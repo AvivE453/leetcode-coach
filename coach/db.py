@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-from coach.config import DB_PATH
+from coach import config
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS problems (
@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS review_state (
     ease REAL NOT NULL,
     interval_days REAL NOT NULL,
     next_due TEXT NOT NULL,
+    reps INTEGER NOT NULL DEFAULT 0,
     lapses INTEGER NOT NULL DEFAULT 0
 );
 
@@ -69,7 +70,9 @@ CREATE TABLE IF NOT EXISTS weekly_runs (
 """
 
 
-def connect(path: Path = DB_PATH) -> sqlite3.Connection:
+def connect(path: Path | None = None) -> sqlite3.Connection:
+    if path is None:
+        path = config.DB_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row

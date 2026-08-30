@@ -23,6 +23,12 @@ dev = [
     "ruff>=0.6",
 ]
 
+[tool.ruff.lint]
+ignore = [
+    "B008",   # typer's API is built on function-call argument defaults
+    "DTZ011", # local dates are the right semantics for a personal local tool
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
