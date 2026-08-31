@@ -50,8 +50,6 @@ flowchart TB
     db --> sim["coach similar<br/>numpy cosine, top-5"]
     db --> rev["coach review"]
     rev -.-> api
-
-    ga["GitHub Actions<br/>Sundays 04:00 UTC"] --> weeklyp
 ```
 
 Solid arrows are local; dotted arrows are the only places an LLM is involved. Every one
@@ -214,14 +212,13 @@ history doubles as the solve timeline.
 
 ## Automation
 
-`.github/workflows/weekly.yml` runs the pipeline every Sunday at 04:00 UTC (and on
-demand via `workflow_dispatch`), then commits the new report. It installs the lean
-dependency set — torch stays in the optional `embed` extra and never reaches this
-workflow, since the planner only needs tags and the database.
+`coach weekly` ran on a schedule via GitHub Actions through M5; that workflow has since
+been removed in favor of a systemd user timer that runs the same command weekly on the
+machine that owns `data/coach.db` — one writer, no CI secret holding an API key it barely
+used, and one less piece of infrastructure to keep working. The report is reviewed and
+pushed by hand, alongside whatever other changes accumulated that week.
 
-The workflow commits `reports/` but deliberately **not** `data/coach.db`. The database is
-a binary SQLite file written daily from a laptop; letting a second writer commit it would
-produce merge conflicts git cannot resolve.
+Unit files: `~/.config/systemd/user/coach-weekly.{service,timer}`.
 
 ## Layout
 
