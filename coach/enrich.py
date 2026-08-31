@@ -78,7 +78,7 @@ Fill in:
 """
 
 
-def enrich_solution(problem: sqlite3.Row, code: str) -> Enrichment:
+def enrich_solution(problem: sqlite3.Row, code: str, model: str | None = None) -> Enrichment:
     prompt = PROMPT.format(
         number=problem["number"],
         title=problem["title"],
@@ -86,10 +86,12 @@ def enrich_solution(problem: sqlite3.Row, code: str) -> Enrichment:
         tags=", ".join(json.loads(problem["official_tags"])) or "none",
         code=code,
     )
-    return llm.parse(prompt, Enrichment)
+    return llm.parse(prompt, Enrichment, model=model)
 
 
-def save(conn: sqlite3.Connection, solution_id: int, e: Enrichment) -> None:
+def save(
+    conn: sqlite3.Connection, solution_id: int, e: Enrichment, model: str | None = None
+) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO enrichments
@@ -105,7 +107,7 @@ def save(conn: sqlite3.Connection, solution_id: int, e: Enrichment) -> None:
             e.key_trick,
             e.time_complexity,
             e.space_complexity,
-            config.MODEL,
+            model or config.MODEL,
             PROMPT_VERSION,
         ),
     )
@@ -151,9 +153,9 @@ Given this LeetCode-style problem statement, predict how an optimal solution wou
 """
 
 
-def hypothesize(statement: str) -> QueryCard:
+def hypothesize(statement: str, model: str | None = None) -> QueryCard:
     """Query-side enrichment for `coach similar --paste` (HyDE-style)."""
-    return llm.parse(QUERY_PROMPT.format(statement=statement), QueryCard)
+    return llm.parse(QUERY_PROMPT.format(statement=statement), QueryCard, model=model)
 
 
 def missing(conn: sqlite3.Connection) -> list[sqlite3.Row]:

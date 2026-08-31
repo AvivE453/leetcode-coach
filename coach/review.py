@@ -55,11 +55,11 @@ Report:
 """
 
 
-def review_solution(problem: sqlite3.Row, code: str) -> Review:
+def review_solution(problem: sqlite3.Row, code: str, model: str | None = None) -> Review:
     prompt = PROMPT.format(
         number=problem["number"],
         title=problem["title"],
         difficulty=problem["difficulty"],
         code=code,
     )
-    return llm.parse(prompt, Review)
+    return llm.parse(prompt, Review, model=model)

@@ -9,6 +9,13 @@ SOLUTIONS_DIR = PROJECT_ROOT / "solutions"
 REPORTS_DIR = PROJECT_ROOT / "reports"
 
 MODEL = "claude-opus-5"
+
+# The eval harness measures prompts, not model capability, so it runs on a
+# cheaper model by default: Sonnet is $2/$10 per Mtok against Opus's $5/$25,
+# and thinking tokens (billed as output) are where eval spend actually goes.
+# Set to MODEL when you specifically want to score the model the coach uses.
+EVAL_MODEL = "claude-sonnet-5"
+
 EMBED_MODEL = "all-MiniLM-L6-v2"
 WEEKLY_TARGET = 25
 CURRICULUM = "blind75"

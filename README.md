@@ -196,8 +196,15 @@ Development:
 uv run pytest                  # 60 tests; every LLM call mocked, API key stripped
 uv run ruff check .
 uv run python -m evals.validate_bank        # re-label the fixture bank, no API calls
-uv run python -m evals.run_evals --dry-run  # count what a full eval run would cost
+uv run python -m evals.run_evals --all --dry-run   # count the calls and cost first
+uv run python -m evals.run_evals --all             # real API calls
 ```
+
+`--dry-run` always reports the exact number of uncached calls and an estimated cost
+before anything is spent. Evals default to a cheaper model (`config.EVAL_MODEL`) because
+they measure the *prompt*, not model capability; pass `--model claude-opus-5` to score
+the model the coach itself uses. Responses cache by prompt version, model, and code
+digest, so a repeat run costs nothing and correcting a *label* re-scores for free.
 
 The database starts empty and grows from your first `coach log`. `data/coach.db` and
 `solutions/` are committed on purpose: the state travels with the repo, and the commit

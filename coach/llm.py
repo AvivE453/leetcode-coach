@@ -51,12 +51,18 @@ def _complete(request):
     return response
 
 
-def parse(prompt: str, output_format, system: str | None = None, max_tokens: int = 16000):
+def parse(
+    prompt: str,
+    output_format,
+    system: str | None = None,
+    max_tokens: int = 16000,
+    model: str | None = None,
+):
     """One structured-output call: prompt in, validated Pydantic instance out."""
     kwargs = {"system": system} if system is not None else {}
     response = _complete(
         lambda: client().messages.parse(
-            model=config.MODEL,
+            model=model or config.MODEL,
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
             output_format=output_format,
@@ -66,12 +72,17 @@ def parse(prompt: str, output_format, system: str | None = None, max_tokens: int
     return response.parsed_output
 
 
-def text(prompt: str, system: str | None = None, max_tokens: int = 4000) -> str:
+def text(
+    prompt: str,
+    system: str | None = None,
+    max_tokens: int = 4000,
+    model: str | None = None,
+) -> str:
     """One plain-text call."""
     kwargs = {"system": system} if system is not None else {}
     response = _complete(
         lambda: client().messages.create(
-            model=config.MODEL,
+            model=model or config.MODEL,
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
             **kwargs,

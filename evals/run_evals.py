@@ -28,6 +28,14 @@ RESULTS_PATH = EVALS_DIR / "RESULTS.md"
 WORKERS = 8
 TOP_K = 5
 
+# Rough observed cost of one eval call, for --dry-run. Dominated by output
+# tokens, since thinking is billed as output.
+COST_PER_CALL = {
+    "claude-opus-5": 0.065,
+    "claude-sonnet-5": 0.026,
+    "claude-haiku-4-5": 0.013,
+}
+
 
 def parallel(fn, items, label):
     print(f"  {label}: {len(items)} call(s) ...", flush=True)
@@ -65,11 +73,11 @@ def build_bank():
     return fixtures
 
 
-def review_cache_path() -> Path:
-    return CACHE_DIR / f"reviews-{review.PROMPT_VERSION}.json"
+def review_cache_path(model: str) -> Path:
+    return CACHE_DIR / f"reviews-{review.PROMPT_VERSION}-{model}.json"
 
 
-def run_feedback(refresh: bool = False) -> dict:
+def run_feedback(refresh: bool, model: str) -> dict:
     print("\n[feedback] labelling fixtures by execution ...")
     fixtures = build_bank()
     flawed = [f for f in fixtures if f["category"]]
@@ -79,7 +87,7 @@ def run_feedback(refresh: bool = False) -> dict:
     # Cached per prompt version and fixture, so correcting a LABEL (which changes
     # scoring, not the model's answer) costs nothing to re-score.
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    path = review_cache_path()
+    path = review_cache_path(model)
     cached = json.loads(path.read_text()) if path.exists() and not refresh else {}
 
     def review_one(fixture):
@@ -90,7 +98,7 @@ def run_feedback(refresh: bool = False) -> dict:
             "difficulty": problem.DIFFICULTY,
         }
         try:
-            result = review.review_solution(row, fixture["code"])
+            result = review.review_solution(row, fixture["code"], model=model)
         except llm.LLMUnavailable as exc:
             print(f"    !! {fixture['slug']}/{fixture['id']}: {exc}")
             return fixture["key"], None
@@ -111,7 +119,8 @@ def run_feedback(refresh: bool = False) -> dict:
                 cached[key] = result
         path.write_text(json.dumps(cached, indent=2, sort_keys=True))
     else:
-        print(f"  reviews: all {len(fixtures)} cached for {review.PROMPT_VERSION}, no calls made")
+        print(f"  reviews: all {len(fixtures)} cached for {review.PROMPT_VERSION}"
+              f" on {model}, no calls made")
 
     results = [cached.get(f["key"]) for f in fixtures]
 
@@ -159,13 +168,13 @@ def run_feedback(refresh: bool = False) -> dict:
 # -------------------------------------------------------------- enrichment
 
 
-def cache_path() -> Path:
-    return CACHE_DIR / f"enrichment-{enrich.PROMPT_VERSION}.json"
+def cache_path(model: str) -> Path:
+    return CACHE_DIR / f"enrichment-{enrich.PROMPT_VERSION}-{model}.json"
 
 
-def enrich_corpus(refresh: bool) -> dict:
+def enrich_corpus(refresh: bool, model: str) -> dict:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    path = cache_path()
+    path = cache_path(model)
     cached = json.loads(path.read_text()) if path.exists() and not refresh else {}
 
     entries = corpus.load()
@@ -179,7 +188,7 @@ def enrich_corpus(refresh: bool) -> dict:
                 "official_tags": entry.official_tags,
             }
             try:
-                return entry.slug, review_safe_enrich(row, entry.code)
+                return entry.slug, review_safe_enrich(row, entry.code, model)
             except llm.LLMUnavailable as exc:
                 print(f"    !! {entry.slug}: {exc}")
                 return entry.slug, None
@@ -193,8 +202,8 @@ def enrich_corpus(refresh: bool) -> dict:
     return cached
 
 
-def review_safe_enrich(row, code) -> dict:
-    e = enrich.enrich_solution(row, code)
+def review_safe_enrich(row, code, model) -> dict:
+    e = enrich.enrich_solution(row, code, model=model)
     return {
         "pattern": e.pattern,
         "intended_pattern": e.intended_pattern,
@@ -282,9 +291,9 @@ def run_retrieval(cached: dict) -> dict:
 # ------------------------------------------------------------------ report
 
 
-def append_results(sections: dict) -> None:
+def append_results(sections: dict, model: str) -> None:
     stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
-    lines = [f"\n## {stamp} · model `{config.MODEL}`\n"]
+    lines = [f"\n## {stamp} · model `{model}`\n"]
 
     if "feedback" in sections:
         f = sections["feedback"]
@@ -351,6 +360,9 @@ def main() -> int:
     parser.add_argument("--retrieval", action="store_true")
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--refresh-cache", action="store_true")
+    parser.add_argument("--model", default=config.EVAL_MODEL,
+                        help=f"Model to score (default: {config.EVAL_MODEL}). Pass"
+                             f" {config.MODEL} to score the model the coach itself uses.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Report what would run and how many calls it costs")
     args = parser.parse_args()
@@ -362,10 +374,21 @@ def main() -> int:
         parser.error("pick at least one of --feedback / --enrichment / --retrieval / --all")
 
     if args.dry_run:
-        bank = build_bank()
-        print(f"feedback: {len(bank)} review calls")
-        print(f"enrichment: up to {len(corpus.load())} enrichment calls (cached where possible)")
+        reviews = len(build_bank()) if want_feedback or args.all else 0
+        enrichments = len(corpus.load()) if want_enrichment or want_retrieval or args.all else 0
+        cached_reviews = review_cache_path(args.model)
+        cached_enrich = cache_path(args.model)
+        if cached_reviews.exists() and not args.refresh_cache:
+            reviews = max(0, reviews - len(json.loads(cached_reviews.read_text())))
+        if cached_enrich.exists() and not args.refresh_cache:
+            enrichments = max(0, enrichments - len(json.loads(cached_enrich.read_text())))
+        total = reviews + enrichments
+        print(f"model: {args.model}")
+        print(f"feedback: {reviews} review call(s) not already cached")
+        print(f"enrichment: {enrichments} enrichment call(s) not already cached")
         print("retrieval: 0 API calls (local embeddings, reuses the enrichment cache)")
+        print(f"\ntotal: {total} call(s), roughly ${total * COST_PER_CALL[args.model]:.2f}"
+              if args.model in COST_PER_CALL else f"\ntotal: {total} call(s)")
         return 0
 
     if not llm.have_api_key():
@@ -374,10 +397,10 @@ def main() -> int:
 
     sections = {}
     if want_feedback:
-        sections["feedback"] = run_feedback(args.refresh_cache)
+        sections["feedback"] = run_feedback(args.refresh_cache, args.model)
     if want_enrichment or want_retrieval:
         print("\n[enrichment] corpus ...")
-        cached = enrich_corpus(args.refresh_cache)
+        cached = enrich_corpus(args.refresh_cache, args.model)
         if want_enrichment:
             sections["enrichment"] = run_enrichment(cached)
         if want_retrieval:
@@ -385,7 +408,7 @@ def main() -> int:
             sections["retrieval"] = run_retrieval(cached)
 
     print("\n" + json.dumps(sections, indent=2, default=str))
-    append_results(sections)
+    append_results(sections, args.model)
     return 0
 
 
