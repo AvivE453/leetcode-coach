@@ -1,4 +1,6 @@
 name: Weekly coach report
+# (Trivial touch to force GitHub's initial workflow-sync scan - the first
+# push from `gh repo create --push` can race with it on a brand-new repo.)
 
 on:
   schedule:
