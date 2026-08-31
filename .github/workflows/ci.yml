@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # Lean install on purpose: torch and sentence-transformers live in the
+      # optional "embed" extra and nothing in the test suite needs them.
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Lint
+        run: uv run ruff check .
+
+      # The suite mocks every LLM call and tests/conftest.py strips
+      # ANTHROPIC_API_KEY, so CI cannot spend money even by accident.
+      - name: Test
+        run: uv run pytest -q
