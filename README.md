@@ -216,12 +216,12 @@ history doubles as the solve timeline.
 
 `.github/workflows/weekly.yml` runs the pipeline every Sunday at 04:00 UTC (and on
 demand via `workflow_dispatch`), then commits the new report. It installs the lean
-dependency set — torch stays in the optional `embed` extra and never reaches CI, since
-the planner only needs tags and the database.
+dependency set — torch stays in the optional `embed` extra and never reaches this
+workflow, since the planner only needs tags and the database.
 
-CI commits `reports/` but deliberately **not** `data/coach.db`. The database is a binary
-SQLite file written daily from a laptop; letting a second writer commit it would produce
-merge conflicts git cannot resolve.
+The workflow commits `reports/` but deliberately **not** `data/coach.db`. The database is
+a binary SQLite file written daily from a laptop; letting a second writer commit it would
+produce merge conflicts git cannot resolve.
 
 ## Layout
 
