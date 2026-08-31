@@ -34,6 +34,27 @@ def test_upsert_inserts_and_updates(tmp_path):
     assert row["title"] == "Two Sum (updated)"
 
 
+def test_init_schema_migrates_pre_m2_problems_table(tmp_path):
+    conn = db.connect(tmp_path / "test.db")
+    conn.execute(
+        """
+        CREATE TABLE problems (
+            number INTEGER PRIMARY KEY,
+            slug TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL,
+            difficulty TEXT NOT NULL,
+            official_tags TEXT NOT NULL DEFAULT '[]',
+            paid_only INTEGER NOT NULL DEFAULT 0,
+            in_blind75 INTEGER NOT NULL DEFAULT 0,
+            in_neetcode150 INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    db.init_schema(conn)
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(problems)")}
+    assert "intended_pattern" in columns
+
+
 def test_attempt_outcome_is_constrained(tmp_path):
     import sqlite3
 

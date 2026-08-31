@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS problems (
     official_tags TEXT NOT NULL DEFAULT '[]',
     paid_only INTEGER NOT NULL DEFAULT 0,
     in_blind75 INTEGER NOT NULL DEFAULT 0,
-    in_neetcode150 INTEGER NOT NULL DEFAULT 0
+    in_neetcode150 INTEGER NOT NULL DEFAULT 0,
+    intended_pattern TEXT
 );
 
 CREATE TABLE IF NOT EXISTS attempts (
@@ -82,6 +83,9 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
 
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(problems)")}
+    if "intended_pattern" not in columns:
+        conn.execute("ALTER TABLE problems ADD COLUMN intended_pattern TEXT")
     conn.commit()
 
 
