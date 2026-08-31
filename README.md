@@ -181,7 +181,7 @@ Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync --extra embed          # omit --extra embed to skip torch (no local embeddings)
-echo "ANTHROPIC_API_KEY=sk-ant-..." > .env    # gitignored; optional, everything degrades
+cp .env.example .env           # then add your key; .env is gitignored
 uv run coach init              # download the catalog, create the database
 
 uv run coach log 1 --outcome clean --time 8   # paste your solution, then Ctrl+D
