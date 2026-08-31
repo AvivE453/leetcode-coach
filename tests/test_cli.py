@@ -1,3 +1,4 @@
+import json
 from datetime import date, timedelta
 
 import numpy as np
@@ -15,6 +16,7 @@ def setup_env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "coach.db")
     monkeypatch.setattr(config, "SOLUTIONS_DIR", tmp_path / "solutions")
+    monkeypatch.setattr(config, "REPORTS_DIR", tmp_path / "reports")
     conn = db.connect()
     db.init_schema(conn)
     db.upsert_problems(
@@ -243,6 +245,72 @@ def test_review_without_solution_fails(tmp_path, monkeypatch):
     result = runner.invoke(app, ["review", "1"])
     assert result.exit_code == 1
     assert "No stored solution" in result.output
+
+
+def test_weekly_writes_report_and_records_run(tmp_path, monkeypatch):
+    setup_env(tmp_path, monkeypatch)
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: ENRICHMENT)
+    monkeypatch.setattr("coach.embed.encode", fake_encode)
+    runner.invoke(app, ["log", "1", "--outcome", "struggled"], input=CODE)
+    monkeypatch.setattr("coach.llm.text", lambda prompt, **kw: "Drill hashmap problems.")
+
+    result = runner.invoke(app, ["weekly", "--target", "5"])
+    assert result.exit_code == 0, result.output
+
+    week = date.today().isocalendar()
+    path = tmp_path / "reports" / f"{week.year}-{week.week:02d}.md"
+    assert path.exists()
+    text = path.read_text()
+    assert "#1 Two Sum" in text
+    assert "Drill hashmap problems." in text
+
+    conn = db.connect()
+    run = conn.execute("SELECT * FROM weekly_runs").fetchone()
+    assert run["degraded"] == 0
+    assert json.loads(run["stats"])["attempts"] == 1
+
+
+def test_weekly_degrades_without_llm(tmp_path, monkeypatch):
+    setup_env(tmp_path, monkeypatch)
+
+    result = runner.invoke(app, ["weekly"])
+    assert result.exit_code == 0, result.output
+    assert "Narrative skipped" in result.output
+    assert "degraded" in result.output
+
+    conn = db.connect()
+    run = conn.execute("SELECT * FROM weekly_runs").fetchone()
+    assert run["degraded"] == 1
+
+    week = date.today().isocalendar()
+    text = (tmp_path / "reports" / f"{week.year}-{week.week:02d}.md").read_text()
+    assert "No attempts logged this week" in text
+    assert "LLM unavailable" in text
+
+
+def test_weekly_no_llm_flag_skips_the_call(tmp_path, monkeypatch):
+    setup_env(tmp_path, monkeypatch)
+
+    def explode(*args, **kwargs):
+        raise AssertionError("--no-llm must not call the API")
+
+    monkeypatch.setattr("coach.llm.text", explode)
+    result = runner.invoke(app, ["weekly", "--no-llm"])
+    assert result.exit_code == 0, result.output
+    assert "degraded" in result.output
+
+
+def test_weekly_without_catalog_points_at_init(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "coach.db")
+    monkeypatch.setattr(config, "REPORTS_DIR", tmp_path / "reports")
+    conn = db.connect()
+    db.init_schema(conn)
+    conn.close()
+
+    result = runner.invoke(app, ["weekly"])
+    assert result.exit_code == 1
+    assert "coach init" in result.output
 
 
 def test_due_lists_overdue_problems(tmp_path, monkeypatch):

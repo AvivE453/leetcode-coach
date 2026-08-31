@@ -27,26 +27,16 @@ def client() -> anthropic.Anthropic:
     return _client
 
 
-def parse(prompt: str, output_format, system: str | None = None, max_tokens: int = 16000):
-    """One structured-output call: prompt in, validated Pydantic instance out.
+def _complete(request):
+    """Run one API call, translating every failure mode into LLMUnavailable.
 
     The SDK already retries rate limits and 5xx with backoff; anything that
-    still fails is wrapped in LLMUnavailable so callers can degrade gracefully.
+    still fails is wrapped so callers can degrade gracefully.
     """
     if not have_api_key():
         raise LLMUnavailable("ANTHROPIC_API_KEY is not set - add it to .env at the project root")
-
-    kwargs = {}
-    if system is not None:
-        kwargs["system"] = system
     try:
-        response = client().messages.parse(
-            model=config.MODEL,
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": prompt}],
-            output_format=output_format,
-            **kwargs,
-        )
+        response = request()
     except anthropic.RateLimitError as e:
         raise LLMUnavailable(f"rate limited by the API: {e.message}") from e
     except anthropic.APIStatusError as e:
@@ -58,4 +48,33 @@ def parse(prompt: str, output_format, system: str | None = None, max_tokens: int
         raise LLMUnavailable("the model declined this request")
     if response.stop_reason == "max_tokens":
         raise LLMUnavailable("response truncated at max_tokens")
+    return response
+
+
+def parse(prompt: str, output_format, system: str | None = None, max_tokens: int = 16000):
+    """One structured-output call: prompt in, validated Pydantic instance out."""
+    kwargs = {"system": system} if system is not None else {}
+    response = _complete(
+        lambda: client().messages.parse(
+            model=config.MODEL,
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+            output_format=output_format,
+            **kwargs,
+        )
+    )
     return response.parsed_output
+
+
+def text(prompt: str, system: str | None = None, max_tokens: int = 4000) -> str:
+    """One plain-text call."""
+    kwargs = {"system": system} if system is not None else {}
+    response = _complete(
+        lambda: client().messages.create(
+            model=config.MODEL,
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+            **kwargs,
+        )
+    )
+    return "".join(block.text for block in response.content if block.type == "text").strip()

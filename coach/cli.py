@@ -9,6 +9,10 @@ import typer
 
 from coach import catalog, config, curriculum, db, embed, enrich, llm, scheduler
 from coach import review as review_llm
+from coach.weekly import analyze as weekly_analyze
+from coach.weekly import collect as weekly_collect
+from coach.weekly import plan as weekly_plan
+from coach.weekly import report as weekly_report
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -397,21 +401,7 @@ def stats():
         for r in patterns:
             typer.echo(f"  {r['pattern']}: {r['attempts']} attempt(s), {r['rough']} not clean")
 
-    off_pattern = conn.execute(
-        """
-        SELECT p.number, p.title, p.intended_pattern
-        FROM problems p
-        WHERE p.intended_pattern IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1
-            FROM solutions s JOIN enrichments en ON en.solution_id = s.id
-            WHERE s.problem_number = p.number
-              AND (en.pattern = p.intended_pattern
-                   OR en.secondary_patterns LIKE '%"' || p.intended_pattern || '"%')
-          )
-        ORDER BY p.number
-        """
-    ).fetchall()
+    off_pattern = enrich.off_pattern_problems(conn)
     if off_pattern:
         typer.echo("Solved off-pattern (canonical approach never used):")
         for r in off_pattern:
@@ -427,6 +417,71 @@ def stats():
             """
         ).fetchone()[0]
         typer.echo(f"{name}: {done}/{in_list}")
+
+
+@app.command()
+def weekly(
+    target: int = typer.Option(config.WEEKLY_TARGET, "--target", help="Problems to plan for next week"),
+    no_llm: bool = typer.Option(False, "--no-llm", help="Skip the narrative call (offline report)"),
+):
+    """Collect the week, analyze patterns, plan the next one, write reports/YYYY-WW.md."""
+    conn = db.connect()
+    if conn.execute("SELECT COUNT(*) FROM problems").fetchone()[0] == 0:
+        typer.echo("No problem catalog in the database - run `coach init` first.")
+        raise typer.Exit(1)
+
+    today = date.today()
+    week = weekly_collect.collect(conn, today)
+    analysis = weekly_analyze.analyze(conn, today)
+    items = weekly_plan.build_plan(conn, analysis, target)
+
+    degraded = False
+    note = None
+    if no_llm:
+        degraded = True
+    else:
+        try:
+            note = weekly_report.narrative(week, analysis, items)
+        except llm.LLMUnavailable as exc:
+            typer.echo(f"Narrative skipped ({exc}) - writing the report without it.")
+            degraded = True
+
+    text = weekly_report.render(week, analysis, items, note, today)
+    path = weekly_report.write(text, today)
+
+    conn.execute(
+        """
+        INSERT INTO weekly_runs (week_start, generated_at, report_path, stats, degraded)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            week["start"].isoformat(),
+            today.isoformat(),
+            str(path.relative_to(config.PROJECT_ROOT)),
+            json.dumps(
+                {
+                    "attempts": len(week["attempts"]),
+                    "distinct_problems": week["distinct_problems"],
+                    "weak_patterns": analysis["weak_patterns"],
+                    "stale_patterns": analysis["stale_patterns"],
+                    "off_pattern": [r["number"] for r in analysis["off_pattern"]],
+                    "due": len(analysis["due"]),
+                    "planned": len(items),
+                }
+            ),
+            int(degraded),
+        ),
+    )
+    conn.commit()
+
+    typer.echo(
+        f"Week {weekly_report.week_key(today)}: {len(week['attempts'])} attempt(s),"
+        f" {len(analysis['due'])} review(s) due, {len(items)} problem(s) planned."
+    )
+    if analysis["weak_patterns"]:
+        typer.echo("Weak patterns: " + ", ".join(analysis["weak_patterns"]))
+    typer.echo(f"Report written to {path.relative_to(config.PROJECT_ROOT)}"
+               + (" (degraded: no narrative)" if degraded else ""))
 
 
 if __name__ == "__main__":

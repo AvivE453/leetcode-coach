@@ -117,6 +117,25 @@ def save_intended(conn: sqlite3.Connection, problem_number: int, pattern: str) -
     )
 
 
+def off_pattern_problems(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Solved problems whose canonical pattern was never used in any solution."""
+    return conn.execute(
+        """
+        SELECT p.number, p.slug, p.title, p.difficulty, p.intended_pattern
+        FROM problems p
+        WHERE p.intended_pattern IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM solutions s JOIN enrichments en ON en.solution_id = s.id
+            WHERE s.problem_number = p.number
+              AND (en.pattern = p.intended_pattern
+                   OR en.secondary_patterns LIKE '%"' || p.intended_pattern || '"%')
+          )
+        ORDER BY p.number
+        """
+    ).fetchall()
+
+
 class QueryCard(BaseModel):
     pattern: Pattern
     key_trick: str
