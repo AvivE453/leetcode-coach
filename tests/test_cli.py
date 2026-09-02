@@ -104,6 +104,17 @@ ENRICHMENT = enrich.Enrichment(
 )
 
 
+FEEDBACK = review.Review(
+    strengths=["Uses a dict for O(1) lookups."],
+    issues=[review.Issue(category="bug", description="Always returns [].")],
+    time_complexity="O(n)",
+    space_complexity="O(n)",
+    optimal_time_complexity="O(n)",
+    better_approach=None,
+    verdict="needs-work",
+)
+
+
 def fake_encode(texts):
     vector = np.array([1.0, 0.0, 0.0], dtype=np.float32)
     return np.tile(vector, (len(texts), 1))
@@ -151,6 +162,65 @@ def test_log_flags_off_pattern_solve(tmp_path, monkeypatch):
     assert row["intended_pattern"] == "dp-1d"
 
 
+def test_log_withholds_a_standing_verdict_on_a_first_solve(tmp_path, monkeypatch):
+    setup_env(tmp_path, monkeypatch)
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: ENRICHMENT)
+    monkeypatch.setattr("coach.embed.encode", fake_encode)
+
+    result = runner.invoke(app, ["log", "1", "--outcome", "struggled"], input=CODE)
+    assert result.exit_code == 0, result.output
+    assert "too early to call" in result.output
+
+
+def test_log_calls_out_a_weak_pattern(tmp_path, monkeypatch):
+    setup_env(tmp_path, monkeypatch)
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: ENRICHMENT)
+    monkeypatch.setattr("coach.embed.encode", fake_encode)
+
+    for _ in range(4):
+        runner.invoke(app, ["log", "1", "--outcome", "failed"], input=CODE)
+    result = runner.invoke(app, ["log", "1", "--outcome", "failed"], input=CODE)
+
+    assert result.exit_code == 0, result.output
+    assert "Standing: hashmap is WEAK" in result.output
+    assert "mastery 1.0/5" in result.output
+    assert "100% struggle rate over 5 attempts" in result.output
+
+
+def test_log_reports_a_healthy_pattern_as_on_track(tmp_path, monkeypatch):
+    setup_env(tmp_path, monkeypatch)
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: ENRICHMENT)
+    monkeypatch.setattr("coach.embed.encode", fake_encode)
+
+    for _ in range(5):
+        result = runner.invoke(app, ["log", "1", "--outcome", "clean"], input=CODE)
+
+    assert "Standing: hashmap is on track" in result.output
+    assert "mastery 5.0/5" in result.output
+
+
+def test_log_holds_off_on_a_pattern_that_struggles_without_failing(tmp_path, monkeypatch):
+    """The gradient's point: five shaky solves are not five failures."""
+    setup_env(tmp_path, monkeypatch)
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: ENRICHMENT)
+    monkeypatch.setattr("coach.embed.encode", fake_encode)
+
+    for _ in range(5):
+        result = runner.invoke(app, ["log", "1", "--outcome", "struggled"], input=CODE)
+
+    assert "Standing: hashmap is on track" in result.output
+    assert "mastery 3.0/5" in result.output
+    assert "100% struggle rate" in result.output  # the old rule would have called this weak
+
+
+def test_log_without_key_prints_no_standing(tmp_path, monkeypatch):
+    """Skipped enrichment means no pattern, so there is nothing to stand on."""
+    setup_env(tmp_path, monkeypatch)
+
+    result = runner.invoke(app, ["log", "1"], input=CODE)
+    assert "Standing:" not in result.output
+
+
 def test_log_matching_pattern_has_no_canonical_note(tmp_path, monkeypatch):
     setup_env(tmp_path, monkeypatch)
     monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: ENRICHMENT)
@@ -169,7 +239,7 @@ def test_stats_shows_both_pattern_layers(tmp_path, monkeypatch):
 
     result = runner.invoke(app, ["stats"])
     assert result.exit_code == 0, result.output
-    assert "prefix-sum: 1 attempt(s), 1 not clean" in result.output
+    assert "prefix-sum: mastery 3.0/5, 1 attempt(s), 1 not clean" in result.output
     assert "#1 Two Sum -> dp-1d" in result.output
 
 
@@ -224,20 +294,39 @@ def test_review_prints_feedback(tmp_path, monkeypatch):
     setup_env(tmp_path, monkeypatch)
     runner.invoke(app, ["log", "1"], input=CODE)
 
-    feedback = review.Review(
-        issues=[review.Issue(category="bug", description="Always returns [].")],
-        time_complexity="O(n)",
-        space_complexity="O(n)",
-        optimal_time_complexity="O(n)",
-        better_approach=None,
-        verdict="needs-work",
-    )
-    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: feedback)
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: FEEDBACK)
 
     result = runner.invoke(app, ["review", "1"])
     assert result.exit_code == 0, result.output
     assert "Verdict: needs-work" in result.output
     assert "[bug] Always returns []." in result.output
+    assert "What went well:" in result.output
+    assert "+ Uses a dict for O(1) lookups." in result.output
+
+
+def test_review_is_stored_and_reused(tmp_path, monkeypatch):
+    """The second look must not cost another call - that is the point of storing it."""
+    setup_env(tmp_path, monkeypatch)
+    runner.invoke(app, ["log", "1"], input=CODE)
+
+    calls = []
+
+    def counted(prompt, output_format, **kw):
+        calls.append(prompt)
+        return FEEDBACK
+
+    monkeypatch.setattr("coach.llm.parse", counted)
+
+    runner.invoke(app, ["review", "1"])
+    second = runner.invoke(app, ["review", "1"])
+
+    assert len(calls) == 1
+    assert "(stored review" in second.output
+    assert "Verdict: needs-work" in second.output
+
+    third = runner.invoke(app, ["review", "1", "--refresh"])
+    assert len(calls) == 2
+    assert "(stored review" not in third.output
 
 
 def test_review_without_solution_fails(tmp_path, monkeypatch):
@@ -245,6 +334,16 @@ def test_review_without_solution_fails(tmp_path, monkeypatch):
     result = runner.invoke(app, ["review", "1"])
     assert result.exit_code == 1
     assert "No stored solution" in result.output
+
+
+def test_review_without_key_degrades(tmp_path, monkeypatch):
+    setup_env(tmp_path, monkeypatch)
+    runner.invoke(app, ["log", "1"], input=CODE)
+
+    result = runner.invoke(app, ["review", "1"])
+    assert result.exit_code == 1
+    assert "Review unavailable" in result.output
+    assert "ANTHROPIC_API_KEY" in result.output
 
 
 def test_weekly_writes_report_and_records_run(tmp_path, monkeypatch):
@@ -268,6 +367,8 @@ def test_weekly_writes_report_and_records_run(tmp_path, monkeypatch):
     run = conn.execute("SELECT * FROM weekly_runs").fetchone()
     assert run["degraded"] == 0
     assert json.loads(run["stats"])["attempts"] == 1
+    # Stored, not just written to the report - the web page reads it back for free.
+    assert run["narrative"] == "Drill hashmap problems."
 
 
 def test_weekly_degrades_without_llm(tmp_path, monkeypatch):
@@ -281,6 +382,7 @@ def test_weekly_degrades_without_llm(tmp_path, monkeypatch):
     conn = db.connect()
     run = conn.execute("SELECT * FROM weekly_runs").fetchone()
     assert run["degraded"] == 1
+    assert run["narrative"] is None
 
     week = date.today().isocalendar()
     text = (tmp_path / "reports" / f"{week.year}-{week.week:02d}.md").read_text()

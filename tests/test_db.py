@@ -1,4 +1,4 @@
-from coach import db
+from coach import db, review
 
 
 def make_problem(**overrides) -> dict:
@@ -53,6 +53,65 @@ def test_init_schema_migrates_pre_m2_problems_table(tmp_path):
     db.init_schema(conn)
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(problems)")}
     assert "intended_pattern" in columns
+
+
+def test_init_schema_migrates_pre_m9_weekly_runs_table(tmp_path):
+    conn = db.connect(tmp_path / "test.db")
+    conn.execute(
+        """
+        CREATE TABLE weekly_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            week_start TEXT NOT NULL,
+            generated_at TEXT NOT NULL,
+            report_path TEXT,
+            stats TEXT,
+            degraded INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO weekly_runs (week_start, generated_at) VALUES ('2026-08-24', '2026-08-30')"
+    )
+
+    db.init_schema(conn)
+    db.init_schema(conn)
+
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(weekly_runs)")}
+    assert "narrative" in columns
+    # The pre-migration run survives, with no note attached.
+    row = conn.execute("SELECT * FROM weekly_runs").fetchone()
+    assert row["week_start"] == "2026-08-24"
+    assert row["narrative"] is None
+
+
+def test_reviews_round_trip_through_the_store(tmp_path):
+    """A stored review must come back as the same Review, JSON list fields included."""
+    conn = db.connect(tmp_path / "test.db")
+    db.init_schema(conn)
+    db.upsert_problems(conn, [make_problem()])
+    conn.execute(
+        "INSERT INTO solutions (id, problem_number, code, created_at) VALUES (1, 1, 'code', '2026-09-01')"
+    )
+
+    assert review.load(conn, 1) is None
+
+    r = review.Review(
+        strengths=["Single pass.", "Handles duplicates."],
+        issues=[review.Issue(category="edge-case", description="Breaks on an empty list.")],
+        time_complexity="O(n)",
+        space_complexity="O(n)",
+        optimal_time_complexity="O(n)",
+        better_approach=None,
+        verdict="acceptable",
+    )
+    review.save(conn, 1, r)
+    conn.commit()
+
+    assert review.load(conn, 1) == r
+
+    stored = conn.execute("SELECT * FROM reviews WHERE solution_id = 1").fetchone()
+    assert stored["prompt_version"] == review.PROMPT_VERSION
+    assert stored["model"]
 
 
 def test_attempt_outcome_is_constrained(tmp_path):

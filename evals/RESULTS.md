@@ -20,6 +20,15 @@ corrected (below).
 | `review-v2` | bank-v1 | 93% (26/28) | 100% (14) | 100% (9) | 60% (5) | 8% |
 | `review-v1` | bank-v2 | **97% (29/30)** | 100% (17) | 100% (9) | 75% (4) | 0% |
 | `review-v2` | bank-v2 | **97% (29/30)** | 94% (17) | 100% (9) | 100% (4) | 0% |
+| `review-v3` | bank-v2 | not scored | — | — | — | — |
+
+`review-v3` is the shipped prompt: it adds a `strengths` field so a review also reports
+what the solution got right, and its output is now stored per solution rather than
+printed once. Scoring it costs a fresh 43 calls (the cache is keyed by prompt version),
+which was deliberately not spent — the v2 numbers above remain valid *for v2*, and the
+cheaper check is that the reviews stay sharp in daily use. Re-run
+`python -m evals.run_evals --feedback` when the claim needs to be current, or the moment
+the feedback starts reading soft.
 
 **The prompt iterations produced no measurable gain.** On the corrected bank v1 and v2
 tie at 29/30, and they differ only in *which* fixture they miss — mirror images of the

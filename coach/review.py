@@ -1,11 +1,13 @@
+import json
 import sqlite3
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel
 
-from coach import llm
+from coach import config, llm
 
-PROMPT_VERSION = "review-v2"
+PROMPT_VERSION = "review-v3"
 
 
 class Issue(BaseModel):
@@ -14,6 +16,7 @@ class Issue(BaseModel):
 
 
 class Review(BaseModel):
+    strengths: list[str]
     issues: list[Issue]
     time_complexity: str
     space_complexity: str
@@ -34,6 +37,11 @@ Solution code:
 ```
 
 Report:
+- strengths: specific things this code does well that are worth repeating - a good data
+  structure choice, a clean invariant, a boundary handled correctly. Ground every one in
+  something actually visible in the code; never generic praise like "clean and readable",
+  and never restate what the problem asked for as though it were an achievement. Empty
+  list when the solution is broken enough that nothing stands out.
 - issues: only genuine problems. The three categories are mutually exclusive - decide
   which one applies by asking what kind of input breaks the code:
   - "bug": wrong on a REPRESENTATIVE input - an ordinary case a reader would write down
@@ -63,3 +71,47 @@ def review_solution(problem: sqlite3.Row, code: str, model: str | None = None) -
         code=code,
     )
     return llm.parse(prompt, Review, model=model)
+
+
+def save(
+    conn: sqlite3.Connection, solution_id: int, r: Review, model: str | None = None
+) -> None:
+    """Store a review so it is paid for once, not re-bought on every look."""
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO reviews
+            (solution_id, verdict, strengths, issues, time_complexity, space_complexity,
+             optimal_time_complexity, better_approach, created_at, model, prompt_version)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            solution_id,
+            r.verdict,
+            json.dumps(r.strengths),
+            json.dumps([i.model_dump() for i in r.issues]),
+            r.time_complexity,
+            r.space_complexity,
+            r.optimal_time_complexity,
+            r.better_approach,
+            date.today().isoformat(),
+            model or config.MODEL,
+            PROMPT_VERSION,
+        ),
+    )
+
+
+def load(conn: sqlite3.Connection, solution_id: int) -> Review | None:
+    row = conn.execute(
+        "SELECT * FROM reviews WHERE solution_id = ?", (solution_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    return Review(
+        strengths=json.loads(row["strengths"]),
+        issues=[Issue(**i) for i in json.loads(row["issues"])],
+        time_complexity=row["time_complexity"],
+        space_complexity=row["space_complexity"],
+        optimal_time_complexity=row["optimal_time_complexity"],
+        better_approach=row["better_approach"],
+        verdict=row["verdict"],
+    )

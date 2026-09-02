@@ -1,0 +1,299 @@
+"""FastAPI wrapper around coach/service.py — the browser UI's backend.
+
+Every endpoint is a thin JSON translation of a service function; the CLI and the
+web UI run the same code paths. The only write endpoint is POST /api/log.
+"""
+
+import json
+from contextlib import contextmanager
+from datetime import date
+from pathlib import Path
+from typing import Literal
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+from coach import config, db, service
+from coach.weekly import analyze as weekly_analyze
+from coach.weekly import plan as weekly_plan
+from coach.weekly import report as weekly_report
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+app = FastAPI(title="leetcode-coach", docs_url="/api/docs", redoc_url=None)
+
+
+@contextmanager
+def open_db():
+    """One SQLite connection per request, opened inside the endpoint.
+
+    It must not be a FastAPI dependency: sync dependencies and sync endpoints
+    run as separate threadpool tasks, so the connection would be created on one
+    thread and used on another - which SQLite refuses under concurrent load.
+    """
+    conn = db.connect()
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+class LogRequest(BaseModel):
+    number: int = Field(gt=0)
+    outcome: Literal["clean", "struggled", "hints", "failed"]
+    code: str
+    minutes: int | None = Field(default=None, ge=0)
+    note: str | None = None
+
+
+@app.get("/api/stats")
+def api_stats() -> dict:
+    with open_db() as conn:
+        summary = service.stats_summary(conn, date.today())
+    summary["db"] = str(config.DB_PATH)
+    return summary
+
+
+@app.get("/api/patterns")
+def api_patterns() -> dict:
+    with open_db() as conn:
+        return {"patterns": service.pattern_counts(conn)}
+
+
+@app.post("/api/log")
+def api_log(body: LogRequest) -> dict:
+    """Log a solve, then enrich it. A saved solve is never an error: if the LLM
+    or the embedding model is unavailable the response says so and the solve
+    still stands (`coach enrich` backfills later)."""
+    with open_db() as conn:
+        problem = service.get_problem(conn, body.number)
+        if problem is None:
+            raise HTTPException(
+                404, f"Problem {body.number} is not in the catalog - run `coach init` first?"
+            )
+        if not body.code.strip():
+            raise HTTPException(400, "No solution code received - nothing logged.")
+
+        result = service.log_solve(
+            conn, body.number, body.outcome, body.code, minutes=body.minutes, note=body.note
+        )
+        e = service.enrich_solution_now(conn, result.solution_id, problem, body.code.strip())
+        standing = service.pattern_standing(conn, e.pattern)
+
+    return {
+        "number": result.number,
+        "title": result.title,
+        "difficulty": problem["difficulty"],
+        "outcome": result.outcome,
+        "solution_file": result.path.name,
+        "next_due": result.next_due.isoformat(),
+        "enrichment": {
+            "status": "skipped" if e.skipped else "ok",
+            "reason": e.skipped,
+            "pattern": e.pattern,
+            "secondary_patterns": e.secondary_patterns,
+            "key_trick": e.key_trick,
+            "intended_pattern": e.intended_pattern,
+            "off_pattern": e.off_pattern,
+            "embedding_skipped": e.embed_skipped,
+            "neighbors": [
+                {
+                    "number": n.number,
+                    "title": n.title,
+                    "difficulty": n.difficulty,
+                    "score": round(n.score, 3),
+                    "pattern": n.pattern,
+                    "key_trick": n.key_trick,
+                }
+                for n in e.neighbors
+            ],
+        },
+        "pattern_standing": (
+            {
+                "pattern": standing.pattern,
+                "attempts": standing.attempts,
+                "struggle_rate": round(standing.struggle_rate, 3),
+                "score": round(standing.score, 2) if standing.score is not None else None,
+                "weak": standing.weak,
+                "enough_data": standing.enough_data,
+            }
+            if standing is not None
+            else None
+        ),
+    }
+
+
+@app.get("/api/solutions")
+def api_solutions() -> dict:
+    with open_db() as conn:
+        return {"problems": service.solved_problems(conn)}
+
+
+@app.get("/api/solutions/{number}")
+def api_solution_history(number: int) -> dict:
+    with open_db() as conn:
+        try:
+            return service.solution_history(conn, number)
+        except service.ProblemNotFound:
+            raise HTTPException(
+                404, f"Problem {number} is not in the catalog - run `coach init` first?"
+            ) from None
+
+
+class ReviewRequest(BaseModel):
+    solution_id: int = Field(gt=0)
+    refresh: bool = False
+
+
+@app.post("/api/solutions/{number}/review")
+def api_review(number: int, body: ReviewRequest) -> dict:
+    """Review one stored solve. POST because it can spend money and it writes.
+
+    A solve that already has a stored review costs nothing - the store is checked
+    before any API call.
+    """
+    with open_db() as conn:
+        problem = service.get_problem(conn, number)
+        if problem is None:
+            raise HTTPException(
+                404, f"Problem {number} is not in the catalog - run `coach init` first?"
+            )
+        solution = conn.execute(
+            "SELECT id, code FROM solutions WHERE id = ? AND problem_number = ?",
+            (body.solution_id, number),
+        ).fetchone()
+        if solution is None:
+            raise HTTPException(404, f"No stored solution {body.solution_id} for #{number}.")
+
+        result = service.review_solution_now(
+            conn, solution["id"], problem, solution["code"], refresh=body.refresh
+        )
+
+    return {
+        "solution_id": body.solution_id,
+        "status": "skipped" if result.skipped else "ok",
+        "reason": result.skipped,
+        "cached": result.cached,
+        "review": service.review_payload(result.review) if result.review else None,
+    }
+
+
+def plan_kind(reason: str) -> str:
+    """Reason string -> chip class. Mirrors the four reasons build_plan emits."""
+    if reason.startswith("review due"):
+        return "review"
+    if reason.startswith("re-solve"):
+        return "re-solve"
+    if reason.startswith("weak pattern"):
+        return "weak-pattern"
+    return "curriculum"
+
+
+@app.get("/api/plan")
+def api_plan(target: int = config.WEEKLY_TARGET) -> dict:
+    """Recompute this week's plan live. Read-only: unlike `coach weekly`, it
+    writes no report and records no weekly_runs row."""
+    today = date.today()
+    with open_db() as conn:
+        analysis = weekly_analyze.analyze(conn, today)
+        items = weekly_plan.build_plan(conn, analysis, target)
+        last_run = conn.execute(
+            "SELECT week_start, generated_at, report_path FROM weekly_runs ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+
+    return {
+        "generated_for": today.isoformat(),
+        "target": target,
+        "items": [
+            {
+                "number": i.number,
+                "slug": i.slug,
+                "title": i.title,
+                "difficulty": i.difficulty,
+                "reason": i.reason,
+                "kind": plan_kind(i.reason),
+            }
+            for i in items
+        ],
+        "topics": {
+            "weak": analysis["weak_patterns"],
+            "stale": analysis["stale_patterns"],
+            "off_pattern": [
+                {
+                    "number": r["number"],
+                    "title": r["title"],
+                    "intended_pattern": r["intended_pattern"],
+                }
+                for r in analysis["off_pattern"]
+            ],
+        },
+        "due_count": len(analysis["due"]),
+        "curriculum": {name: {"done": d, "total": t} for name, (d, t) in analysis["curriculum"].items()},
+        "last_report": dict(last_run) if last_run else None,
+    }
+
+
+@app.get("/api/weekly")
+def api_weekly() -> dict:
+    """The last `coach weekly` run, exactly as it was written.
+
+    Frozen on purpose: the narrative was paid for once, so this page never
+    recomputes it and never calls the API. `null` until the first run.
+    """
+    with open_db() as conn:
+        row = conn.execute(
+            """
+            SELECT week_start, generated_at, report_path, stats, degraded, narrative
+            FROM weekly_runs ORDER BY id DESC LIMIT 1
+            """
+        ).fetchone()
+
+    if row is None:
+        return {"run": None}
+    return {
+        "run": {
+            # Keyed off generated_at, not week_start: the report filename is
+            # week_key(today), and the 7-day window starts in the previous ISO week.
+            "week": weekly_report.week_key(date.fromisoformat(row["generated_at"])),
+            "week_start": row["week_start"],
+            "generated_at": row["generated_at"],
+            "report_path": row["report_path"],
+            "degraded": bool(row["degraded"]),
+            "narrative": row["narrative"],
+            "stats": json.loads(row["stats"]) if row["stats"] else {},
+        }
+    }
+
+
+@app.get("/", include_in_schema=False)
+def home() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/plan", include_in_schema=False)
+def plan_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "plan.html")
+
+
+@app.get("/solutions", include_in_schema=False)
+def solutions_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "solutions.html")
+
+
+@app.get("/weekly", include_in_schema=False)
+def weekly_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "weekly.html")
+
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+def main() -> None:
+    """`coach-web` entry point."""
+    import uvicorn
+
+    print(f"leetcode-coach web UI on http://{config.WEB_HOST}:{config.WEB_PORT}")
+    print(f"database: {config.DB_PATH}")
+    uvicorn.run(app, host=config.WEB_HOST, port=config.WEB_PORT, log_level="info")

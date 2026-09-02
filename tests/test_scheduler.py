@@ -51,6 +51,30 @@ def test_hints_also_resets():
     assert s.interval_days == 1.0
 
 
+def test_intervals_stop_growing_at_the_cap():
+    s = None
+    day = TODAY
+    for _ in range(10):
+        s = scheduler.review(s, "clean", day)
+        day += timedelta(days=round(s.interval_days))
+    assert s.interval_days == scheduler.MAX_INTERVAL
+
+
+def test_a_capped_interval_stays_capped():
+    """The stored interval is clamped too, so the next review multiplies 180 -
+    not an ever-growing number - and lands back on 180."""
+    capped = scheduler.ReviewState(
+        ease=3.0,
+        interval_days=scheduler.MAX_INTERVAL,
+        next_due=TODAY,
+        reps=8,
+        lapses=0,
+    )
+    s = scheduler.review(capped, "clean", TODAY)
+    assert s.interval_days == scheduler.MAX_INTERVAL
+    assert s.next_due == TODAY + timedelta(days=180)
+
+
 def test_ease_never_drops_below_floor():
     s = None
     day = TODAY

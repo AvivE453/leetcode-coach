@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weekly Plan · leetcode-coach</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%232563eb'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%2360a5fa'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="brand">
+      <h1>leetcode-coach</h1>
+      <span class="sub">this week, in priority order</span>
+    </div>
+    <nav class="pills" aria-label="Sections">
+      <a href="/">Home</a>
+      <a href="/solutions">Solutions</a>
+      <a href="/plan" aria-current="page">Weekly Plan</a>
+      <a href="/weekly">Weekly Review</a>
+    </nav>
+  </header>
+
+  <main>
+    <section aria-labelledby="topics-heading" style="margin-top:0">
+      <div class="section-head">
+        <div>
+          <h2 id="topics-heading">Focus topics</h2>
+          <p class="hint">What to get better at, from your own solve history.</p>
+        </div>
+        <p class="hint" id="plan-meta"></p>
+      </div>
+      <div class="topics" id="topics">
+        <p class="loading">Loading the plan…</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="problems-heading">
+      <div class="section-head">
+        <div>
+          <h2 id="problems-heading">Problems, most important first</h2>
+          <p class="hint">Reviews due, then off-pattern re-solves, then weak-pattern picks, then curriculum progression.</p>
+        </div>
+      </div>
+      <ol class="plan" id="plan-list"></ol>
+      <p class="hint" id="plan-empty" hidden></p>
+    </section>
+  </main>
+</div>
+
+<script src="/static/plan.js"></script>
+</body>
+</html>

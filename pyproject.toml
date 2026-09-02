@@ -14,16 +14,27 @@ dependencies = [
 [project.optional-dependencies]
 embed = [
     "sentence-transformers>=3.0",
+    "torch>=2.2",
+]
+web = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
 ]
 
 [project.scripts]
 coach = "coach.cli:app"
+coach-web = "coach.web.app:main"
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
 ]
+
+[tool.ruff]
+# solutions/ is pasted practice code, stored as history - it is written against
+# LeetCode's ambient TreeNode/Optional, not meant to stand alone.
+exclude = ["solutions"]
 
 [tool.ruff.lint]
 ignore = [

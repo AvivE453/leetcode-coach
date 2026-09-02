@@ -1,14 +1,14 @@
 import json
+import sqlite3
 import sys
-from datetime import date, timedelta
+from datetime import date
 from enum import Enum
 from pathlib import Path
 
 import numpy as np
 import typer
 
-from coach import catalog, config, curriculum, db, embed, enrich, llm, scheduler
-from coach import review as review_llm
+from coach import catalog, config, curriculum, db, embed, enrich, llm, mastery, service
 from coach.weekly import analyze as weekly_analyze
 from coach.weekly import collect as weekly_collect
 from coach.weekly import plan as weekly_plan
@@ -53,6 +53,9 @@ def init(
         ],
     )
     flagged = curriculum.apply_flags(conn)
+    # Rebuilds pattern_scores from whatever history the database already holds,
+    # so this is also the repair path if that cache is ever wrong.
+    mastery.recompute_all(conn)
 
     typer.echo(f"Database ready: {len(problems)} problems")
     for name, count in flagged.items():
@@ -69,52 +72,6 @@ def read_solution_code(file: Path | None) -> str:
     return sys.stdin.read()
 
 
-def append_to_solution_file(problem, code: str, today: str, outcome: str, minutes: int | None) -> Path:
-    config.SOLUTIONS_DIR.mkdir(parents=True, exist_ok=True)
-    path = config.SOLUTIONS_DIR / f"{problem['number']:04d}-{problem['slug']}.py"
-    if not path.exists():
-        path.write_text(
-            f"# {problem['number']}. {problem['title']}\n"
-            f"# https://leetcode.com/problems/{problem['slug']}/\n"
-        )
-    header = f"\n# --- {today} · {outcome}" + (f" · {minutes}m" if minutes else "") + "\n"
-    with path.open("a") as f:
-        f.write(header + code.rstrip() + "\n")
-    return path
-
-
-def update_review_state(conn, number: int, outcome: str, today: date) -> scheduler.ReviewState:
-    row = conn.execute(
-        "SELECT * FROM review_state WHERE problem_number = ?", (number,)
-    ).fetchone()
-    state = (
-        scheduler.ReviewState(
-            ease=row["ease"],
-            interval_days=row["interval_days"],
-            next_due=date.fromisoformat(row["next_due"]),
-            reps=row["reps"],
-            lapses=row["lapses"],
-        )
-        if row
-        else None
-    )
-    new = scheduler.review(state, outcome, today)
-    conn.execute(
-        """
-        INSERT INTO review_state (problem_number, ease, interval_days, next_due, reps, lapses)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(problem_number) DO UPDATE SET
-            ease = excluded.ease,
-            interval_days = excluded.interval_days,
-            next_due = excluded.next_due,
-            reps = excluded.reps,
-            lapses = excluded.lapses
-        """,
-        (number, new.ease, new.interval_days, new.next_due.isoformat(), new.reps, new.lapses),
-    )
-    return new
-
-
 @app.command()
 def log(
     number: int = typer.Argument(help="LeetCode problem number"),
@@ -125,7 +82,7 @@ def log(
 ):
     """Log a solve: stores the attempt + solution and updates the review schedule."""
     conn = db.connect()
-    problem = conn.execute("SELECT * FROM problems WHERE number = ?", (number,)).fetchone()
+    problem = service.get_problem(conn, number)
     if problem is None:
         typer.echo(f"Problem {number} not found in the catalog - run `coach init` first?")
         raise typer.Exit(1)
@@ -135,70 +92,56 @@ def log(
         typer.echo("No solution code received - nothing logged.")
         raise typer.Exit(1)
 
-    today = date.today()
-    cursor = conn.execute(
-        "INSERT INTO attempts (problem_number, date, outcome, minutes, note) VALUES (?, ?, ?, ?, ?)",
-        (number, today.isoformat(), outcome.value, time, note),
-    )
-    path = append_to_solution_file(problem, code, today.isoformat(), outcome.value, time)
-    solution_id = conn.execute(
-        "INSERT INTO solutions (problem_number, attempt_id, code, created_at, file_path) VALUES (?, ?, ?, ?, ?)",
-        (number, cursor.lastrowid, code, today.isoformat(), str(path.relative_to(config.PROJECT_ROOT))),
-    ).lastrowid
-    state = update_review_state(conn, number, outcome.value, today)
-    conn.commit()
+    result = service.log_solve(conn, number, outcome.value, code, minutes=time, note=note)
 
     detail = outcome.value + (f", {time}m" if time else "")
     typer.echo(f"Logged #{number} {problem['title']} ({detail})")
-    typer.echo(f"Solution saved to {path.name}. Next review: {state.next_due.isoformat()}")
-    enrich_and_embed(conn, solution_id, problem, code)
+    typer.echo(f"Solution saved to {result.path.name}. Next review: {result.next_due.isoformat()}")
+    echo_enrichment(conn, service.enrich_solution_now(conn, result.solution_id, problem, code))
 
 
-def enrich_and_embed(conn, solution_id: int, problem, code: str) -> None:
-    """Post-log enrichment: tag the solution, embed its card, show similar solves."""
-    try:
-        e = enrich.enrich_solution(problem, code)
-    except llm.LLMUnavailable as exc:
-        typer.echo(f"Enrichment skipped ({exc}) - run `coach enrich` to backfill later.")
+def echo_enrichment(conn: sqlite3.Connection, e: service.EnrichResult) -> None:
+    """Print what post-log enrichment found, including how it degraded."""
+    if e.skipped:
+        typer.echo(f"Enrichment skipped ({e.skipped}) - run `coach enrich` to backfill later.")
         return
-    enrich.save(conn, solution_id, e)
-    enrich.save_intended(conn, problem["number"], e.intended_pattern)
-    conn.commit()
     secondary = f" (+ {', '.join(e.secondary_patterns)})" if e.secondary_patterns else ""
     typer.echo(f"Pattern: {e.pattern}{secondary} · {e.key_trick}")
-    if e.intended_pattern != e.pattern and e.intended_pattern not in e.secondary_patterns:
+    echo_standing(service.pattern_standing(conn, e.pattern))
+    if e.off_pattern:
         typer.echo(f"Note: the canonical approach is {e.intended_pattern} - worth re-solving that way.")
-
-    try:
-        vector = embed.encode([embed.card_text(problem["title"], e.pattern, e.key_trick, code)])[0]
-    except embed.EmbeddingsUnavailable as exc:
-        typer.echo(f"Embedding skipped ({exc})")
+    if e.embed_skipped:
+        typer.echo(f"Embedding skipped ({e.embed_skipped})")
         return
-    embed.store(conn, solution_id, vector)
-    conn.commit()
-
-    neighbors = embed.search(conn, vector, top_k=3, exclude_problem=problem["number"])
-    if neighbors:
+    if e.neighbors:
         typer.echo("Similar solved problems:")
-        echo_neighbors(conn, neighbors)
+        echo_neighbors(e.neighbors)
 
 
-def echo_neighbors(conn, neighbors: list[tuple[int, float]]) -> None:
-    for i, (number, score) in enumerate(neighbors, 1):
-        p = conn.execute(
-            "SELECT title, difficulty FROM problems WHERE number = ?", (number,)
-        ).fetchone()
-        typer.echo(f"  {i}. #{number} {p['title']} [{p['difficulty']}]  {score:.2f}")
-        en = conn.execute(
-            """
-            SELECT en.pattern, en.key_trick
-            FROM solutions s JOIN enrichments en ON en.solution_id = s.id
-            WHERE s.problem_number = ? ORDER BY s.id DESC LIMIT 1
-            """,
-            (number,),
-        ).fetchone()
-        if en:
-            typer.echo(f"     {en['pattern']}: {en['key_trick']}")
+def echo_standing(standing: service.PatternStanding | None) -> None:
+    """How this pattern is going overall - the weekly analysis, one solve early."""
+    if standing is None:
+        return
+    mastery_note = f"mastery {standing.score:.1f}/5" if standing.score is not None else "unscored"
+    if not standing.enough_data:
+        plural = "" if standing.attempts == 1 else "s"
+        typer.echo(
+            f"Standing: {standing.pattern} - {mastery_note} over only {standing.attempts}"
+            f" attempt{plural}, too early to call."
+        )
+        return
+    verdict = "WEAK" if standing.weak else "on track"
+    typer.echo(
+        f"Standing: {standing.pattern} is {verdict} - {mastery_note}, "
+        f"{standing.struggle_rate:.0%} struggle rate over {standing.attempts} attempts."
+    )
+
+
+def echo_neighbors(neighbors: list[service.Neighbor]) -> None:
+    for i, n in enumerate(neighbors, 1):
+        typer.echo(f"  {i}. #{n.number} {n.title} [{n.difficulty}]  {n.score:.2f}")
+        if n.pattern:
+            typer.echo(f"     {n.pattern}: {n.key_trick}")
 
 
 @app.command()
@@ -269,12 +212,18 @@ def similar(
     if not neighbors:
         typer.echo("No embedded solutions to compare against yet.")
         return
-    echo_neighbors(conn, neighbors)
+    echo_neighbors(service.neighbor_details(conn, neighbors))
 
 
 @app.command("review")
-def review_cmd(number: int = typer.Argument(help="LeetCode problem number")):
-    """LLM feedback on your latest stored solution: complexity, bugs, better approach."""
+def review_cmd(
+    number: int = typer.Argument(help="LeetCode problem number"),
+    refresh: bool = typer.Option(False, "--refresh", help="Re-run the review instead of showing the stored one"),
+):
+    """Feedback on your latest stored solution: strengths, bugs, better approach.
+
+    Stored after the first run, so looking at it again costs nothing.
+    """
     conn = db.connect()
     problem = conn.execute("SELECT * FROM problems WHERE number = ?", (number,)).fetchone()
     if problem is None:
@@ -288,15 +237,23 @@ def review_cmd(number: int = typer.Argument(help="LeetCode problem number")):
         raise typer.Exit(1)
 
     typer.echo(f"Reviewing #{number} {problem['title']} ...")
-    try:
-        r = review_llm.review_solution(problem, solution["code"])
-    except llm.LLMUnavailable as exc:
-        typer.echo(f"Review unavailable: {exc}")
-        raise typer.Exit(1) from None
+    result = service.review_solution_now(
+        conn, solution["id"], problem, solution["code"], refresh=refresh
+    )
+    if result.skipped:
+        typer.echo(f"Review unavailable: {result.skipped}")
+        raise typer.Exit(1)
 
+    r = result.review
+    if result.cached:
+        typer.echo("(stored review - use --refresh to re-run it)")
     typer.echo(f"Verdict: {r.verdict}")
     typer.echo(f"Complexity: {r.time_complexity} time / {r.space_complexity} space"
                f" (optimal: {r.optimal_time_complexity})")
+    if r.strengths:
+        typer.echo("What went well:")
+        for strength in r.strengths:
+            typer.echo(f"  + {strength}")
     if r.issues:
         typer.echo("Issues:")
         for issue in r.issues:
@@ -329,6 +286,8 @@ def enrich_cmd(
             mismatch = f"  (canonical: {e.intended_pattern})"
         typer.echo(f"#{row['number']} {row['title']}: {e.pattern} · {e.key_trick}{mismatch}")
         done += 1
+    if done:
+        mastery.recompute_all(conn)
     typer.echo(f"Enriched {done}/{len(todo)} solution(s).")
 
     pending = conn.execute(
@@ -360,63 +319,36 @@ def enrich_cmd(
 def stats():
     """Progress overview: solved counts, curriculum coverage, recent activity."""
     conn = db.connect()
-    total = conn.execute("SELECT COUNT(*) FROM problems").fetchone()[0]
-    if total == 0:
+    s = service.stats_summary(conn, date.today())
+    if s["catalog"] == 0:
         typer.echo("No problems in the database yet - run `coach init` first.")
         raise typer.Exit(1)
 
-    today = date.today()
-    solved = conn.execute("SELECT COUNT(DISTINCT problem_number) FROM attempts").fetchone()[0]
-    attempts = conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0]
-    week = conn.execute(
-        "SELECT COUNT(*) FROM attempts WHERE date >= ?",
-        ((today - timedelta(days=7)).isoformat(),),
-    ).fetchone()[0]
-    due_count = conn.execute(
-        "SELECT COUNT(*) FROM review_state WHERE next_due <= ?", (today.isoformat(),)
-    ).fetchone()[0]
+    typer.echo(f"Catalog: {s['catalog']} problems")
+    typer.echo(
+        f"Solved: {s['solved']} distinct problems"
+        f" ({s['attempts']} attempts, {s['last_7_days']} in the last 7 days)"
+    )
+    typer.echo(f"Due for review: {s['due_today']}")
 
-    typer.echo(f"Catalog: {total} problems")
-    typer.echo(f"Solved: {solved} distinct problems ({attempts} attempts, {week} in the last 7 days)")
-    typer.echo(f"Due for review: {due_count}")
+    if s["outcomes"]:
+        typer.echo("Outcomes: " + ", ".join(f"{r['outcome']} {r['count']}" for r in s["outcomes"]))
 
-    outcomes = conn.execute(
-        "SELECT outcome, COUNT(*) AS n FROM attempts GROUP BY outcome ORDER BY n DESC"
-    ).fetchall()
-    if outcomes:
-        typer.echo("Outcomes: " + ", ".join(f"{r['outcome']} {r['n']}" for r in outcomes))
-
-    patterns = conn.execute(
-        """
-        SELECT en.pattern, COUNT(*) AS attempts, SUM(a.outcome != 'clean') AS rough
-        FROM attempts a
-        JOIN solutions s ON s.attempt_id = a.id
-        JOIN enrichments en ON en.solution_id = s.id
-        GROUP BY en.pattern
-        ORDER BY attempts DESC, en.pattern
-        """
-    ).fetchall()
-    if patterns:
+    if s["patterns"]:
         typer.echo("Patterns practiced (by your solutions):")
-        for r in patterns:
-            typer.echo(f"  {r['pattern']}: {r['attempts']} attempt(s), {r['rough']} not clean")
+        for r in s["patterns"]:
+            score = f"mastery {r['score']:.1f}/5" if r["score"] is not None else "unscored"
+            typer.echo(
+                f"  {r['pattern']}: {score}, {r['attempts']} attempt(s), {r['rough']} not clean"
+            )
 
-    off_pattern = enrich.off_pattern_problems(conn)
-    if off_pattern:
+    if s["off_pattern"]:
         typer.echo("Solved off-pattern (canonical approach never used):")
-        for r in off_pattern:
+        for r in s["off_pattern"]:
             typer.echo(f"  #{r['number']} {r['title']} -> {r['intended_pattern']}")
 
-    for name, column in curriculum.FLAG_COLUMNS.items():
-        in_list = conn.execute(f"SELECT COUNT(*) FROM problems WHERE {column} = 1").fetchone()[0]
-        done = conn.execute(
-            f"""
-            SELECT COUNT(DISTINCT a.problem_number)
-            FROM attempts a JOIN problems p ON p.number = a.problem_number
-            WHERE p.{column} = 1
-            """
-        ).fetchone()[0]
-        typer.echo(f"{name}: {done}/{in_list}")
+    for name, progress in s["curriculum"].items():
+        typer.echo(f"{name}: {progress['done']}/{progress['total']}")
 
 
 @app.command()
@@ -451,8 +383,8 @@ def weekly(
 
     conn.execute(
         """
-        INSERT INTO weekly_runs (week_start, generated_at, report_path, stats, degraded)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO weekly_runs (week_start, generated_at, report_path, stats, degraded, narrative)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
         (
             week["start"].isoformat(),
@@ -465,11 +397,17 @@ def weekly(
                     "weak_patterns": analysis["weak_patterns"],
                     "stale_patterns": analysis["stale_patterns"],
                     "off_pattern": [r["number"] for r in analysis["off_pattern"]],
+                    "pattern_scores": {
+                        p["pattern"]: round(p["score"], 2)
+                        for p in analysis["patterns"]
+                        if p["score"] is not None
+                    },
                     "due": len(analysis["due"]),
                     "planned": len(items),
                 }
             ),
             int(degraded),
+            note,
         ),
     )
     conn.commit()

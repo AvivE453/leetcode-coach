@@ -32,7 +32,7 @@ flowchart TB
 
     subgraph weeklyp ["coach weekly — deterministic pipeline"]
         direction LR
-        c["collect<br/>last 7 days"] --> a["analyze<br/>struggle rates,<br/>weak + stale patterns"] --> p["plan<br/>fill ~25 slots"] --> r["report"]
+        c["collect<br/>last 7 days<br/>+ stored reviews"] --> a["analyze<br/>mastery scores,<br/>weak + stale patterns"] --> p["plan<br/>fill ~25 slots"] --> r["report"]
     end
 
     api{{"Claude API<br/>structured outputs"}}
@@ -64,10 +64,47 @@ of them degrades to a working non-LLM path when the API is unavailable.
 | `coach log <n>` | Paste a solution → stores it, tags the pattern, embeds it, schedules the review, shows similar past solves, and flags the solve if you used the wrong approach |
 | `coach due` | What to re-solve today, by spaced repetition |
 | `coach similar <n>` / `--paste` | Your five most similar past solutions, by *algorithmic pattern* rather than text |
-| `coach review <n>` | Structured feedback on a stored solution: complexity, bugs, edge cases, better approach |
-| `coach stats` | Pattern coverage, struggle rates, off-pattern solves, curriculum progress |
+| `coach review <n>` | Structured feedback on a stored solution: what it got right, complexity, bugs, edge cases, better approach. Stored after the first run, so looking again is free |
+| `coach stats` | Pattern coverage, mastery scores, struggle rates, off-pattern solves, curriculum progress |
 | `coach weekly` | Writes `reports/YYYY-WW.md`: the week, the diagnosis, and next week's plan |
 | `coach enrich` | Backfills tags and embeddings for anything logged while offline |
+| `coach-web` | The same data in a browser: progress, a bubble map of your practiced patterns, a form to log a solve, the weekly plan, and last week's coach's note |
+
+---
+
+## Web UI
+
+```bash
+uv sync --extra web
+uv run coach-web        # http://127.0.0.1:8000
+```
+
+Four pages, no build step — FastAPI serving plain HTML/CSS/JS:
+
+- **Home** — solved count, reviews due, clean-solve rate, curriculum progress; a circle-packed
+  bubble map with one bubble per pattern, sized by how many distinct problems you have solved
+  that way (with a table view of the same numbers); and an *I solved a question* form that runs
+  the exact `coach log` code path — attempt, solution file, SM-2 reschedule, tagging, embedding,
+  similar-solve lookup, the off-pattern notice, and where that pattern now stands.
+- **Solutions** — every problem you have logged, newest first; open one to read each solve's code
+  exactly as you pasted it, with its outcome, timing, pattern and complexity. Each solve can carry
+  a review — what it got right, what to improve, your complexity against optimal — stored once and
+  shown for free thereafter. Asking for a new one is always an explicit click, never something
+  opening the page pays for.
+- **Weekly Plan** — this week's focus topics (weak patterns, stale patterns, off-pattern solves)
+  and the planned problems in priority order, each with the reason it was picked. Recomputed live
+  and read-only: unlike `coach weekly` it writes no report and records no run.
+- **Weekly Review** — the coach's note from the last `coach weekly` run, with the snapshot it was
+  written against. Frozen rather than live: the paragraph was paid for once when the report was
+  generated, so this page reads it back and never calls the API.
+
+The CLI and the web UI share one implementation ([`coach/service.py`](coach/service.py)); the web
+layer only translates it to JSON. Degradation is the same too — with no API key a solve still
+saves, and the page says the enrichment is pending.
+
+`COACH_DB=/tmp/scratch.db` points any command, `coach-web` included, at a throwaway database.
+`COACH_WEB_HOST` / `COACH_WEB_PORT` move the server; it binds to localhost by default and has
+no authentication, so keep it there.
 
 ---
 
@@ -81,6 +118,18 @@ analytics truthful; if a brute-forced Maximum Subarray were filed under `dp-1d`,
 planner would never schedule the one thing you most need to learn. The **disagreement
 between the layers** is the useful signal: it marks a problem you solved without
 learning what it teaches, and the planner forces a re-solve.
+
+**One mastery score per pattern, not a struggle rate.**
+"Weak" used to mean *at least half the attempts were not clean* — a binary that read five
+shaky-but-solved sweeps exactly like five failures. It now means a mastery score below
+2.5/5 over at least five attempts. Each solve scores `0.7 · outcome + 0.3 · review`, on the
+same 1–5 scale SM-2 already uses for scheduling: the outcome is self-report (how it felt),
+the review is the external judgement on the code (a bug scores 1, a missed boundary 2, and
+extra findings can only pull it down). They disagree often enough to be worth both — a solve
+can feel clean and still carry a bug. Scores fold through an exponential moving average
+(α = 0.2), so recent solves move the number without erasing history, and the table is
+rebuilt by replaying attempts rather than updated in place — a review usually arrives days
+after the solve it judges, and replay is what lets it count.
 
 **A controlled vocabulary of 26 patterns, enforced as a type.**
 The model picks from an enum, so tags can never fragment into `dp`/`DP`/`dynamic
@@ -122,6 +171,10 @@ defend or iterate against. Full numbers and methodology: **[evals/RESULTS.md](ev
 | Recall on planted flaws | **97%** (29/30) |
 | False-positive rate on clean controls | **0%** (13 controls) |
 | By category | bug 94% · complexity 100% · edge-case 100% |
+
+These numbers were measured on `review-v2`. The shipped prompt is now `review-v3`, which
+adds a `strengths` field so a review also says what the solution got right; its
+issue-detection has not been re-scored, and the table stands as a v2 result until it is.
 
 The false-positive rate matters as much as recall: a reviewer that reports five issues
 on every solution scores perfect recall and is useless, because it would send you
@@ -179,6 +232,7 @@ Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync --extra embed          # omit --extra embed to skip torch (no local embeddings)
+uv sync --extra web            # optional: FastAPI + uvicorn for the browser UI
 cp .env.example .env           # then add your key; .env is gitignored
 uv run coach init              # download the catalog, create the database
 
@@ -186,12 +240,13 @@ uv run coach log 1 --outcome clean --time 8   # paste your solution, then Ctrl+D
 uv run coach due
 uv run coach similar 1
 uv run coach weekly
+uv run coach-web                              # the same data in a browser
 ```
 
 Development:
 
 ```bash
-uv run pytest                  # 60 tests; every LLM call mocked, API key stripped
+uv run pytest                  # 130 tests; every LLM call mocked, API key stripped
 uv run ruff check .
 uv run python -m evals.validate_bank        # re-label the fixture bank, no API calls
 uv run python -m evals.run_evals --all --dry-run   # count the calls and cost first
@@ -199,10 +254,10 @@ uv run python -m evals.run_evals --all             # real API calls
 ```
 
 `--dry-run` always reports the exact number of uncached calls and an estimated cost
-before anything is spent. Evals default to a cheaper model (`config.EVAL_MODEL`) because
-they measure the *prompt*, not model capability; pass `--model claude-opus-5` to score
-the model the coach itself uses. Responses cache by prompt version, model, and code
-digest, so a repeat run costs nothing and correcting a *label* re-scores for free.
+before anything is spent. Evals run on `config.EVAL_MODEL`, which is the model the coach
+itself uses; pass `--model` to score a different one. Responses cache by prompt version,
+model, and code digest, so a repeat run costs nothing and correcting a *label* re-scores
+for free.
 
 The database starts empty and grows from your first `coach log`. `data/coach.db` and
 `solutions/` are committed on purpose: the state travels with the repo, and the commit
@@ -223,9 +278,10 @@ Unit files: `~/.config/systemd/user/coach-weekly.{service,timer}`.
 ## Layout
 
 ```
-coach/          CLI, SQLite schema, scheduler, LLM wrapper, enrichment, embeddings
+coach/          CLI, service layer, SQLite schema, scheduler, LLM wrapper, enrichment, embeddings
 coach/weekly/   collect → analyze → plan → report
+coach/web/      FastAPI app + the static Home, Solutions, Weekly Plan and Weekly Review pages
 evals/          execution oracle, fixture bank, corpus, scorers, RESULTS.md
-tests/          60 tests, no network
+tests/          130 tests, no network
 docs/PLAN.md    full design record and milestone history
 ```

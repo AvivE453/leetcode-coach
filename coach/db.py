@@ -46,6 +46,20 @@ CREATE TABLE IF NOT EXISTS enrichments (
     prompt_version TEXT
 );
 
+CREATE TABLE IF NOT EXISTS reviews (
+    solution_id INTEGER PRIMARY KEY REFERENCES solutions(id),
+    verdict TEXT NOT NULL,
+    strengths TEXT NOT NULL DEFAULT '[]',
+    issues TEXT NOT NULL DEFAULT '[]',
+    time_complexity TEXT,
+    space_complexity TEXT,
+    optimal_time_complexity TEXT,
+    better_approach TEXT,
+    created_at TEXT NOT NULL,
+    model TEXT,
+    prompt_version TEXT
+);
+
 CREATE TABLE IF NOT EXISTS embeddings (
     solution_id INTEGER PRIMARY KEY REFERENCES solutions(id),
     vector BLOB NOT NULL
@@ -60,13 +74,23 @@ CREATE TABLE IF NOT EXISTS review_state (
     lapses INTEGER NOT NULL DEFAULT 0
 );
 
+-- Derived cache, not a source of truth: rebuilt from attempts + reviews by
+-- mastery.recompute_all(), which `coach init` runs - so dropping it is safe.
+CREATE TABLE IF NOT EXISTS pattern_scores (
+    pattern TEXT PRIMARY KEY,
+    score REAL NOT NULL,
+    attempts INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS weekly_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     week_start TEXT NOT NULL,
     generated_at TEXT NOT NULL,
     report_path TEXT,
     stats TEXT,
-    degraded INTEGER NOT NULL DEFAULT 0
+    degraded INTEGER NOT NULL DEFAULT 0,
+    narrative TEXT
 );
 """
 
@@ -86,6 +110,9 @@ def init_schema(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(problems)")}
     if "intended_pattern" not in columns:
         conn.execute("ALTER TABLE problems ADD COLUMN intended_pattern TEXT")
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(weekly_runs)")}
+    if "narrative" not in columns:
+        conn.execute("ALTER TABLE weekly_runs ADD COLUMN narrative TEXT")
     conn.commit()
 
 

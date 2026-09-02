@@ -2,23 +2,6 @@ import os
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
-DB_PATH = DATA_DIR / "coach.db"
-CATALOG_PATH = DATA_DIR / "catalog.json"
-SOLUTIONS_DIR = PROJECT_ROOT / "solutions"
-REPORTS_DIR = PROJECT_ROOT / "reports"
-
-MODEL = "claude-opus-5"
-
-# The eval harness measures prompts, not model capability, so it runs on a
-# cheaper model by default: Sonnet is $2/$10 per Mtok against Opus's $5/$25,
-# and thinking tokens (billed as output) are where eval spend actually goes.
-# Set to MODEL when you specifically want to score the model the coach uses.
-EVAL_MODEL = "claude-sonnet-5"
-
-EMBED_MODEL = "all-MiniLM-L6-v2"
-WEEKLY_TARGET = 25
-CURRICULUM = "blind75"
 
 
 def load_env(path: Path | None = None) -> None:
@@ -36,3 +19,26 @@ def load_env(path: Path | None = None) -> None:
 
 
 load_env()
+
+DATA_DIR = PROJECT_ROOT / "data"
+# COACH_DB points the whole tool at a different database - the safe way to try
+# things (or run the web UI) without touching data/coach.db.
+DB_PATH = Path(os.environ["COACH_DB"]).expanduser() if os.environ.get("COACH_DB") else DATA_DIR / "coach.db"
+CATALOG_PATH = DATA_DIR / "catalog.json"
+SOLUTIONS_DIR = PROJECT_ROOT / "solutions"
+REPORTS_DIR = PROJECT_ROOT / "reports"
+
+# Sonnet ($2/$10 per Mtok against Opus's $5/$25) - the enrichment eval scored
+# 100% on it, so the extra spend bought nothing this tool can measure.
+MODEL = "claude-sonnet-5"
+
+# Kept separate from MODEL so the evals can score a different model than the one
+# the coach runs on, without either default dragging the other along.
+EVAL_MODEL = "claude-sonnet-5"
+
+EMBED_MODEL = "all-MiniLM-L6-v2"
+WEEKLY_TARGET = 25
+CURRICULUM = "blind75"
+
+WEB_HOST = os.environ.get("COACH_WEB_HOST", "127.0.0.1")
+WEB_PORT = int(os.environ.get("COACH_WEB_PORT", "8000"))

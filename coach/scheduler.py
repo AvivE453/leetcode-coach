@@ -5,6 +5,7 @@ QUALITY = {"clean": 5, "struggled": 3, "hints": 2, "failed": 1}
 INITIAL_EASE = 2.5
 MIN_EASE = 1.3
 SECOND_INTERVAL = 6.0
+MAX_INTERVAL = 180.0
 
 
 @dataclass(frozen=True)
@@ -35,7 +36,7 @@ def review(state: ReviewState | None, outcome: str, today: date) -> ReviewState:
         elif reps == 2:
             interval = SECOND_INTERVAL
         else:
-            interval = state.interval_days * ease
+            interval = min(state.interval_days * ease, MAX_INTERVAL)
 
     return ReviewState(
         ease=ease,

@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from pathlib import Path
 
@@ -18,13 +19,27 @@ def week_key(today: date) -> str:
     return f"{iso.year}-{iso.week:02d}"
 
 
+def review_note(row) -> str:
+    """A stored review as one trailing clause, so the narrative can name what broke.
+
+    Already-paid-for judgement: `outcome` is how the solve felt, the review is what
+    the code actually did. Empty string when that solve was never reviewed.
+    """
+    if not row["review_verdict"]:
+        return ""
+    issues = "; ".join(
+        f"{i['category']}: {i['description']}" for i in json.loads(row["review_issues"])
+    )
+    return f" review={row['review_verdict']}" + (f" ({issues})" if issues else "")
+
+
 def summarize(week: dict, analysis: dict, items: list[PlanItem]) -> str:
     """Compact plain-text digest of the week - input for the narrative LLM call."""
     lines = [f"Attempts this week: {len(week['attempts'])} on {week['distinct_problems']} problems"]
     for r in week["attempts"]:
         lines.append(
             f"  {r['date']} #{r['problem_number']} {r['title']} [{r['difficulty']}]"
-            f" outcome={r['outcome']} pattern={r['pattern'] or 'untagged'}"
+            f" outcome={r['outcome']} pattern={r['pattern'] or 'untagged'}{review_note(r)}"
         )
     if analysis["weak_patterns"]:
         lines.append("Weak patterns (>=50% non-clean): " + ", ".join(analysis["weak_patterns"]))

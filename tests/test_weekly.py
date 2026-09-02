@@ -1,7 +1,9 @@
 import json
 from datetime import date, timedelta
 
-from coach import db
+import pytest
+
+from coach import db, mastery
 from coach.weekly import analyze as weekly_analyze
 from coach.weekly import collect as weekly_collect
 from coach.weekly import plan as weekly_plan
@@ -44,7 +46,26 @@ def add_attempt(conn, number, day, outcome="clean", pattern=None, minutes=None):
             """,
             (solution_id, pattern),
         )
-    return attempt_id
+        # Mirrors production: tagging a solve is what makes it scorable, and the
+        # enrich path recomputes right there.
+        mastery.recompute_all(conn)
+    return solution_id
+
+
+def add_review(conn, solution_id, verdict, issues=()):
+    conn.execute(
+        """
+        INSERT INTO reviews (solution_id, verdict, strengths, issues, time_complexity,
+                             space_complexity, optimal_time_complexity, created_at)
+        VALUES (?, ?, '[]', ?, 'O(n)', 'O(1)', 'O(n)', '2026-08-30')
+        """,
+        (
+            solution_id,
+            verdict,
+            json.dumps([{"category": c, "description": d} for c, d in issues]),
+        ),
+    )
+    mastery.recompute_all(conn)
 
 
 def set_due(conn, number, day):
@@ -82,9 +103,13 @@ def test_analyze_flags_weak_and_stale_patterns(tmp_path):
     add_problem(conn, 1, "two-sum", "Two Sum")
     add_problem(conn, 2, "coin-change", "Coin Change")
     add_problem(conn, 3, "lru-cache", "LRU Cache")
-    # weak: 2 of 3 attempts not clean
-    for outcome in ["struggled", "failed", "clean"]:
-        add_attempt(conn, 2, TODAY - timedelta(days=1), outcome=outcome, pattern="dp-1d")
+    add_problem(conn, 4, "3sum", "3Sum")
+    # weak: five failures, so mastery bottoms out at 1.0
+    for _ in range(5):
+        add_attempt(conn, 2, TODAY - timedelta(days=1), outcome="failed", pattern="dp-1d")
+    # NOT weak: the same 100% struggle rate, but solved every time - mastery 3.0
+    for _ in range(5):
+        add_attempt(conn, 4, TODAY - timedelta(days=1), outcome="struggled", pattern="two-pointers")
     # strong: single clean attempt
     add_attempt(conn, 1, TODAY - timedelta(days=1), outcome="clean", pattern="hashmap")
     # stale: clean but 60 days ago
@@ -94,8 +119,24 @@ def test_analyze_flags_weak_and_stale_patterns(tmp_path):
     assert analysis["weak_patterns"] == ["dp-1d"]
     assert analysis["stale_patterns"] == ["design"]
     rates = {p["pattern"]: p["struggle_rate"] for p in analysis["patterns"]}
-    assert rates["dp-1d"] > 0.6
+    assert rates["dp-1d"] == 1.0
+    assert rates["two-pointers"] == 1.0
     assert rates["hashmap"] == 0.0
+    scores = {p["pattern"]: p["score"] for p in analysis["patterns"]}
+    assert scores == pytest.approx({"dp-1d": 1.0, "two-pointers": 3.0, "hashmap": 5.0, "design": 5.0})
+
+
+def test_analyze_needs_five_attempts_before_calling_a_pattern_weak(tmp_path):
+    conn = make_db(tmp_path)
+    add_problem(conn, 1, "coin-change", "Coin Change")
+    for _ in range(4):
+        add_attempt(conn, 1, TODAY - timedelta(days=1), outcome="failed", pattern="dp-1d")
+
+    analysis = weekly_analyze.analyze(conn, TODAY)
+    assert analysis["weak_patterns"] == []
+
+    add_attempt(conn, 1, TODAY, outcome="failed", pattern="dp-1d")
+    assert weekly_analyze.analyze(conn, TODAY)["weak_patterns"] == ["dp-1d"]
 
 
 def test_analyze_reports_due_and_curriculum(tmp_path):
@@ -215,6 +256,44 @@ def test_summarize_feeds_llm_the_key_facts(tmp_path):
     assert "Attempts this week: 1" in summary
     assert "#1 Two Sum" in summary
     assert "outcome=struggled" in summary
+    assert "review=" not in summary
+
+
+def test_summarize_carries_stored_reviews(tmp_path):
+    conn = make_db(tmp_path)
+    add_problem(conn, 1, "two-sum", "Two Sum")
+    add_problem(conn, 2, "valid-palindrome", "Valid Palindrome")
+    reviewed = add_attempt(conn, 1, TODAY - timedelta(days=1), outcome="clean", pattern="hashmap")
+    add_review(
+        conn,
+        reviewed,
+        "needs-work",
+        [("edge-case", "wrong on an empty array"), ("complexity", "sorts unnecessarily")],
+    )
+    add_attempt(conn, 2, TODAY - timedelta(days=1), outcome="struggled", pattern="two-pointers")
+
+    week = weekly_collect.collect(conn, TODAY)
+    summary = weekly_report.summarize(week, weekly_analyze.analyze(conn, TODAY), [])
+
+    reviewed_line = next(line for line in summary.splitlines() if "#1 Two Sum" in line)
+    assert "review=needs-work" in reviewed_line
+    assert "edge-case: wrong on an empty array" in reviewed_line
+    assert "complexity: sorts unnecessarily" in reviewed_line
+    # The unreviewed solve is unchanged - a missing review is not an empty one.
+    assert "review=" not in next(line for line in summary.splitlines() if "#2" in line)
+
+
+def test_summarize_notes_a_clean_review_without_issues(tmp_path):
+    conn = make_db(tmp_path)
+    add_problem(conn, 1, "two-sum", "Two Sum")
+    solution_id = add_attempt(conn, 1, TODAY - timedelta(days=1), pattern="hashmap")
+    add_review(conn, solution_id, "optimal")
+
+    week = weekly_collect.collect(conn, TODAY)
+    summary = weekly_report.summarize(week, weekly_analyze.analyze(conn, TODAY), [])
+
+    assert "review=optimal" in summary
+    assert "()" not in summary
 
 
 def test_week_key_uses_iso_week():
