@@ -25,7 +25,6 @@ DATA_DIR = PROJECT_ROOT / "data"
 # things (or run the web UI) without touching data/coach.db.
 DB_PATH = Path(os.environ["COACH_DB"]).expanduser() if os.environ.get("COACH_DB") else DATA_DIR / "coach.db"
 CATALOG_PATH = DATA_DIR / "catalog.json"
-SOLUTIONS_DIR = PROJECT_ROOT / "solutions"
 REPORTS_DIR = PROJECT_ROOT / "reports"
 
 # Sonnet ($2/$10 per Mtok against Opus's $5/$25) - the enrichment eval scored

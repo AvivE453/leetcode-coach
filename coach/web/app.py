@@ -19,6 +19,7 @@ from coach import config, db, service
 from coach.weekly import analyze as weekly_analyze
 from coach.weekly import plan as weekly_plan
 from coach.weekly import report as weekly_report
+from coach.weekly.plan import plan_kind
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -87,7 +88,6 @@ def api_log(body: LogRequest) -> dict:
         "title": result.title,
         "difficulty": problem["difficulty"],
         "outcome": result.outcome,
-        "solution_file": result.path.name,
         "next_due": result.next_due.isoformat(),
         "enrichment": {
             "status": "skipped" if e.skipped else "ok",
@@ -96,7 +96,9 @@ def api_log(body: LogRequest) -> dict:
             "secondary_patterns": e.secondary_patterns,
             "key_trick": e.key_trick,
             "intended_pattern": e.intended_pattern,
+            "intended_secondary_patterns": e.intended_secondary_patterns,
             "off_pattern": e.off_pattern,
+            "also_solvable_with": e.also_solvable_with,
             "embedding_skipped": e.embed_skipped,
             "neighbors": [
                 {
@@ -178,17 +180,6 @@ def api_review(number: int, body: ReviewRequest) -> dict:
         "cached": result.cached,
         "review": service.review_payload(result.review) if result.review else None,
     }
-
-
-def plan_kind(reason: str) -> str:
-    """Reason string -> chip class. Mirrors the four reasons build_plan emits."""
-    if reason.startswith("review due"):
-        return "review"
-    if reason.startswith("re-solve"):
-        return "re-solve"
-    if reason.startswith("weak pattern"):
-        return "weak-pattern"
-    return "curriculum"
 
 
 @app.get("/api/plan")

@@ -55,6 +55,42 @@ def test_init_schema_migrates_pre_m2_problems_table(tmp_path):
     assert "intended_pattern" in columns
 
 
+def test_init_schema_migrates_pre_m11_problems_table(tmp_path):
+    conn = db.connect(tmp_path / "test.db")
+    conn.execute(
+        """
+        CREATE TABLE problems (
+            number INTEGER PRIMARY KEY,
+            slug TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL,
+            difficulty TEXT NOT NULL,
+            official_tags TEXT NOT NULL DEFAULT '[]',
+            paid_only INTEGER NOT NULL DEFAULT 0,
+            in_blind75 INTEGER NOT NULL DEFAULT 0,
+            in_neetcode150 INTEGER NOT NULL DEFAULT 0,
+            intended_pattern TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO problems (number, slug, title, difficulty, intended_pattern)
+        VALUES (1, 'two-sum', 'Two Sum', 'Easy', 'hashmap')
+        """
+    )
+
+    db.init_schema(conn)
+    db.init_schema(conn)
+
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(problems)")}
+    assert "intended_secondary_patterns" in columns
+    # An existing problem keeps its central pattern and starts with no alternates,
+    # which it accrues the next time any of its solves is enriched.
+    row = conn.execute("SELECT * FROM problems WHERE number = 1").fetchone()
+    assert row["intended_pattern"] == "hashmap"
+    assert row["intended_secondary_patterns"] == "[]"
+
+
 def test_init_schema_migrates_pre_m9_weekly_runs_table(tmp_path):
     conn = db.connect(tmp_path / "test.db")
     conn.execute(

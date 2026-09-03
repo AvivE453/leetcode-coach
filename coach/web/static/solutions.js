@@ -102,6 +102,12 @@ function renderSolve(s, number) {
       ])
     );
   }
+  /* Computed server-side on every load, not frozen with the review: if the
+     problem's canonical set widens later, an old solve's note widens too. */
+  if (s.also_solvable_with?.length) {
+    block.append(el("p", { class: "hint", text:
+      `Can also be solved with: ${s.also_solvable_with.join(", ")}` }));
+  }
   if (s.time_complexity) {
     block.append(el("p", { class: "hint", text: `${s.time_complexity} time / ${s.space_complexity} space` }));
   }

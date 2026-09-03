@@ -96,7 +96,7 @@ def log(
 
     detail = outcome.value + (f", {time}m" if time else "")
     typer.echo(f"Logged #{number} {problem['title']} ({detail})")
-    typer.echo(f"Solution saved to {result.path.name}. Next review: {result.next_due.isoformat()}")
+    typer.echo(f"Next review: {result.next_due.isoformat()}")
     echo_enrichment(conn, service.enrich_solution_now(conn, result.solution_id, problem, code))
 
 
@@ -110,12 +110,22 @@ def echo_enrichment(conn: sqlite3.Connection, e: service.EnrichResult) -> None:
     echo_standing(service.pattern_standing(conn, e.pattern))
     if e.off_pattern:
         typer.echo(f"Note: the canonical approach is {e.intended_pattern} - worth re-solving that way.")
+    echo_also_solvable(e.also_solvable_with)
     if e.embed_skipped:
         typer.echo(f"Embedding skipped ({e.embed_skipped})")
         return
     if e.neighbors:
         typer.echo("Similar solved problems:")
         echo_neighbors(e.neighbors)
+    else:
+        typer.echo(f"No other solved problems tagged as {e.pattern} yet.")
+
+
+def echo_also_solvable(patterns: list[str]) -> None:
+    """The canonical approaches this solve did not use - shown whether or not the
+    off-pattern warning fired, and costing nothing extra to compute."""
+    if patterns:
+        typer.echo(f"This problem can also be solved with: {', '.join(patterns)}")
 
 
 def echo_standing(standing: service.PatternStanding | None) -> None:
@@ -262,6 +272,7 @@ def review_cmd(
         typer.echo("Issues: none found")
     if r.better_approach:
         typer.echo(f"Better approach: {r.better_approach}")
+    echo_also_solvable(service.also_solvable_with(conn, solution["id"], problem))
 
 
 @app.command("enrich")
@@ -279,10 +290,14 @@ def enrich_cmd(
             typer.echo(f"Stopped at #{row['number']}: {exc}")
             break
         enrich.save(conn, row["solution_id"], e)
-        enrich.save_intended(conn, row["number"], e.intended_pattern)
+        enrich.save_intended(
+            conn, row["number"], e.intended_pattern, list(e.intended_secondary_patterns)
+        )
         conn.commit()
         mismatch = ""
-        if e.intended_pattern != e.pattern and e.intended_pattern not in e.secondary_patterns:
+        if enrich.off_pattern(
+            e.pattern, e.secondary_patterns, e.intended_pattern, e.intended_secondary_patterns
+        ):
             mismatch = f"  (canonical: {e.intended_pattern})"
         typer.echo(f"#{row['number']} {row['title']}: {e.pattern} · {e.key_trick}{mismatch}")
         done += 1
@@ -390,22 +405,7 @@ def weekly(
             week["start"].isoformat(),
             today.isoformat(),
             str(path.relative_to(config.PROJECT_ROOT)),
-            json.dumps(
-                {
-                    "attempts": len(week["attempts"]),
-                    "distinct_problems": week["distinct_problems"],
-                    "weak_patterns": analysis["weak_patterns"],
-                    "stale_patterns": analysis["stale_patterns"],
-                    "off_pattern": [r["number"] for r in analysis["off_pattern"]],
-                    "pattern_scores": {
-                        p["pattern"]: round(p["score"], 2)
-                        for p in analysis["patterns"]
-                        if p["score"] is not None
-                    },
-                    "due": len(analysis["due"]),
-                    "planned": len(items),
-                }
-            ),
+            json.dumps(weekly_report.snapshot(week, analysis, items)),
             int(degraded),
             note,
         ),

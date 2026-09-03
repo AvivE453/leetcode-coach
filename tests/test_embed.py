@@ -14,7 +14,7 @@ def make_db(tmp_path):
     return conn
 
 
-def add_embedded_solution(conn, number, vector):
+def add_embedded_solution(conn, number, vector, pattern="test-pattern"):
     if not conn.execute("SELECT 1 FROM problems WHERE number = ?", (number,)).fetchone():
         conn.execute(
             "INSERT INTO problems (number, slug, title, difficulty) VALUES (?, ?, ?, 'Easy')",
@@ -24,6 +24,7 @@ def add_embedded_solution(conn, number, vector):
         "INSERT INTO solutions (problem_number, code, created_at) VALUES (?, 'c', '2026-01-01')",
         (number,),
     ).lastrowid
+    conn.execute("INSERT INTO enrichments (solution_id, pattern) VALUES (?, ?)", (solution_id, pattern))
     embed.store(conn, solution_id, vector)
 
 
@@ -62,3 +63,20 @@ def test_search_dedupes_multiple_solutions_per_problem(tmp_path):
     results = embed.search(conn, unit(1, 0), top_k=5)
     assert [number for number, _ in results] == [1, 2]
     assert results[0][1] == 1.0  # best of problem 1's two vectors, not the average
+
+
+def test_search_filters_by_pattern(tmp_path):
+    conn = make_db(tmp_path)
+    add_embedded_solution(conn, 1, unit(1, 0), pattern="hashmap")
+    add_embedded_solution(conn, 2, unit(0.9, 0.4), pattern="two-pointers")
+
+    results = embed.search(conn, unit(1, 0), top_k=5, pattern="hashmap")
+    assert [number for number, _ in results] == [1]
+
+
+def test_search_with_pattern_finds_nothing_outside_it(tmp_path):
+    conn = make_db(tmp_path)
+    add_embedded_solution(conn, 1, unit(1, 0), pattern="hashmap")
+
+    results = embed.search(conn, unit(1, 0), top_k=5, exclude_problem=1, pattern="hashmap")
+    assert results == []

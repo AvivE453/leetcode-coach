@@ -13,6 +13,7 @@ CODE = "class Solution:\n    def twoSum(self, nums, target):\n        return []\
 ENRICHMENT = enrich.Enrichment(
     pattern="hashmap",
     intended_pattern="hashmap",
+    intended_secondary_patterns=["two-pointers"],
     secondary_patterns=[],
     data_structures=["dict"],
     key_trick="Store complements while scanning once.",
@@ -59,7 +60,6 @@ def client(tmp_path, monkeypatch):
     """A TestClient bound to a scratch database - never data/coach.db."""
     monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "coach.db")
-    monkeypatch.setattr(config, "SOLUTIONS_DIR", tmp_path / "solutions")
     monkeypatch.setattr(config, "REPORTS_DIR", tmp_path / "reports")
     conn = db.connect()
     db.init_schema(conn)
@@ -92,7 +92,6 @@ def test_log_endpoint_stores_and_enriches(client, monkeypatch):
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["title"] == "Two Sum"
-    assert body["solution_file"] == "0001-two-sum.py"
     assert body["enrichment"]["status"] == "ok"
     assert body["enrichment"]["pattern"] == "hashmap"
     assert body["enrichment"]["off_pattern"] is False
@@ -110,6 +109,30 @@ def test_log_endpoint_flags_off_pattern_solves(client, monkeypatch):
 
     assert body["enrichment"]["off_pattern"] is True
     assert body["enrichment"]["intended_pattern"] == "dp-1d"
+    assert body["enrichment"]["intended_secondary_patterns"] == ["two-pointers"]
+    assert body["enrichment"]["also_solvable_with"] == ["dp-1d", "two-pointers"]
+
+
+def test_log_endpoint_accepts_a_canonical_alternate_approach(client, monkeypatch):
+    """An alternate canonical route is not off-pattern, but the unused central
+    approach is still worth mentioning."""
+    enriched(monkeypatch, pattern="two-pointers", intended_pattern="hashmap")
+
+    body = client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE}).json()
+
+    assert body["enrichment"]["off_pattern"] is False
+    assert body["enrichment"]["also_solvable_with"] == ["hashmap"]
+
+
+def test_solution_history_endpoint_carries_the_canonical_note(client, monkeypatch):
+    enriched(monkeypatch)
+    client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
+
+    body = client.get("/api/solutions/1").json()
+
+    assert body["intended_secondary_patterns"] == ["two-pointers"]
+    assert body["solves"][0]["also_solvable_with"] == ["two-pointers"]
+    assert body["solves"][0]["secondary_patterns"] == []
 
 
 def test_log_endpoint_degrades_without_an_api_key(client):
@@ -179,12 +202,12 @@ def test_log_endpoint_rejects_unknown_problem_and_empty_code(client):
     assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 0
 
 
-def test_patterns_endpoint_feeds_the_bubble_map(client, monkeypatch):
+def test_patterns_endpoint_feeds_the_pattern_table(client, monkeypatch):
     enriched(monkeypatch)
     client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
     client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
 
-    # two attempts on one problem is still one bubble unit
+    # two attempts on one problem is still one solved unit
     assert client.get("/api/patterns").json() == {"patterns": [{"pattern": "hashmap", "solved": 1}]}
 
 
@@ -371,4 +394,3 @@ def test_pages_are_served(client):
     assert client.get("/static/home.js").status_code == 200
     assert client.get("/static/solutions.js").status_code == 200
     assert client.get("/static/weekly.js").status_code == 200
-    assert client.get("/static/vendor/d3-hierarchy.v3.min.js").status_code == 200

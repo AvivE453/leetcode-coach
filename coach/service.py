@@ -5,12 +5,12 @@ returns data. No printing, no typer, no HTTP. `coach/cli.py` wraps these in
 `typer.echo` calls; `coach/web/app.py` serialises them to JSON.
 """
 
+import json
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from pathlib import Path
 
-from coach import config, curriculum, embed, enrich, llm, mastery, scheduler
+from coach import curriculum, embed, enrich, llm, mastery, scheduler
 from coach import review as review_llm
 from coach.weekly import analyze as weekly_analyze
 
@@ -32,7 +32,6 @@ class LogResult:
     outcome: str
     minutes: int | None
     solution_id: int
-    path: Path
     next_due: date
 
 
@@ -58,7 +57,9 @@ class EnrichResult:
     secondary_patterns: list[str] = field(default_factory=list)
     key_trick: str | None = None
     intended_pattern: str | None = None
+    intended_secondary_patterns: list[str] = field(default_factory=list)
     off_pattern: bool = False
+    also_solvable_with: list[str] = field(default_factory=list)
     neighbors: list[Neighbor] = field(default_factory=list)
     skipped: str | None = None
     embed_skipped: str | None = None
@@ -93,24 +94,21 @@ def get_problem(conn: sqlite3.Connection, number: int) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM problems WHERE number = ?", (number,)).fetchone()
 
 
-def solution_path(problem: sqlite3.Row) -> Path:
-    return config.SOLUTIONS_DIR / f"{problem['number']:04d}-{problem['slug']}.py"
+def json_list(raw: str | None) -> list[str]:
+    return json.loads(raw) if raw else []
 
 
-def append_to_solution_file(
-    problem: sqlite3.Row, code: str, today: str, outcome: str, minutes: int | None
-) -> Path:
-    config.SOLUTIONS_DIR.mkdir(parents=True, exist_ok=True)
-    path = solution_path(problem)
-    if not path.exists():
-        path.write_text(
-            f"# {problem['number']}. {problem['title']}\n"
-            f"# https://leetcode.com/problems/{problem['slug']}/\n"
-        )
-    header = f"\n# --- {today} · {outcome}" + (f" · {minutes}m" if minutes else "") + "\n"
-    with path.open("a") as f:
-        f.write(header + code.rstrip() + "\n")
-    return path
+def problem_canonical(problem) -> tuple[str | None, list[str]]:
+    """A problem row's canonical approaches: (intended, intended_secondary).
+
+    Tolerates a row from before the column existed, so a caller holding an old
+    query result still gets the single-pattern behaviour rather than an error.
+    """
+    try:
+        secondary = json_list(problem["intended_secondary_patterns"])
+    except (IndexError, KeyError):
+        secondary = []
+    return problem["intended_pattern"], secondary
 
 
 def update_review_state(
@@ -156,7 +154,7 @@ def log_solve(
     note: str | None = None,
     today: date | None = None,
 ) -> LogResult:
-    """Store an attempt + solution, append to the solution file, reschedule."""
+    """Store an attempt + solution and reschedule its review."""
     problem = get_problem(conn, number)
     if problem is None:
         raise ProblemNotFound(number)
@@ -169,10 +167,9 @@ def log_solve(
         "INSERT INTO attempts (problem_number, date, outcome, minutes, note) VALUES (?, ?, ?, ?, ?)",
         (number, today.isoformat(), outcome, minutes, note),
     )
-    path = append_to_solution_file(problem, code, today.isoformat(), outcome, minutes)
     solution_id = conn.execute(
-        "INSERT INTO solutions (problem_number, attempt_id, code, created_at, file_path) VALUES (?, ?, ?, ?, ?)",
-        (number, cursor.lastrowid, code, today.isoformat(), str(path.relative_to(config.PROJECT_ROOT))),
+        "INSERT INTO solutions (problem_number, attempt_id, code, created_at) VALUES (?, ?, ?, ?)",
+        (number, cursor.lastrowid, code, today.isoformat()),
     ).lastrowid
     state = update_review_state(conn, number, outcome, today)
     conn.commit()
@@ -183,7 +180,6 @@ def log_solve(
         outcome=outcome,
         minutes=minutes,
         solution_id=solution_id,
-        path=path,
         next_due=state.next_due,
     )
 
@@ -230,37 +226,44 @@ def enrich_solution_now(
         return EnrichResult(skipped=str(exc))
 
     enrich.save(conn, solution_id, e)
-    enrich.save_intended(conn, problem["number"], e.intended_pattern)
+    enrich.save_intended(
+        conn, problem["number"], e.intended_pattern, list(e.intended_secondary_patterns)
+    )
     conn.commit()
     # The pattern only exists now, so this is the first moment the solve can be
     # scored - and pattern_standing() below reads what this writes.
     mastery.recompute_all(conn)
-    off_pattern = e.intended_pattern != e.pattern and e.intended_pattern not in e.secondary_patterns
+
+    # canonical[0] is intended_pattern; the rest are the alternates, deduplicated
+    # exactly as save_intended stored them, so response and database agree.
+    canonical = enrich.canonical_patterns(e.intended_pattern, list(e.intended_secondary_patterns))
+    intended_secondary = canonical[1:]
+    # Two signals off one free set comparison: off_pattern is the sharp one (no
+    # canonical approach used at all), also_solvable_with is informational.
+    tagged = {
+        "pattern": e.pattern,
+        "secondary_patterns": list(e.secondary_patterns),
+        "key_trick": e.key_trick,
+        "intended_pattern": e.intended_pattern,
+        "intended_secondary_patterns": intended_secondary,
+        "off_pattern": enrich.off_pattern(
+            e.pattern, e.secondary_patterns, e.intended_pattern, intended_secondary
+        ),
+        "also_solvable_with": enrich.unused_canonical(
+            e.pattern, e.secondary_patterns, e.intended_pattern, intended_secondary
+        ),
+    }
 
     try:
         vector = embed.encode([embed.card_text(problem["title"], e.pattern, e.key_trick, code)])[0]
     except embed.EmbeddingsUnavailable as exc:
-        return EnrichResult(
-            pattern=e.pattern,
-            secondary_patterns=list(e.secondary_patterns),
-            key_trick=e.key_trick,
-            intended_pattern=e.intended_pattern,
-            off_pattern=off_pattern,
-            embed_skipped=str(exc),
-        )
+        return EnrichResult(**tagged, embed_skipped=str(exc))
 
     embed.store(conn, solution_id, vector)
     conn.commit()
-    hits = embed.search(conn, vector, top_k=3, exclude_problem=problem["number"])
+    hits = embed.search(conn, vector, top_k=3, exclude_problem=problem["number"], pattern=e.pattern)
 
-    return EnrichResult(
-        pattern=e.pattern,
-        secondary_patterns=list(e.secondary_patterns),
-        key_trick=e.key_trick,
-        intended_pattern=e.intended_pattern,
-        off_pattern=off_pattern,
-        neighbors=neighbor_details(conn, hits),
-    )
+    return EnrichResult(**tagged, neighbors=neighbor_details(conn, hits))
 
 
 def review_solution_now(
@@ -291,6 +294,24 @@ def review_solution_now(
     # it belongs to - the whole reason scores are replayed rather than updated.
     mastery.recompute_all(conn)
     return ReviewResult(review=r)
+
+
+def also_solvable_with(conn: sqlite3.Connection, solution_id: int, problem) -> list[str]:
+    """Canonical approaches one stored solve did not use.
+
+    Computed on read, never stored, so the note stays correct if the problem's
+    canonical set widens later. Empty when the solve was never enriched.
+    """
+    row = conn.execute(
+        "SELECT pattern, secondary_patterns FROM enrichments WHERE solution_id = ?",
+        (solution_id,),
+    ).fetchone()
+    if row is None:
+        return []
+    intended, intended_secondary = problem_canonical(problem)
+    return enrich.unused_canonical(
+        row["pattern"], json_list(row["secondary_patterns"]), intended, intended_secondary
+    )
 
 
 def pattern_standing(
@@ -440,9 +461,10 @@ def solution_history(conn: sqlite3.Connection, number: int) -> dict:
         raise ProblemNotFound(number)
     rows = conn.execute(
         """
-        SELECT s.id, s.code, s.created_at, s.file_path,
+        SELECT s.id, s.code, s.created_at,
                a.outcome, a.minutes, a.note,
-               en.pattern, en.key_trick, en.time_complexity, en.space_complexity
+               en.pattern, en.secondary_patterns, en.key_trick,
+               en.time_complexity, en.space_complexity
         FROM solutions s
         LEFT JOIN attempts a ON a.id = s.attempt_id
         LEFT JOIN enrichments en ON en.solution_id = s.id
@@ -451,9 +473,18 @@ def solution_history(conn: sqlite3.Connection, number: int) -> dict:
         """,
         (number,),
     ).fetchall()
+    intended, intended_secondary = problem_canonical(problem)
     solves = []
     for r in rows:
         solve = dict(r)
+        solve["secondary_patterns"] = json_list(r["secondary_patterns"])
+        solve["also_solvable_with"] = (
+            enrich.unused_canonical(
+                r["pattern"], solve["secondary_patterns"], intended, intended_secondary
+            )
+            if r["pattern"]
+            else []
+        )
         stored = review_llm.load(conn, r["id"])
         solve["review"] = review_payload(stored) if stored else None
         solves.append(solve)
@@ -462,25 +493,34 @@ def solution_history(conn: sqlite3.Connection, number: int) -> dict:
         "title": problem["title"],
         "difficulty": problem["difficulty"],
         "slug": problem["slug"],
-        "intended_pattern": problem["intended_pattern"],
+        "intended_pattern": intended,
+        "intended_secondary_patterns": intended_secondary,
         "solves": solves,
     }
 
 
 def pattern_counts(conn: sqlite3.Connection) -> list[dict]:
-    """Distinct solved problems per pattern, from each problem's latest enriched
-    solution — the bubble map's sizes."""
+    """Distinct solved problems per pattern — the home page's pattern table.
+
+    A problem counts once under every pattern it was ever practiced with, primary
+    or secondary, across all of its solves: solving one problem two ways credits
+    both patterns, and re-solving the same way twice still credits it once. The
+    inner UNION deduplicates (problem, pattern) pairs before they are counted.
+    """
     rows = conn.execute(
         """
-        SELECT en.pattern, COUNT(*) AS solved
+        SELECT pattern, COUNT(DISTINCT problem_number) AS solved
         FROM (
-            SELECT s.problem_number, MAX(s.id) AS solution_id
-            FROM solutions s JOIN enrichments e ON e.solution_id = s.id
-            GROUP BY s.problem_number
-        ) latest
-        JOIN enrichments en ON en.solution_id = latest.solution_id
-        GROUP BY en.pattern
-        ORDER BY solved DESC, en.pattern
+            SELECT s.problem_number, en.pattern AS pattern
+            FROM solutions s JOIN enrichments en ON en.solution_id = s.id
+            UNION
+            SELECT s.problem_number, j.value AS pattern
+            FROM solutions s
+            JOIN enrichments en ON en.solution_id = s.id,
+                 json_each(en.secondary_patterns) j
+        )
+        GROUP BY pattern
+        ORDER BY solved DESC, pattern
         """
     ).fetchall()
     return [{"pattern": r["pattern"], "solved": r["solved"]} for r in rows]

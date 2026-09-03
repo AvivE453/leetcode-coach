@@ -27,7 +27,6 @@ flowchart TB
     subgraph state ["Committed state"]
         direction LR
         db[("data/coach.db<br/>SQLite")]
-        files["solutions/NNNN-slug.py"]
     end
 
     subgraph weeklyp ["coach weekly — deterministic pipeline"]
@@ -37,7 +36,6 @@ flowchart TB
 
     api{{"Claude API<br/>structured outputs"}}
 
-    paste --> files
     sm2 --> db
     enr --> db
     emb --> db
@@ -68,7 +66,7 @@ of them degrades to a working non-LLM path when the API is unavailable.
 | `coach stats` | Pattern coverage, mastery scores, struggle rates, off-pattern solves, curriculum progress |
 | `coach weekly` | Writes `reports/YYYY-WW.md`: the week, the diagnosis, and next week's plan |
 | `coach enrich` | Backfills tags and embeddings for anything logged while offline |
-| `coach-web` | The same data in a browser: progress, a bubble map of your practiced patterns, a form to log a solve, the weekly plan, and last week's coach's note |
+| `coach-web` | The same data in a browser: progress, a table of your practiced patterns, a form to log a solve, the weekly plan, and last week's coach's note |
 
 ---
 
@@ -81,10 +79,10 @@ uv run coach-web        # http://127.0.0.1:8000
 
 Four pages, no build step — FastAPI serving plain HTML/CSS/JS:
 
-- **Home** — solved count, reviews due, clean-solve rate, curriculum progress; a circle-packed
-  bubble map with one bubble per pattern, sized by how many distinct problems you have solved
-  that way (with a table view of the same numbers); and an *I solved a question* form that runs
-  the exact `coach log` code path — attempt, solution file, SM-2 reschedule, tagging, embedding,
+- **Home** — solved count, reviews due, clean-solve rate, curriculum progress; a table of
+  distinct problems solved per pattern (a problem counts under *every* pattern you have
+  practised it with, so solving one problem two ways credits both); and an *I solved a question*
+  form that runs the exact `coach log` code path — attempt, SM-2 reschedule, tagging, embedding,
   similar-solve lookup, the off-pattern notice, and where that pattern now stands.
 - **Solutions** — every problem you have logged, newest first; open one to read each solve's code
   exactly as you pasted it, with its outcome, timing, pattern and complexity. Each solve can carry
@@ -94,9 +92,11 @@ Four pages, no build step — FastAPI serving plain HTML/CSS/JS:
 - **Weekly Plan** — this week's focus topics (weak patterns, stale patterns, off-pattern solves)
   and the planned problems in priority order, each with the reason it was picked. Recomputed live
   and read-only: unlike `coach weekly` it writes no report and records no run.
-- **Weekly Review** — the coach's note from the last `coach weekly` run, with the snapshot it was
-  written against. Frozen rather than live: the paragraph was paid for once when the report was
-  generated, so this page reads it back and never calls the API.
+- **Weekly Review** — the coach's note from the last `coach weekly` run, plus the full picture it
+  was written against: that week's attempts, the per-pattern table, off-pattern solves, curriculum
+  progress, and the plan itself — the same detail as `reports/YYYY-WW.md`, not a thinner summary
+  of it. Frozen rather than live: all of it was computed once when the report was generated, so
+  this page reads it back and never calls the API.
 
 The CLI and the web UI share one implementation ([`coach/service.py`](coach/service.py)); the web
 layer only translates it to JSON. Degradation is the same too — with no API key a solve still
@@ -119,6 +119,18 @@ planner would never schedule the one thing you most need to learn. The **disagre
 between the layers** is the useful signal: it marks a problem you solved without
 learning what it teaches, and the planner forces a re-solve.
 
+**A problem can have more than one canonical approach.**
+Best Time to Buy and Sell Stock is a one-pass greedy *and* a textbook 1-D DP; solving it
+either way is solving it properly. So a problem carries `intended_secondary_patterns`
+alongside its central `intended_pattern`, and the two feed two different signals. The
+sharp one, *off-pattern*, now fires only when a solve used **none** of the accepted
+approaches — no more forced re-solves for taking the other legitimate route. The soft one
+is a note ("this problem can also be solved with: dp-1d") shown on every solve, off-pattern
+or not, that lists the canonical approaches you have not practised here. It costs nothing:
+both are set arithmetic over columns the enrichment call already filled in. Because it is
+computed when you look rather than frozen when the solve was stored, widening a problem's
+canonical set later widens the note on old solves too.
+
 **One mastery score per pattern, not a struggle rate.**
 "Weak" used to mean *at least half the attempts were not clean* — a binary that read five
 shaky-but-solved sweeps exactly like five failures. It now means a mastery score below
@@ -130,6 +142,14 @@ can feel clean and still carry a bug. Scores fold through an exponential moving 
 (α = 0.2), so recent solves move the number without erasing history, and the table is
 rebuilt by replaying attempts rather than updated in place — a review usually arrives days
 after the solve it judges, and replay is what lets it count.
+
+**No per-problem file mirror.** Early versions also wrote each solve to
+`solutions/NNNN-slug.py`, so the repo doubled as a browsable archive without needing to
+open the database. It was removed once it became clear nothing in the application ever
+read those files back — `coach.db` already stores every attempt in full, not just the
+latest, so the mirror was pure duplication, kept alive only for a reader outside the
+tool (git, GitHub, a human). That's a real audience, but not one worth writing every
+solve to disk twice for; `coach.db` is the only copy now.
 
 **A controlled vocabulary of 26 patterns, enforced as a type.**
 The model picks from an enum, so tags can never fragment into `dp`/`DP`/`dynamic
@@ -212,7 +232,7 @@ with a label and the disagreement turned out to be its point:
 
 | Eval | Result |
 |---|---|
-| `intended_pattern` vs NeetCode's published Blind 75 sections | **100%** (29 problems) |
+| `intended_pattern` vs NeetCode's published Blind 75 sections (measured on `enrich-v2`) | **100%** (29 problems) |
 | Retrieval recall@5 — enriched cards | **64%** |
 | Retrieval recall@5 — raw code | 60% |
 
@@ -259,9 +279,9 @@ itself uses; pass `--model` to score a different one. Responses cache by prompt 
 model, and code digest, so a repeat run costs nothing and correcting a *label* re-scores
 for free.
 
-The database starts empty and grows from your first `coach log`. `data/coach.db` and
-`solutions/` are committed on purpose: the state travels with the repo, and the commit
-history doubles as the solve timeline.
+The database starts empty and grows from your first `coach log`. `data/coach.db` is
+committed on purpose: the state travels with the repo, and the commit history doubles
+as the solve timeline.
 
 ---
 

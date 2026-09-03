@@ -81,24 +81,16 @@
     <section>
       <div class="section-head">
         <div>
-          <h2 id="bubbles-heading">Patterns you have practiced</h2>
-          <p class="hint">One bubble per pattern, sized by how many distinct problems you have solved with it.</p>
+          <h2 id="patterns-heading">Patterns you have practiced</h2>
+          <p class="hint">Distinct problems solved per pattern.</p>
         </div>
-        <button class="btn ghost" id="view-toggle" aria-expanded="false" aria-controls="pattern-table">
-          Show as table
-        </button>
       </div>
 
-      <div class="bubbles" id="bubbles" aria-describedby="bubbles-heading">
-        <p class="loading" id="bubbles-empty">Loading patterns…</p>
-      </div>
-
-      <div class="card" id="pattern-table" hidden></div>
+      <div class="card" id="pattern-table" aria-describedby="patterns-heading"></div>
     </section>
   </main>
 </div>
 
-<script src="/static/vendor/d3-hierarchy.v3.min.js"></script>
 <script src="/static/home.js"></script>
 </body>
 </html>

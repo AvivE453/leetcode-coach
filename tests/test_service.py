@@ -11,6 +11,9 @@ CODE = "class Solution:\n    def twoSum(self, nums, target):\n        return []\
 ENRICHMENT = enrich.Enrichment(
     pattern="hashmap",
     intended_pattern="hashmap",
+    # Two Sum really does have a second canonical route (sort + two-pointers), so
+    # every fixture carries one - the empty case would not exercise much.
+    intended_secondary_patterns=["two-pointers"],
     secondary_patterns=[],
     data_structures=["dict"],
     key_trick="Store complements while scanning once.",
@@ -37,7 +40,6 @@ def fake_encode(texts):
 def setup_env(tmp_path, monkeypatch, problems=None):
     monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "coach.db")
-    monkeypatch.setattr(config, "SOLUTIONS_DIR", tmp_path / "solutions")
     monkeypatch.setattr(config, "REPORTS_DIR", tmp_path / "reports")
     conn = db.connect()
     db.init_schema(conn)
@@ -58,14 +60,13 @@ def setup_env(tmp_path, monkeypatch, problems=None):
     return conn
 
 
-def test_log_solve_writes_attempt_solution_file_and_schedule(tmp_path, monkeypatch):
+def test_log_solve_stores_attempt_solution_and_schedule(tmp_path, monkeypatch):
     conn = setup_env(tmp_path, monkeypatch)
 
     result = service.log_solve(conn, 1, "struggled", CODE, minutes=25, today=date(2026, 9, 1))
 
     assert result.title == "Two Sum"
     assert result.next_due == date(2026, 9, 2)
-    assert result.path.read_text().count("# ---") == 1
     assert conn.execute("SELECT minutes FROM attempts").fetchone()["minutes"] == 25
     assert conn.execute("SELECT code FROM solutions").fetchone()["code"].startswith("class Solution")
 
@@ -125,18 +126,73 @@ def test_enrich_solution_now_flags_off_pattern(tmp_path, monkeypatch):
     assert conn.execute("SELECT intended_pattern FROM problems").fetchone()[0] == "dp-1d"
 
 
-def test_pattern_counts_uses_the_latest_solution_per_problem(tmp_path, monkeypatch):
+def test_enrich_solution_now_accepts_a_canonical_alternate_approach(tmp_path, monkeypatch):
+    """The whole point of intended_secondary_patterns: a different but still
+    canonical route is not off-pattern, and earns no forced re-solve."""
+    conn = setup_env(tmp_path, monkeypatch)
+    alternate = ENRICHMENT.model_copy(update={"pattern": "two-pointers"})
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: alternate)
+    monkeypatch.setattr("coach.embed.encode", fake_encode)
+    result = service.log_solve(conn, 1, "clean", CODE)
+
+    e = service.enrich_solution_now(conn, result.solution_id, service.get_problem(conn, 1), CODE)
+
+    assert e.off_pattern is False
+    # the note still points at the approach that went unpractised
+    assert e.also_solvable_with == ["hashmap"]
+    assert e.intended_secondary_patterns == ["two-pointers"]
+    assert enrich.off_pattern_problems(conn) == []
+
+
+def test_enrich_solution_now_carries_both_signals_when_embedding_fails(tmp_path, monkeypatch):
+    """The early return path must not drop the new fields."""
+    conn = setup_env(tmp_path, monkeypatch)
+    off = ENRICHMENT.model_copy(update={"pattern": "prefix-sum", "intended_pattern": "dp-1d"})
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: off)
+    monkeypatch.setattr(
+        "coach.embed.encode",
+        lambda texts: (_ for _ in ()).throw(embed.EmbeddingsUnavailable("no model")),
+    )
+    result = service.log_solve(conn, 1, "clean", CODE)
+
+    e = service.enrich_solution_now(conn, result.solution_id, service.get_problem(conn, 1), CODE)
+
+    assert e.embed_skipped
+    assert e.off_pattern is True
+    assert e.also_solvable_with == ["dp-1d", "two-pointers"]
+    assert e.intended_secondary_patterns == ["two-pointers"]
+
+
+def test_pattern_counts_credits_every_pattern_a_problem_was_practiced_with(tmp_path, monkeypatch):
     conn = setup_env(tmp_path, monkeypatch)
     monkeypatch.setattr("coach.embed.encode", fake_encode)
 
-    # same problem solved twice, the second time with a different approach
-    for pattern in ("prefix-sum", "hashmap"):
+    # one problem solved three times: two approaches, the second one repeated
+    for pattern in ("prefix-sum", "hashmap", "hashmap"):
         e = ENRICHMENT.model_copy(update={"pattern": pattern})
         monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, _e=e, **kw: _e)
         r = service.log_solve(conn, 1, "clean", CODE)
         service.enrich_solution_now(conn, r.solution_id, service.get_problem(conn, 1), CODE)
 
-    assert service.pattern_counts(conn) == [{"pattern": "hashmap", "solved": 1}]
+    # both approaches counted, and the repeated one still counts once
+    assert service.pattern_counts(conn) == [
+        {"pattern": "hashmap", "solved": 1},
+        {"pattern": "prefix-sum", "solved": 1},
+    ]
+
+
+def test_pattern_counts_includes_a_solutions_secondary_patterns(tmp_path, monkeypatch):
+    conn = setup_env(tmp_path, monkeypatch)
+    monkeypatch.setattr("coach.embed.encode", fake_encode)
+    e = ENRICHMENT.model_copy(update={"secondary_patterns": ["two-pointers"]})
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: e)
+    r = service.log_solve(conn, 1, "clean", CODE)
+    service.enrich_solution_now(conn, r.solution_id, service.get_problem(conn, 1), CODE)
+
+    assert service.pattern_counts(conn) == [
+        {"pattern": "hashmap", "solved": 1},
+        {"pattern": "two-pointers", "solved": 1},
+    ]
 
 
 def log_and_enrich(conn, monkeypatch, outcome, pattern="hashmap"):
@@ -270,6 +326,32 @@ def test_solution_history_returns_every_solve_newest_first(tmp_path, monkeypatch
     assert history["solves"][1]["code"] == "first attempt"
     assert history["solves"][0]["pattern"] == "hashmap"
     assert history["solves"][1]["pattern"] is None  # logged before enrichment ran
+
+
+def test_solution_history_notes_the_canonical_approaches_not_used(tmp_path, monkeypatch):
+    """Computed per load rather than frozen, so widening the problem's canonical
+    set later widens the note on solves that were stored before it."""
+    conn = setup_env(tmp_path, monkeypatch)
+    service.log_solve(conn, 1, "failed", "first attempt\n")  # never enriched
+    log_and_enrich(conn, monkeypatch, "clean")
+
+    solves = service.solution_history(conn, 1)["solves"]
+    assert solves[0]["also_solvable_with"] == ["two-pointers"]
+    assert solves[1]["also_solvable_with"] == []  # no pattern to compare against
+
+    enrich.save_intended(conn, 1, "hashmap", ["two-pointers", "binary-search"])
+    conn.commit()
+    history = service.solution_history(conn, 1)
+    assert history["solves"][0]["also_solvable_with"] == ["two-pointers", "binary-search"]
+    assert history["intended_secondary_patterns"] == ["two-pointers", "binary-search"]
+
+
+def test_also_solvable_with_is_empty_for_an_unenriched_solve(tmp_path, monkeypatch):
+    conn = setup_env(tmp_path, monkeypatch)
+    result = service.log_solve(conn, 1, "failed", CODE)
+
+    problem = service.get_problem(conn, 1)
+    assert service.also_solvable_with(conn, result.solution_id, problem) == []
 
 
 def test_solution_history_rejects_an_unknown_problem(tmp_path, monkeypatch):

@@ -207,6 +207,9 @@ def review_safe_enrich(row, code, model) -> dict:
     return {
         "pattern": e.pattern,
         "intended_pattern": e.intended_pattern,
+        # Recorded but not scored: enrich-v3 added it, and the corpus labels only
+        # cover the central intended_pattern (see RESULTS.md).
+        "intended_secondary_patterns": e.intended_secondary_patterns,
         "secondary_patterns": e.secondary_patterns,
         "key_trick": e.key_trick,
         "time_complexity": e.time_complexity,

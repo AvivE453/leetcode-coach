@@ -1,8 +1,4 @@
-/* Home page: progress numbers, the pattern bubble map, and the log form. */
-
-const SVG_NS = "http://www.w3.org/2000/svg";
-const W = 900;
-const H = 520;
+/* Home page: progress numbers, the pattern table, and the log form. */
 
 function el(tag, props = {}, children = []) {
   const node = document.createElement(tag);
@@ -12,13 +8,6 @@ function el(tag, props = {}, children = []) {
     else if (v !== null && v !== undefined) node.setAttribute(k, v);
   }
   for (const child of children) node.append(child);
-  return node;
-}
-
-function svg(tag, attrs = {}, text = null) {
-  const node = document.createElementNS(SVG_NS, tag);
-  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
-  if (text !== null) node.textContent = text;
   return node;
 }
 
@@ -64,50 +53,10 @@ function statCard(label, value, note) {
   ]);
 }
 
-/* ---------- bubble map ---------- */
+/* ---------- pattern table ---------- */
 
-function bubbleFill(value, max) {
-  // Darker blue for rarely practiced patterns, brighter for the well-worn ones.
-  const t = max > 1 ? (value - 1) / (max - 1) : 1;
-  const from = [30, 58, 138];   // #1e3a8a
-  const to = [59, 130, 246];    // #3b82f6
-  const mix = from.map((c, i) => Math.round(c + (to[i] - c) * t));
-  return `rgb(${mix.join(",")})`;
-}
-
-function labelLines(d, r) {
-  /* Whole pattern name or nothing: a truncated "binary" or "dp" would read as a
-     different pattern. One hyphen-separated word per line, sized to fit the
-     widest one, with the count underneath when there is room. */
-  const words = d.pattern.split("-");
-  const longest = Math.max(...words.map((w) => w.length));
-  const size = Math.min(
-    (1.45 * r) / (0.58 * longest),      // widest word inside the circle
-    (1.5 * r) / (1.15 * (words.length + 1)),  // words + the count line
-    19
-  );
-  if (size < 9) return [];  // too small to read - the title and table still carry it
-
-  const showCount = size >= 11;
-  const rows = showCount ? words.length + 1 : words.length;
-  let y = (-(rows - 1) * size * 1.15) / 2;
-
-  const lines = words.map((word) => {
-    const t = svg("text", { y, "font-size": size.toFixed(1) }, word);
-    t.setAttribute("dominant-baseline", "middle");
-    y += size * 1.15;
-    return t;
-  });
-  if (showCount) {
-    const t = svg("text", { class: "count", y, "font-size": (size * 0.85).toFixed(1) }, String(d.solved));
-    t.setAttribute("dominant-baseline", "middle");
-    lines.push(t);
-  }
-  return lines;
-}
-
-function renderBubbles(patterns) {
-  const host = document.getElementById("bubbles");
+function renderPatternTable(patterns) {
+  const host = document.getElementById("pattern-table");
   host.replaceChildren();
 
   if (!patterns.length) {
@@ -118,52 +67,11 @@ function renderBubbles(patterns) {
     return;
   }
 
-  const root = d3.hierarchy({ children: patterns }).sum((d) => d.solved);
-  d3.pack().size([W, H]).padding(8)(root);
-  const leaves = root.leaves();
-  const max = Math.max(...patterns.map((p) => p.solved));
-
-  // Crop the viewBox to the packed circles so the card has no dead margin.
-  const pad = 10;
-  const minX = Math.min(...leaves.map((n) => n.x - n.r)) - pad;
-  const minY = Math.min(...leaves.map((n) => n.y - n.r)) - pad;
-  const maxX = Math.max(...leaves.map((n) => n.x + n.r)) + pad;
-  const maxY = Math.max(...leaves.map((n) => n.y + n.r)) + pad;
-
-  const chart = svg("svg", {
-    viewBox: `${minX} ${minY} ${maxX - minX} ${maxY - minY}`,
-    role: "list",
-    "aria-label": `${patterns.length} practiced patterns, sized by problems solved`,
-  });
-
-  for (const node of leaves) {
-    const d = node.data;
-    const g = svg("g", {
-      class: "bubble",
-      role: "listitem",
-      tabindex: "0",
-      transform: `translate(${node.x},${node.y})`,
-      "aria-label": `${d.pattern}: ${d.solved} problem${d.solved === 1 ? "" : "s"} solved`,
-    });
-    const circle = svg("circle", { r: node.r });
-    circle.style.fill = bubbleFill(d.solved, max);
-    g.append(circle);
-    g.append(svg("title", {}, `${d.pattern} — ${d.solved} solved`));
-    for (const line of labelLines(d, node.r)) g.append(line);
-    chart.append(g);
-  }
-  host.append(chart);
-}
-
-function renderPatternTable(patterns) {
-  const host = document.getElementById("pattern-table");
-  host.replaceChildren();
   const rows = patterns.map((p) =>
     el("tr", {}, [el("td", { text: p.pattern }), el("td", { text: String(p.solved) })])
   );
   host.append(
     el("table", {}, [
-      el("caption", { text: "The same data as the bubble map." }),
       el("thead", {}, [el("tr", {}, [el("th", { text: "Pattern" }), el("th", { text: "Problems solved" })])]),
       el("tbody", {}, rows),
     ])
@@ -212,7 +120,7 @@ function renderLogResult(data) {
   box.hidden = false;
 
   box.append(el("h3", { text: `Logged #${data.number} ${data.title} (${data.outcome})` }));
-  box.append(el("p", { text: `Next review: ${data.next_due} · saved to ${data.solution_file}` }));
+  box.append(el("p", { text: `Next review: ${data.next_due}` }));
 
   const e = data.enrichment;
   if (e.status === "skipped") {
@@ -243,16 +151,21 @@ function renderLogResult(data) {
       ])
     );
   }
+  if (e.also_solvable_with?.length) {
+    box.append(el("p", { class: "hint", text:
+      `This problem can also be solved with: ${e.also_solvable_with.join(", ")}` }));
+  }
   if (e.embedding_skipped) {
     box.append(el("p", { class: "hint", text: `Embedding skipped (${e.embedding_skipped})` }));
-  }
-  if (e.neighbors.length) {
+  } else if (e.neighbors.length) {
     box.append(el("p", { class: "hint", text: "Similar solved problems:" }));
     box.append(
       el("ul", {}, e.neighbors.map((n) =>
         el("li", { text: `#${n.number} ${n.title} [${n.difficulty}] — ${n.pattern || "untagged"}` })
       ))
     );
+  } else {
+    box.append(el("p", { class: "hint", text: `No other solved problems tagged as ${e.pattern} yet.` }));
   }
 }
 
@@ -305,7 +218,6 @@ async function submitLog(event) {
 async function refresh() {
   const [stats, patterns] = await Promise.all([getJSON("/api/stats"), getJSON("/api/patterns")]);
   renderStats(stats);
-  renderBubbles(patterns.patterns);
   renderPatternTable(patterns.patterns);
 }
 
@@ -317,17 +229,6 @@ function setup() {
     panel.hidden = !open;
     logToggle.setAttribute("aria-expanded", String(open));
     if (open) document.getElementById("number").focus();
-  });
-
-  const viewToggle = document.getElementById("view-toggle");
-  const table = document.getElementById("pattern-table");
-  const bubbles = document.getElementById("bubbles");
-  viewToggle.addEventListener("click", () => {
-    const showTable = table.hidden;
-    table.hidden = !showTable;
-    bubbles.hidden = showTable;
-    viewToggle.setAttribute("aria-expanded", String(showTable));
-    viewToggle.textContent = showTable ? "Show as bubbles" : "Show as table";
   });
 
   document.getElementById("log-form").addEventListener("submit", submitLog);

@@ -7,3 +7,4 @@ __pycache__/
 dist/
 evals/cache/
 CLAUDE.md
+data/coach.db

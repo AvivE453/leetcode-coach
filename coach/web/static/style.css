@@ -181,31 +181,7 @@ h2 { font-size: 1.08rem; margin: 0; letter-spacing: -0.01em; }
 }
 .btn.ghost:hover { color: var(--text); border-color: #35486e; }
 
-/* ---------- bubble map ---------- */
-
-.bubbles {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 8px;
-}
-
-/* The viewBox is cropped to the packed circles, so cap the drawn height -
-   without it a handful of bubbles would fill the whole screen. */
-.bubbles svg { width: 100%; height: auto; max-height: 440px; display: block; margin: 0 auto; }
-
-.bubble circle {
-  fill: var(--grad-fill, #2563eb);
-  stroke: rgba(147, 197, 253, 0.55);
-  stroke-width: 1;
-}
-.bubble:hover circle, .bubble:focus-visible circle { stroke: #bfdbfe; stroke-width: 2.5; }
-.bubble text { fill: #fff; text-anchor: middle; pointer-events: none; font-weight: 600; }
-.bubble .count { fill: #dbeafe; font-weight: 500; }
-.bubble:focus-visible { outline: none; }
-
 table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
-caption { text-align: left; color: var(--muted); font-size: 0.85rem; padding-bottom: 8px; }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
 th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; }
 
@@ -413,6 +389,14 @@ pre code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-siz
 .note-card .empty { color: var(--muted); margin: 0; }
 .note-card .hint { margin-top: 8px; }
 #counts { margin-bottom: 14px; }
+.subhead {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 22px 0 8px;
+}
 
 .sr-only {
   position: absolute;

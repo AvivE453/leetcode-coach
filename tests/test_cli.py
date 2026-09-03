@@ -15,7 +15,6 @@ CODE = "class Solution:\n    def twoSum(self, nums, target):\n        return []\
 def setup_env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "coach.db")
-    monkeypatch.setattr(config, "SOLUTIONS_DIR", tmp_path / "solutions")
     monkeypatch.setattr(config, "REPORTS_DIR", tmp_path / "reports")
     conn = db.connect()
     db.init_schema(conn)
@@ -53,12 +52,6 @@ def test_log_stores_attempt_solution_and_schedule(tmp_path, monkeypatch):
     state = conn.execute("SELECT * FROM review_state").fetchone()
     assert state["next_due"] == (date.today() + timedelta(days=1)).isoformat()
 
-    sol_file = tmp_path / "solutions" / "0001-two-sum.py"
-    assert sol_file.exists()
-    content = sol_file.read_text()
-    assert "# 1. Two Sum" in content
-    assert "twoSum" in content
-
 
 def test_second_solve_appends_and_advances_schedule(tmp_path, monkeypatch):
     setup_env(tmp_path, monkeypatch)
@@ -72,9 +65,6 @@ def test_second_solve_appends_and_advances_schedule(tmp_path, monkeypatch):
     state = conn.execute("SELECT * FROM review_state").fetchone()
     assert state["reps"] == 2
     assert state["interval_days"] == 6.0
-
-    content = (tmp_path / "solutions" / "0001-two-sum.py").read_text()
-    assert content.count("# ---") == 2
 
 
 def test_log_unknown_problem_fails(tmp_path, monkeypatch):
@@ -96,6 +86,7 @@ def test_log_empty_input_fails(tmp_path, monkeypatch):
 ENRICHMENT = enrich.Enrichment(
     pattern="hashmap",
     intended_pattern="hashmap",
+    intended_secondary_patterns=["two-pointers"],
     secondary_patterns=[],
     data_structures=["dict"],
     key_trick="Store complements while scanning once.",
@@ -156,10 +147,39 @@ def test_log_flags_off_pattern_solve(tmp_path, monkeypatch):
     result = runner.invoke(app, ["log", "1"], input=CODE)
     assert result.exit_code == 0, result.output
     assert "canonical approach is dp-1d" in result.output
+    # both signals speak when a solve is genuinely off-pattern: the warning names
+    # the central approach, the note lists every canonical route left unpractised
+    assert "This problem can also be solved with: dp-1d, two-pointers" in result.output
 
     conn = db.connect()
-    row = conn.execute("SELECT intended_pattern FROM problems WHERE number = 1").fetchone()
+    row = conn.execute("SELECT * FROM problems WHERE number = 1").fetchone()
     assert row["intended_pattern"] == "dp-1d"
+    assert json.loads(row["intended_secondary_patterns"]) == ["two-pointers"]
+
+
+def test_log_notes_other_canonical_approaches_without_warning(tmp_path, monkeypatch):
+    """A canonical solve is never flagged, but the road not taken is still shown."""
+    setup_env(tmp_path, monkeypatch)
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: ENRICHMENT)
+    monkeypatch.setattr("coach.embed.encode", fake_encode)
+
+    result = runner.invoke(app, ["log", "1"], input=CODE)
+    assert result.exit_code == 0, result.output
+    assert "This problem can also be solved with: two-pointers" in result.output
+    assert "canonical approach" not in result.output
+
+
+def test_review_notes_other_canonical_approaches(tmp_path, monkeypatch):
+    setup_env(tmp_path, monkeypatch)
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: ENRICHMENT)
+    monkeypatch.setattr("coach.embed.encode", fake_encode)
+    runner.invoke(app, ["log", "1"], input=CODE)
+
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: FEEDBACK)
+    result = runner.invoke(app, ["review", "1"])
+
+    assert result.exit_code == 0, result.output
+    assert "This problem can also be solved with: two-pointers" in result.output
 
 
 def test_log_withholds_a_standing_verdict_on_a_first_solve(tmp_path, monkeypatch):
@@ -280,6 +300,9 @@ def test_similar_by_number(tmp_path, monkeypatch):
             "INSERT INTO solutions (problem_number, code, created_at) VALUES (?, 'c', '2026-01-01')",
             (number,),
         ).lastrowid
+        conn.execute(
+            "INSERT INTO enrichments (solution_id, pattern) VALUES (?, 'hashmap')", (solution_id,)
+        )
         embed.store(conn, solution_id, np.array(vector, dtype=np.float32))
     conn.commit()
     conn.close()
@@ -366,9 +389,45 @@ def test_weekly_writes_report_and_records_run(tmp_path, monkeypatch):
     conn = db.connect()
     run = conn.execute("SELECT * FROM weekly_runs").fetchone()
     assert run["degraded"] == 0
-    assert json.loads(run["stats"])["attempts"] == 1
+    stats = json.loads(run["stats"])
+    assert stats["attempts"] == 1
     # Stored, not just written to the report - the web page reads it back for free.
     assert run["narrative"] == "Drill hashmap problems."
+
+    # The stored snapshot mirrors render()'s sections, not a thin summary of
+    # them - the /weekly page must be able to show the same depth as the .md.
+    assert stats["attempts_detail"] == [
+        {
+            "date": date.today().isoformat(),
+            "number": 1,
+            "title": "Two Sum",
+            "difficulty": "Easy",
+            "outcome": "struggled",
+            "minutes": None,
+            "pattern": "hashmap",
+        }
+    ]
+    assert stats["patterns"] == [
+        {"pattern": "hashmap", "attempts": 1, "struggle_rate": 1.0, "score": 3.0,
+         "weak": False, "stale": False}
+    ]
+    assert stats["curriculum"] == {
+        "blind75": {"done": 0, "total": 0},
+        "neetcode150": {"done": 0, "total": 0},
+    }
+    # A first "struggled" solve schedules its review 1 day out, which the 6-day
+    # lookahead in analyze() already treats as due - so the plan is that review.
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    assert stats["plan_items"] == [
+        {
+            "number": 1,
+            "slug": "two-sum",
+            "title": "Two Sum",
+            "difficulty": "Easy",
+            "reason": f"review due {tomorrow}",
+            "kind": "review",
+        }
+    ]
 
 
 def test_weekly_degrades_without_llm(tmp_path, monkeypatch):

@@ -1,4 +1,9 @@
-/* Weekly Review page: the last `coach weekly` run, frozen as it was written. */
+/* Weekly Review page: the last `coach weekly` run, frozen as it was written.
+
+Rows written before this depth existed only carry the thin fields (counts,
+weak/stale pattern names, pattern_scores, bare off-pattern numbers) - every
+section below falls back to exactly what it showed before rather than
+breaking, so an old run still renders correctly. */
 
 function el(tag, props = {}, children = []) {
   const node = document.createElement(tag);
@@ -26,6 +31,100 @@ function topicCard(title, hint, items, render) {
   }
   card.append(el("ul", {}, items.map(render)));
   return card;
+}
+
+function withScore(scores) {
+  /* Old-shape fallback: pattern name plus the score the run recorded, if any. */
+  return (pattern) =>
+    el("li", {
+      text: scores[pattern] === undefined ? pattern : `${pattern} — ${scores[pattern].toFixed(1)}/5`,
+    });
+}
+
+function offPatternItem(entry) {
+  /* New shape is {number, title, intended_pattern}; old rows stored bare numbers. */
+  if (entry !== null && typeof entry === "object") {
+    return el("li", { text: `#${entry.number} ${entry.title} → ${entry.intended_pattern}` });
+  }
+  return el("li", { text: `#${entry}` });
+}
+
+function weekTable(rows) {
+  return el("table", {}, [
+    el("thead", {}, [
+      el(
+        "tr",
+        {},
+        ["Date", "Problem", "Difficulty", "Outcome", "Minutes", "Pattern"].map((h) => el("th", { text: h }))
+      ),
+    ]),
+    el(
+      "tbody",
+      {},
+      rows.map((r) =>
+        el("tr", {}, [
+          el("td", { text: r.date }),
+          el("td", { text: `#${r.number} ${r.title}` }),
+          el("td", {}, [el("span", { class: `diff ${r.difficulty}`, text: r.difficulty })]),
+          el("td", { text: r.outcome }),
+          el("td", { text: r.minutes == null ? "" : String(r.minutes) }),
+          el("td", { text: r.pattern || "" }),
+        ])
+      )
+    ),
+  ]);
+}
+
+function patternsTable(patterns) {
+  return el("table", {}, [
+    el(
+      "thead",
+      {},
+      ["Pattern", "Attempts", "Struggle rate", "Mastery", "Flags"].map((h) => el("th", { text: h }))
+    ),
+    el(
+      "tbody",
+      {},
+      patterns.map((p) => {
+        const flags = [];
+        if (p.weak) flags.push("weak");
+        if (p.stale) flags.push("stale");
+        return el("tr", {}, [
+          el("td", { text: p.pattern }),
+          el("td", { text: String(p.attempts) }),
+          el("td", { text: `${Math.round(p.struggle_rate * 100)}%` }),
+          el("td", { text: p.score == null ? "—" : `${p.score.toFixed(1)}/5` }),
+          el("td", { text: flags.join(", ") }),
+        ]);
+      })
+    ),
+  ]);
+}
+
+function curriculumCard(curriculum) {
+  const entries = Object.entries(curriculum || {});
+  return topicCard(
+    "Curriculum",
+    "No curriculum progress recorded for this run.",
+    entries,
+    ([name, p]) => el("li", { text: `${name}: ${p.done}/${p.total}` })
+  );
+}
+
+function planItem(item) {
+  return el("li", {}, [
+    el("span", { class: "title" }, [
+      el("span", { class: "num", text: `#${item.number} ` }),
+      el("a", {
+        href: `https://leetcode.com/problems/${item.slug}/`,
+        target: "_blank",
+        rel: "noreferrer",
+        text: item.title,
+      }),
+    ]),
+    el("span", { class: `diff ${item.difficulty}`, text: item.difficulty }),
+    el("span", { class: `chip ${item.kind}`, text: item.reason }),
+  ]);
 }
 
 function renderEmpty() {
@@ -59,17 +158,8 @@ function renderNote(run) {
   document.getElementById("run-meta").textContent = meta.join(" · ");
 }
 
-function withScore(scores) {
-  /* Pattern name plus the mastery it had that week, when the run recorded one. */
-  return (pattern) =>
-    el("li", {
-      text: scores[pattern] === undefined ? pattern : `${pattern} — ${scores[pattern].toFixed(1)}/5`,
-    });
-}
-
 function renderSnapshot(run) {
   const s = run.stats;
-  const scores = s.pattern_scores || {};
   document.getElementById("snapshot-section").hidden = false;
 
   document.getElementById("counts").replaceChildren(
@@ -79,26 +169,56 @@ function renderSnapshot(run) {
     countCard("Problems planned", s.planned)
   );
 
-  document.getElementById("snapshot-topics").replaceChildren(
-    topicCard(
-      "Weak patterns",
-      "Nothing was flagged weak that week.",
-      s.weak_patterns || [],
-      withScore(scores)
-    ),
-    topicCard(
-      "Stale patterns",
-      "Nothing had gone stale (30+ days untouched).",
-      s.stale_patterns || [],
-      withScore(scores)
-    ),
+  const hasFullPatterns = Array.isArray(s.patterns) && s.patterns.length > 0;
+
+  if (Array.isArray(s.attempts_detail) && s.attempts_detail.length) {
+    document.getElementById("week-heading").hidden = false;
+    document.getElementById("week-table").replaceChildren(weekTable(s.attempts_detail));
+  } else {
+    document.getElementById("week-heading").hidden = true;
+    document.getElementById("week-table").replaceChildren();
+  }
+
+  if (hasFullPatterns) {
+    document.getElementById("patterns-heading").hidden = false;
+    document.getElementById("patterns-table").replaceChildren(patternsTable(s.patterns));
+  } else {
+    document.getElementById("patterns-heading").hidden = true;
+    document.getElementById("patterns-table").replaceChildren();
+  }
+
+  const topics = [];
+  if (!hasFullPatterns) {
+    // Old-shape fallback: exactly what this page showed before the full table existed.
+    const scores = s.pattern_scores || {};
+    topics.push(
+      topicCard("Weak patterns", "Nothing was flagged weak that week.", s.weak_patterns || [], withScore(scores)),
+      topicCard(
+        "Stale patterns",
+        "Nothing had gone stale (30+ days untouched).",
+        s.stale_patterns || [],
+        withScore(scores)
+      )
+    );
+  }
+  topics.push(
     topicCard(
       "Solved off-pattern",
       "Every solved problem used its canonical approach.",
       s.off_pattern || [],
-      (n) => el("li", { text: `#${n}` })
+      offPatternItem
     )
   );
+  if (s.curriculum) topics.push(curriculumCard(s.curriculum));
+  document.getElementById("snapshot-topics").replaceChildren(...topics);
+
+  if (Array.isArray(s.plan_items) && s.plan_items.length) {
+    document.getElementById("weekly-plan-heading").hidden = false;
+    document.getElementById("weekly-plan-list").replaceChildren(...s.plan_items.map(planItem));
+  } else {
+    document.getElementById("weekly-plan-heading").hidden = true;
+    document.getElementById("weekly-plan-list").replaceChildren();
+  }
 }
 
 async function load() {

@@ -41,12 +41,20 @@ def search(
     query: np.ndarray,
     top_k: int = 5,
     exclude_problem: int | None = None,
+    pattern: str | None = None,
 ) -> list[tuple[int, float]]:
-    """Best cosine score per solved problem, descending. Vectors are unit-norm."""
+    """Best cosine score per solved problem, descending. Vectors are unit-norm.
+
+    With `pattern` set, only solutions tagged with that pattern are considered -
+    the embedding then ranks *within* the pattern instead of across all of them,
+    so an unrelated pattern never wins just for being the least-bad match.
+    """
     rows = conn.execute(
         """
-        SELECT e.vector, s.problem_number
-        FROM embeddings e JOIN solutions s ON s.id = e.solution_id
+        SELECT e.vector, s.problem_number, en.pattern
+        FROM embeddings e
+        JOIN solutions s ON s.id = e.solution_id
+        JOIN enrichments en ON en.solution_id = s.id
         """
     ).fetchall()
 
@@ -54,6 +62,8 @@ def search(
     for row in rows:
         number = row["problem_number"]
         if number == exclude_problem:
+            continue
+        if pattern is not None and row["pattern"] != pattern:
             continue
         vector = np.frombuffer(row["vector"], dtype=np.float32)
         score = float(np.dot(vector, query))

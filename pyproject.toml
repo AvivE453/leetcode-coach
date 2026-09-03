@@ -31,11 +31,6 @@ dev = [
     "ruff>=0.6",
 ]
 
-[tool.ruff]
-# solutions/ is pasted practice code, stored as history - it is written against
-# LeetCode's ambient TreeNode/Optional, not meant to stand alone.
-exclude = ["solutions"]
-
 [tool.ruff.lint]
 ignore = [
     "B008",   # typer's API is built on function-call argument defaults

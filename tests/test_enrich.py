@@ -5,6 +5,7 @@ from coach import db, enrich
 ENRICHMENT = enrich.Enrichment(
     pattern="hashmap",
     intended_pattern="hashmap",
+    intended_secondary_patterns=["two-pointers"],
     secondary_patterns=[],
     data_structures=["dict"],
     key_trick="Store complements while scanning once.",
@@ -56,8 +57,74 @@ def test_save_and_missing(tmp_path):
 def test_save_intended_updates_problem(tmp_path):
     conn = make_db(tmp_path)
     enrich.save_intended(conn, 1, "dp-1d")
-    row = conn.execute("SELECT intended_pattern FROM problems WHERE number = 1").fetchone()
+    row = conn.execute("SELECT * FROM problems WHERE number = 1").fetchone()
     assert row["intended_pattern"] == "dp-1d"
+    assert json.loads(row["intended_secondary_patterns"]) == []
+
+
+def test_save_intended_stores_alternates_without_repeating_the_central_one(tmp_path):
+    conn = make_db(tmp_path)
+    enrich.save_intended(conn, 1, "dp-1d", ["greedy", "dp-1d", "greedy"])
+    row = conn.execute("SELECT * FROM problems WHERE number = 1").fetchone()
+    assert row["intended_pattern"] == "dp-1d"
+    # the central pattern and the duplicate are both dropped: the two columns are
+    # read back as one set, so a repeat would surface as a repeated note
+    assert json.loads(row["intended_secondary_patterns"]) == ["greedy"]
+
+
+CANONICAL = ("hashmap", ["two-pointers"])
+
+
+def test_off_pattern_accepts_any_canonical_approach():
+    intended, alternates = CANONICAL
+    # the central approach, and an alternate one, are both on-pattern
+    assert enrich.off_pattern("hashmap", [], intended, alternates) is False
+    assert enrich.off_pattern("two-pointers", [], intended, alternates) is False
+    # so is a solve that reached one of them as a secondary tag
+    assert enrich.off_pattern("math", ["two-pointers"], intended, alternates) is False
+    # nothing canonical anywhere -> the sharp signal fires
+    assert enrich.off_pattern("math", ["stack"], intended, alternates) is True
+    # a problem that was never enriched has no canonical set to be outside of
+    assert enrich.off_pattern("math", [], None, []) is False
+
+
+def test_unused_canonical_lists_what_is_left_central_first():
+    intended, alternates = CANONICAL
+    assert enrich.unused_canonical("hashmap", [], intended, alternates) == ["two-pointers"]
+    assert enrich.unused_canonical("two-pointers", [], intended, alternates) == ["hashmap"]
+    # an off-pattern solve gets the whole canonical set, central approach first
+    assert enrich.unused_canonical("math", [], intended, alternates) == ["hashmap", "two-pointers"]
+    # nothing left to suggest once every canonical approach has been practised
+    assert enrich.unused_canonical("hashmap", ["two-pointers"], intended, alternates) == []
+    assert enrich.unused_canonical("math", [], None, []) == []
+
+
+def enrich_solution_row(conn, pattern, secondary=()):
+    solution_id = add_solution(conn)
+    conn.execute(
+        "INSERT INTO enrichments (solution_id, pattern, secondary_patterns) VALUES (?, ?, ?)",
+        (solution_id, pattern, json.dumps(list(secondary))),
+    )
+    conn.commit()
+
+
+def test_off_pattern_problems_clears_on_any_canonical_approach(tmp_path):
+    conn = make_db(tmp_path)
+    enrich.save_intended(conn, 1, "hashmap", ["two-pointers"])
+    enrich_solution_row(conn, "math")
+    assert [r["number"] for r in enrich.off_pattern_problems(conn)] == [1]
+
+    # a later solve using the *alternate* canonical approach clears the problem
+    enrich_solution_row(conn, "two-pointers")
+    assert enrich.off_pattern_problems(conn) == []
+
+
+def test_off_pattern_problems_matches_an_alternate_in_solution_secondaries(tmp_path):
+    conn = make_db(tmp_path)
+    enrich.save_intended(conn, 1, "hashmap", ["two-pointers"])
+    enrich_solution_row(conn, "math", secondary=["two-pointers"])
+
+    assert enrich.off_pattern_problems(conn) == []
 
 
 def test_enrich_solution_builds_prompt_and_parses(monkeypatch):

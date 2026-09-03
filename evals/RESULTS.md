@@ -71,6 +71,13 @@ with a label and the disagreement turned out to be the model's point:
 | `intended_pattern` matches NeetCode's section | **100%** | 29 |
 | solution `pattern` == `intended_pattern` on canonical code | 97% | 29 |
 
+> These numbers describe `enrich-v2`. `enrich-v3` added one field —
+> `intended_secondary_patterns`, a problem's *other* canonical approaches — and changed
+> nothing about how `intended_pattern` is asked for. The new field is **not evaluated**:
+> the corpus labels one canonical section per problem, so there is no ground truth for
+> "which alternates are also acceptable" to score against. The numbers above were not
+> re-run, on the same reasoning as `review-v3`'s `strengths` field.
+
 The two-layer design holds: on canonical solutions the layers agree (as they should,
 since a canonical solution *is* the intended approach), and the one disagreement is
 Best Time to Buy and Sell Stock, where NeetCode files the problem under Sliding Window

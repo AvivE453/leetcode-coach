@@ -52,6 +52,17 @@ def hard_cap(target: int) -> int:
     return max(1, target // 5)
 
 
+def plan_kind(reason: str) -> str:
+    """Reason string -> chip class. Mirrors the four reasons build_plan emits."""
+    if reason.startswith("review due"):
+        return "review"
+    if reason.startswith("re-solve"):
+        return "re-solve"
+    if reason.startswith("weak pattern"):
+        return "weak-pattern"
+    return "curriculum"
+
+
 def build_plan(conn: sqlite3.Connection, analysis: dict, target: int) -> list[PlanItem]:
     """Fill ~target slots: due reviews -> off-pattern re-solves -> weak-pattern
     picks from the unsolved curriculum -> curriculum progression. Hard problems

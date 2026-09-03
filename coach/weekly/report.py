@@ -3,7 +3,7 @@ from datetime import date
 from pathlib import Path
 
 from coach import config, llm
-from coach.weekly.plan import PlanItem
+from coach.weekly.plan import PlanItem, plan_kind
 
 NARRATIVE_PROMPT = """\
 You are a direct, supportive LeetCode interview-prep coach. Based on this week's data,
@@ -59,6 +59,63 @@ def summarize(week: dict, analysis: dict, items: list[PlanItem]) -> str:
 
 def narrative(week: dict, analysis: dict, items: list[PlanItem]) -> str:
     return llm.text(NARRATIVE_PROMPT.format(summary=summarize(week, analysis, items)))
+
+
+def snapshot(week: dict, analysis: dict, items: list[PlanItem]) -> dict:
+    """Everything render() shows, as JSON - the frozen picture /weekly serves.
+
+    Stored once by `coach weekly` alongside the narrative, so the web page never
+    recomputes it and shows exactly what this run saw, not today's live numbers.
+    Mirrors render()'s sections one-for-one, rather than a hand-picked summary of
+    them, so the two views cannot quietly drift apart the way they already had.
+    """
+    return {
+        "attempts": len(week["attempts"]),
+        "distinct_problems": week["distinct_problems"],
+        "attempts_detail": [
+            {
+                "date": r["date"],
+                "number": r["problem_number"],
+                "title": r["title"],
+                "difficulty": r["difficulty"],
+                "outcome": r["outcome"],
+                "minutes": r["minutes"],
+                "pattern": r["pattern"],
+            }
+            for r in week["attempts"]
+        ],
+        "patterns": [
+            {
+                "pattern": p["pattern"],
+                "attempts": p["attempts"],
+                "struggle_rate": round(p["struggle_rate"], 3),
+                "score": round(p["score"], 2) if p["score"] is not None else None,
+                "weak": p["pattern"] in analysis["weak_patterns"],
+                "stale": p["pattern"] in analysis["stale_patterns"],
+            }
+            for p in analysis["patterns"]
+        ],
+        "weak_patterns": analysis["weak_patterns"],
+        "stale_patterns": analysis["stale_patterns"],
+        "off_pattern": [
+            {"number": r["number"], "title": r["title"], "intended_pattern": r["intended_pattern"]}
+            for r in analysis["off_pattern"]
+        ],
+        "curriculum": {name: {"done": d, "total": t} for name, (d, t) in analysis["curriculum"].items()},
+        "due": len(analysis["due"]),
+        "planned": len(items),
+        "plan_items": [
+            {
+                "number": i.number,
+                "slug": i.slug,
+                "title": i.title,
+                "difficulty": i.difficulty,
+                "reason": i.reason,
+                "kind": plan_kind(i.reason),
+            }
+            for i in items
+        ],
+    }
 
 
 def render(

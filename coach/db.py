@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS problems (
     paid_only INTEGER NOT NULL DEFAULT 0,
     in_blind75 INTEGER NOT NULL DEFAULT 0,
     in_neetcode150 INTEGER NOT NULL DEFAULT 0,
-    intended_pattern TEXT
+    intended_pattern TEXT,
+    intended_secondary_patterns TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS attempts (
@@ -30,8 +31,7 @@ CREATE TABLE IF NOT EXISTS solutions (
     problem_number INTEGER NOT NULL REFERENCES problems(number),
     attempt_id INTEGER REFERENCES attempts(id),
     code TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    file_path TEXT
+    created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS enrichments (
@@ -110,6 +110,10 @@ def init_schema(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(problems)")}
     if "intended_pattern" not in columns:
         conn.execute("ALTER TABLE problems ADD COLUMN intended_pattern TEXT")
+    if "intended_secondary_patterns" not in columns:
+        conn.execute(
+            "ALTER TABLE problems ADD COLUMN intended_secondary_patterns TEXT NOT NULL DEFAULT '[]'"
+        )
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(weekly_runs)")}
     if "narrative" not in columns:
         conn.execute("ALTER TABLE weekly_runs ADD COLUMN narrative TEXT")
