@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -274,27 +274,50 @@ def api_weekly() -> dict:
     }
 
 
+# A page and the script that drives it are one unit: the script reaches into the
+# markup by id, so a cached script paired with fresh markup does not degrade, it
+# breaks silently - getElementById returns null, the handler that would report the
+# failure reaches for a missing element too, and the page sits on its loading text
+# forever. "no-cache" means revalidate, not re-download: the browser still gets a
+# 304 when nothing changed, which costs nothing on localhost.
+NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+def page(name: str) -> FileResponse:
+    """One of the four HTML pages, revalidated on every load like its script."""
+    return FileResponse(STATIC_DIR / name, headers=NO_CACHE)
+
+
+class RevalidatedStaticFiles(StaticFiles):
+    """StaticFiles under the same rule as page() - see NO_CACHE above for why."""
+
+    def file_response(self, *args, **kwargs) -> Response:
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 @app.get("/", include_in_schema=False)
 def home() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    return page("index.html")
 
 
 @app.get("/plan", include_in_schema=False)
 def plan_page() -> FileResponse:
-    return FileResponse(STATIC_DIR / "plan.html")
+    return page("plan.html")
 
 
 @app.get("/solutions", include_in_schema=False)
 def solutions_page() -> FileResponse:
-    return FileResponse(STATIC_DIR / "solutions.html")
+    return page("solutions.html")
 
 
 @app.get("/weekly", include_in_schema=False)
 def weekly_page() -> FileResponse:
-    return FileResponse(STATIC_DIR / "weekly.html")
+    return page("weekly.html")
 
 
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/static", RevalidatedStaticFiles(directory=STATIC_DIR), name="static")
 
 
 def main() -> None:

@@ -416,3 +416,15 @@ def test_pages_are_served(client):
     assert client.get("/static/home.js").status_code == 200
     assert client.get("/static/solutions.js").status_code == 200
     assert client.get("/static/weekly.js").status_code == 200
+
+
+def test_pages_and_scripts_are_revalidated(client):
+    """A page and its script are one unit, and a stale script breaks the page in
+    silence: it looks up elements the new markup no longer has, gets null, and the
+    error path reaches for a missing element too, so the page sits on its loading
+    text with nothing rendered and no message. Revalidating both prevents the pair
+    from ever being mismatched; the 304 it usually gets back costs nothing here.
+    """
+    for path in ("/", "/plan", "/solutions", "/weekly",
+                 "/static/weekly.js", "/static/plan.js", "/static/style.css"):
+        assert client.get(path).headers["cache-control"] == "no-cache", path
