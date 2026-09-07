@@ -66,7 +66,7 @@ def test_log_solve_stores_attempt_solution_and_schedule(tmp_path, monkeypatch):
     result = service.log_solve(conn, 1, "struggled", CODE, minutes=25, today=date(2026, 9, 1))
 
     assert result.title == "Two Sum"
-    assert result.next_due == date(2026, 9, 2)
+    assert result.next_due == date(2026, 9, 8)
     assert conn.execute("SELECT minutes FROM attempts").fetchone()["minutes"] == 25
     assert conn.execute("SELECT code FROM solutions").fetchone()["code"].startswith("class Solution")
 

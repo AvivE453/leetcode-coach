@@ -4,7 +4,9 @@ from datetime import date, timedelta
 QUALITY = {"clean": 5, "struggled": 3, "hints": 2, "failed": 1}
 INITIAL_EASE = 2.5
 MIN_EASE = 1.3
-SECOND_INTERVAL = 6.0
+FIRST_INTERVAL = 7.0
+SECOND_INTERVAL = 14.0
+LAPSE_INTERVAL = 3.0
 MAX_INTERVAL = 180.0
 
 
@@ -28,11 +30,11 @@ def review(state: ReviewState | None, outcome: str, today: date) -> ReviewState:
     if quality < 3:
         reps = 0
         lapses += 1
-        interval = 1.0
+        interval = LAPSE_INTERVAL
     else:
         reps += 1
         if reps == 1:
-            interval = 1.0
+            interval = FIRST_INTERVAL
         elif reps == 2:
             interval = SECOND_INTERVAL
         else:

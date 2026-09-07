@@ -50,7 +50,7 @@ def test_log_stores_attempt_solution_and_schedule(tmp_path, monkeypatch):
     assert solution["attempt_id"] == attempt["id"]
 
     state = conn.execute("SELECT * FROM review_state").fetchone()
-    assert state["next_due"] == (date.today() + timedelta(days=1)).isoformat()
+    assert state["next_due"] == (date.today() + timedelta(days=7)).isoformat()
 
 
 def test_second_solve_appends_and_advances_schedule(tmp_path, monkeypatch):
@@ -64,7 +64,7 @@ def test_second_solve_appends_and_advances_schedule(tmp_path, monkeypatch):
     assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 2
     state = conn.execute("SELECT * FROM review_state").fetchone()
     assert state["reps"] == 2
-    assert state["interval_days"] == 6.0
+    assert state["interval_days"] == 14.0
 
 
 def test_log_unknown_problem_fails(tmp_path, monkeypatch):
@@ -415,19 +415,10 @@ def test_weekly_writes_report_and_records_run(tmp_path, monkeypatch):
         "blind75": {"done": 0, "total": 0},
         "neetcode150": {"done": 0, "total": 0},
     }
-    # A first "struggled" solve schedules its review 1 day out, which the 6-day
-    # lookahead in analyze() already treats as due - so the plan is that review.
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
-    assert stats["plan_items"] == [
-        {
-            "number": 1,
-            "slug": "two-sum",
-            "title": "Two Sum",
-            "difficulty": "Easy",
-            "reason": f"review due {tomorrow}",
-            "kind": "review",
-        }
-    ]
+    # A first "struggled" solve schedules its review 7 days out (see
+    # coach/scheduler.py), past the 6-day lookahead in analyze() - so it's not
+    # due yet and the plan has nothing to fill (no curriculum problems either).
+    assert stats["plan_items"] == []
 
 
 def test_weekly_degrades_without_llm(tmp_path, monkeypatch):

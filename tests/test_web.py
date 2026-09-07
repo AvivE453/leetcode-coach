@@ -215,6 +215,13 @@ def test_plan_endpoint_ranks_problems_and_stays_read_only(client, monkeypatch):
     enriched(monkeypatch)
     client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
 
+    # A fresh clean solve isn't due again for a week (see coach/scheduler.py),
+    # so force it due now to exercise the "due outranks curriculum" ranking.
+    conn = db.connect()
+    conn.execute("UPDATE review_state SET next_due = date('now') WHERE problem_number = 1")
+    conn.commit()
+    conn.close()
+
     plan = client.get("/api/plan").json()
 
     numbers = [i["number"] for i in plan["items"]]
