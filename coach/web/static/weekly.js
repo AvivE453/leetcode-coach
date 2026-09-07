@@ -1,11 +1,9 @@
-/* Weekly Review page: the last weekly run, frozen as it was written.
+/* Weekly Review page: the last seven days, recomputed on every load.
 
-Rows written before this depth existed only carry the thin fields (counts,
-weak/stale pattern names, pattern_scores, bare off-pattern numbers) - every
-section below falls back to exactly what it showed before rather than
-breaking, so an old run still renders correctly. Old rows may also carry a
-`plan_items` list from when the report planned the following week; it is
-ignored now that `coach today` owns that. */
+Nothing here is stored - /api/weekly runs the same SQL the CLI does, so this
+page is current the moment a solve is logged. Mastery and standing are all-time
+numbers; only `delta` is about this week, and it is the difference between the
+score now and the same score folded over history up to the window's start. */
 
 function el(tag, props = {}, children = []) {
   const node = document.createElement(tag);
@@ -35,20 +33,16 @@ function topicCard(title, hint, items, render) {
   return card;
 }
 
-function withScore(scores) {
-  /* Old-shape fallback: pattern name plus the score the run recorded, if any. */
-  return (pattern) =>
-    el("li", {
-      text: scores[pattern] === undefined ? pattern : `${pattern} — ${scores[pattern].toFixed(1)}/5`,
-    });
+function score(value) {
+  return value == null ? "—" : `${value.toFixed(1)}/5`;
 }
 
-function offPatternItem(entry) {
-  /* New shape is {number, title, intended_pattern}; old rows stored bare numbers. */
-  if (entry !== null && typeof entry === "object") {
-    return el("li", { text: `#${entry.number} ${entry.title} → ${entry.intended_pattern}` });
-  }
-  return el("li", { text: `#${entry}` });
+/* The week's movement, signed. "new" means this pattern had no history before
+   the window, so there is nothing to compare it against. */
+function trend(delta) {
+  if (delta == null) return "new";
+  if (Math.abs(delta) < 0.05) return "±0.0";
+  return `${delta > 0 ? "+" : "−"}${Math.abs(delta).toFixed(1)}`;
 }
 
 function weekTable(rows) {
@@ -70,148 +64,113 @@ function weekTable(rows) {
           el("td", {}, [el("span", { class: `diff ${r.difficulty}`, text: r.difficulty })]),
           el("td", { text: r.outcome }),
           el("td", { text: r.minutes == null ? "" : String(r.minutes) }),
-          el("td", { text: r.pattern || "" }),
+          el("td", { text: r.pattern || "untagged" }),
         ])
       )
     ),
   ]);
 }
 
+const STANDING_LABEL = { weak: "needs work", "on-track": "going well", "too-early": "too early to call" };
+
 function patternsTable(patterns) {
   return el("table", {}, [
     el(
       "thead",
       {},
-      ["Pattern", "Attempts", "Struggle rate", "Mastery", "Flags"].map((h) => el("th", { text: h }))
+      ["Pattern", "This week", "All-time", "Mastery", "Change", "Standing"].map((h) => el("th", { text: h }))
     ),
     el(
       "tbody",
       {},
-      patterns.map((p) => {
-        const flags = [];
-        if (p.weak) flags.push("weak");
-        if (p.stale) flags.push("stale");
-        return el("tr", {}, [
+      patterns.map((p) =>
+        el("tr", {}, [
           el("td", { text: p.pattern }),
-          el("td", { text: String(p.attempts) }),
-          el("td", { text: `${Math.round(p.struggle_rate * 100)}%` }),
-          el("td", { text: p.score == null ? "—" : `${p.score.toFixed(1)}/5` }),
-          el("td", { text: flags.join(", ") }),
-        ]);
-      })
+          el("td", { text: String(p.attempts_week) }),
+          el("td", { text: String(p.attempts_total) }),
+          el("td", { text: score(p.score) }),
+          el("td", { text: trend(p.delta) }),
+          el("td", {}, [el("span", { class: `standing ${p.standing}`, text: STANDING_LABEL[p.standing] })]),
+        ])
+      )
     ),
   ]);
 }
 
-function curriculumCard(curriculum) {
-  const entries = Object.entries(curriculum || {});
-  return topicCard(
-    "Curriculum",
-    "No curriculum progress recorded for this run.",
-    entries,
-    ([name, p]) => el("li", { text: `${name}: ${p.done}/${p.total}` })
-  );
+function verdictItem(p) {
+  return el("li", { text: `${p.pattern} — ${score(p.score)} (${trend(p.delta)})` });
 }
 
-function renderEmpty() {
-  document.getElementById("note").replaceChildren(
-    el("p", { class: "empty", text: "No weekly run yet — the first `coach today` of the week writes one." }),
-    el("p", {
-      class: "hint",
-      text: "You can also run `coach weekly` by hand; the note it writes shows up here.",
-    })
-  );
-  document.getElementById("run-meta").textContent = "";
-}
-
-function renderNote(run) {
-  const host = document.getElementById("note");
-  host.replaceChildren();
-
-  if (run.narrative) {
-    host.append(el("p", { class: "narrative", text: run.narrative }));
-  } else {
-    host.append(
-      el("p", {
-        class: "empty",
-        text: "This run was generated without a narrative — the model was unavailable, so the numbers below are all it wrote.",
-      })
-    );
-  }
-
-  const meta = [`week ${run.week}`, `generated ${run.generated_at}`];
-  if (run.report_path) meta.push(run.report_path);
-  document.getElementById("run-meta").textContent = meta.join(" · ");
-}
-
-function renderSnapshot(run) {
-  const s = run.stats;
-  document.getElementById("snapshot-section").hidden = false;
+function renderWeek(data) {
+  document.getElementById("week-meta").textContent = `${data.start} to ${data.end}`;
 
   document.getElementById("counts").replaceChildren(
-    countCard("Attempts that week", s.attempts),
-    countCard("Distinct problems", s.distinct_problems),
-    countCard("Reviews due", s.due)
+    countCard("Attempts", data.attempts.length),
+    countCard("Distinct problems", data.distinct_problems),
+    countCard("Patterns used", data.patterns.length)
   );
 
-  const hasFullPatterns = Array.isArray(s.patterns) && s.patterns.length > 0;
-
-  if (Array.isArray(s.attempts_detail) && s.attempts_detail.length) {
-    document.getElementById("week-heading").hidden = false;
-    document.getElementById("week-table").replaceChildren(weekTable(s.attempts_detail));
-  } else {
-    document.getElementById("week-heading").hidden = true;
-    document.getElementById("week-table").replaceChildren();
-  }
-
-  if (hasFullPatterns) {
-    document.getElementById("patterns-heading").hidden = false;
-    document.getElementById("patterns-table").replaceChildren(patternsTable(s.patterns));
-  } else {
-    document.getElementById("patterns-heading").hidden = true;
-    document.getElementById("patterns-table").replaceChildren();
-  }
-
-  const topics = [];
-  if (!hasFullPatterns) {
-    // Old-shape fallback: exactly what this page showed before the full table existed.
-    const scores = s.pattern_scores || {};
-    topics.push(
-      topicCard("Weak patterns", "Nothing was flagged weak that week.", s.weak_patterns || [], withScore(scores)),
-      topicCard(
-        "Stale patterns",
-        "Nothing had gone stale (30+ days untouched).",
-        s.stale_patterns || [],
-        withScore(scores)
-      )
+  const host = document.getElementById("week-table");
+  if (!data.attempts.length) {
+    host.replaceChildren(
+      el("div", { class: "card" }, [
+        el("p", { class: "empty", text: "Nothing logged in the last seven days." }),
+      ])
     );
+    return;
   }
-  topics.push(
+  host.replaceChildren(weekTable(data.attempts));
+}
+
+function renderPatterns(data) {
+  const th = data.thresholds || {};
+  const judged = `A pattern is judged once it has ${th.weak_min_attempts} attempts all-time; below ${th.weak_score}/5 it needs work.`;
+  document.getElementById("patterns-hint").textContent =
+    `Mastery is all-time, so a week of practice moves it rather than defining it. ${judged}`;
+
+  const verdicts = document.getElementById("verdicts");
+  const table = document.getElementById("patterns-table");
+
+  if (!data.patterns.length) {
+    verdicts.replaceChildren(
+      el("div", { class: "card" }, [
+        el("p", {
+          class: "empty",
+          text: "No tagged solves this week yet — patterns show up here once a solve is enriched.",
+        }),
+      ])
+    );
+    table.replaceChildren();
+    return;
+  }
+
+  verdicts.replaceChildren(
     topicCard(
-      "Solved off-pattern",
-      "Every solved problem used its canonical approach.",
-      s.off_pattern || [],
-      offPatternItem
+      "Needs more work",
+      `Nothing you practiced this week is below ${th.weak_score}/5.`,
+      data.patterns.filter((p) => p.standing === "weak"),
+      verdictItem
+    ),
+    topicCard(
+      "Going well",
+      `Nothing yet — a pattern needs ${th.weak_min_attempts} attempts before this page will call it either way.`,
+      data.patterns.filter((p) => p.standing === "on-track"),
+      verdictItem
     )
   );
-  if (s.curriculum) topics.push(curriculumCard(s.curriculum));
-  document.getElementById("snapshot-topics").replaceChildren(...topics);
+  table.replaceChildren(patternsTable(data.patterns));
 }
 
 async function load() {
   try {
     const res = await fetch("/api/weekly");
     if (!res.ok) throw new Error(`the coach returned ${res.status}`);
-    const { run } = await res.json();
-    if (!run) {
-      renderEmpty();
-      return;
-    }
-    renderNote(run);
-    renderSnapshot(run);
+    const data = await res.json();
+    renderWeek(data);
+    renderPatterns(data);
   } catch (err) {
-    document.getElementById("note").replaceChildren(
-      el("p", { class: "error", text: `Could not load the weekly run: ${err.message}` })
+    document.getElementById("week-table").replaceChildren(
+      el("p", { class: "error", text: `Could not load this week: ${err.message}` })
     );
   }
 }

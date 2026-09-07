@@ -4,7 +4,6 @@ Every endpoint is a thin JSON translation of a service function; the CLI and the
 web UI run the same code paths. The only write endpoint is POST /api/log.
 """
 
-import json
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
@@ -17,7 +16,6 @@ from pydantic import BaseModel, Field
 
 from coach import config, db, mastery, service
 from coach.weekly import analyze as weekly_analyze
-from coach.weekly import report as weekly_report
 from coach.weekly.plan import plan_kind
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -38,6 +36,19 @@ def open_db():
         yield conn
     finally:
         conn.close()
+
+
+def thresholds() -> dict:
+    """The numbers that decide weak and stale.
+
+    Served so each page can word its own empty states from the constants rather
+    than restating them in English, where they go stale silently.
+    """
+    return {
+        "weak_score": mastery.WEAK_SCORE,
+        "weak_min_attempts": mastery.WEAK_MIN_ATTEMPTS,
+        "stale_days": weekly_analyze.STALE_DAYS,
+    }
 
 
 class LogRequest(BaseModel):
@@ -183,13 +194,10 @@ def api_review(number: int, body: ReviewRequest) -> dict:
 
 @app.get("/api/plan")
 def api_plan(target: int = config.DAILY_TARGET) -> dict:
-    """Recompute today's plan live. Read-only: unlike `coach today`, it never
-    writes reports/YYYY-WW.md or touches weekly_runs, even on the week's first
-    call - `last_report` below only ever reports what a CLI run has produced."""
+    """Recompute today's plan live. Read-only, and stored nowhere."""
     today = date.today()
     with open_db() as conn:
         plan = service.daily_plan(conn, today, target)
-        last_run = service.last_weekly_run(conn)
     items, analysis = plan.items, plan.analysis
 
     return {
@@ -220,55 +228,49 @@ def api_plan(target: int = config.DAILY_TARGET) -> dict:
         },
         "due_count": len(analysis["due"]),
         "curriculum": analysis["curriculum"],
-        # Served so the page can word its empty states from the numbers that
-        # actually decide weak/stale, instead of restating them in English.
-        "thresholds": {
-            "weak_score": mastery.WEAK_SCORE,
-            "weak_min_attempts": mastery.WEAK_MIN_ATTEMPTS,
-            "stale_days": weekly_analyze.STALE_DAYS,
-        },
-        # Projected, not the whole row: /weekly serves the stats blob and the
-        # narrative, and this endpoint has no reason to ship them too. The `week`
-        # label ships pre-computed for the same reason the thresholds do - keyed
-        # off generated_at, never week_start, and deriving an ISO week in the
-        # browser would be a second implementation of week_key().
-        "last_report": (
-            {
-                "week": weekly_report.week_key(date.fromisoformat(last_run["generated_at"])),
-                "week_start": last_run["week_start"],
-                "generated_at": last_run["generated_at"],
-                "report_path": last_run["report_path"],
-            }
-            if last_run
-            else None
-        ),
+        "thresholds": thresholds(),
     }
 
 
 @app.get("/api/weekly")
 def api_weekly() -> dict:
-    """The last `coach weekly` run, exactly as it was written.
+    """The last seven days, recomputed on every call.
 
-    Frozen on purpose: the narrative was paid for once, so this page never
-    recomputes it and never calls the API. `null` until the first run.
+    Free to open, like every other page: pure SQL, no LLM call, and nothing is
+    written - so logging a solve is visible here immediately.
     """
     with open_db() as conn:
-        row = service.last_weekly_run(conn)
+        review = service.weekly_review(conn, date.today())
 
-    if row is None:
-        return {"run": None}
     return {
-        "run": {
-            # Keyed off generated_at, not week_start: the report filename is
-            # week_key(today), and the 7-day window starts in the previous ISO week.
-            "week": weekly_report.week_key(date.fromisoformat(row["generated_at"])),
-            "week_start": row["week_start"],
-            "generated_at": row["generated_at"],
-            "report_path": row["report_path"],
-            "degraded": bool(row["degraded"]),
-            "narrative": row["narrative"],
-            "stats": json.loads(row["stats"]) if row["stats"] else {},
-        }
+        "start": review.start.isoformat(),
+        "end": review.end.isoformat(),
+        "distinct_problems": review.distinct_problems,
+        "attempts": [
+            {
+                "date": r["date"],
+                "number": r["problem_number"],
+                "title": r["title"],
+                "difficulty": r["difficulty"],
+                "outcome": r["outcome"],
+                "minutes": r["minutes"],
+                "pattern": r["pattern"],
+            }
+            for r in review.attempts
+        ],
+        "patterns": [
+            {
+                "pattern": p.pattern,
+                "attempts_week": p.attempts_week,
+                "attempts_total": p.attempts_total,
+                "score": p.score,
+                "score_before": p.score_before,
+                "delta": p.delta,
+                "standing": p.standing,
+            }
+            for p in review.patterns
+        ],
+        "thresholds": thresholds(),
     }
 
 

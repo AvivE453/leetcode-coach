@@ -1,7 +1,7 @@
 [project]
 name = "leetcode-coach"
 version = "0.1.0"
-description = "Personal LeetCode coach: pattern-based solution retrieval, spaced repetition, and a weekly planning agent"
+description = "Personal LeetCode coach: pattern-based solution retrieval, spaced repetition, and per-pattern mastery tracking"
 requires-python = ">=3.12"
 dependencies = [
     "typer>=0.15",

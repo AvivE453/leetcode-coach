@@ -4,7 +4,8 @@ from datetime import date, timedelta
 import numpy as np
 import pytest
 
-from coach import config, db, embed, enrich, review, service
+from coach import config, db, embed, enrich, mastery, review, service
+from coach.weekly import analyze as weekly_analyze
 from coach.weekly import collect as weekly_collect
 
 CODE = "class Solution:\n    def twoSum(self, nums, target):\n        return []\n"
@@ -41,7 +42,6 @@ def fake_encode(texts):
 def setup_env(tmp_path, monkeypatch, problems=None):
     monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "coach.db")
-    monkeypatch.setattr(config, "REPORTS_DIR", tmp_path / "reports")
     conn = db.connect()
     db.init_schema(conn)
     db.upsert_problems(
@@ -397,47 +397,140 @@ def test_solved_problems_aggregates_one_row_per_problem(tmp_path, monkeypatch):
     assert rows[0]["pattern"] == "hashmap"
 
 
-def test_weekly_report_needed_is_true_once_per_iso_week(tmp_path, monkeypatch):
-    """Keyed on generated_at, like the report filename - not week_start, which
-    falls in the previous ISO week."""
+WEEK_TODAY = date(2026, 9, 7)
+
+
+def scored_attempt(conn, day, outcome, pattern="hashmap", number=1):
+    """One enriched solve, scored - the history a mastery number folds over."""
+    attempt_id = conn.execute(
+        "INSERT INTO attempts (problem_number, date, outcome) VALUES (?, ?, ?)",
+        (number, day.isoformat(), outcome),
+    ).lastrowid
+    solution_id = conn.execute(
+        "INSERT INTO solutions (problem_number, attempt_id, code, created_at) VALUES (?, ?, 'c', ?)",
+        (number, attempt_id, day.isoformat()),
+    ).lastrowid
+    if pattern:
+        conn.execute(
+            """
+            INSERT INTO enrichments (solution_id, pattern, secondary_patterns, data_structures)
+            VALUES (?, ?, '[]', '[]')
+            """,
+            (solution_id, pattern),
+        )
+    conn.commit()
+    mastery.recompute_all(conn)
+    return solution_id
+
+
+def test_weekly_review_collects_the_window_and_the_patterns_in_it(tmp_path, monkeypatch):
     conn = setup_env(tmp_path, monkeypatch)
-    today = date(2026, 9, 7)  # a Monday, ISO week 37
+    scored_attempt(conn, WEEK_TODAY - timedelta(days=2), "clean")
+    scored_attempt(conn, WEEK_TODAY - timedelta(days=20), "failed", pattern="dp-1d")
 
-    assert service.weekly_report_needed(conn, today) is True
+    review = service.weekly_review(conn, WEEK_TODAY)
 
-    service.run_weekly(conn, today)
-    assert service.weekly_report_needed(conn, today) is False
-    assert service.weekly_report_needed(conn, date(2026, 9, 13)) is False  # Sunday, same week
-    assert service.weekly_report_needed(conn, date(2026, 9, 14)) is True  # next Monday
+    assert review.start == WEEK_TODAY - timedelta(days=6)
+    assert review.end == WEEK_TODAY
+    assert len(review.attempts) == 1
+    assert review.distinct_problems == 1
+    # dp-1d has all-time history but was not practiced in the window.
+    assert [p.pattern for p in review.patterns] == ["hashmap"]
 
 
-def test_run_weekly_writes_the_report_and_records_the_run(tmp_path, monkeypatch):
+def test_weekly_review_counts_an_untagged_solve_without_inventing_a_pattern(tmp_path, monkeypatch):
+    """Enrichment can be skipped (no API key), and the solve is still a solve."""
     conn = setup_env(tmp_path, monkeypatch)
-    monkeypatch.setattr("coach.llm.text", lambda prompt, **kw: "Drill hashmap problems.")
-    today = date(2026, 9, 7)
+    scored_attempt(conn, WEEK_TODAY, "clean", pattern=None)
 
-    result = service.run_weekly(conn, today)
+    review = service.weekly_review(conn, WEEK_TODAY)
 
-    assert result.week == "2026-37"
-    assert result.degraded is False
-    assert result.narrative_skipped is None
-    assert result.path.read_text().count("Drill hashmap problems.") == 1
-
-    run = conn.execute("SELECT * FROM weekly_runs").fetchone()
-    assert run["degraded"] == 0
-    assert run["narrative"] == "Drill hashmap problems."
+    assert len(review.attempts) == 1
+    assert review.attempts[0]["pattern"] is None
+    assert review.patterns == []
 
 
-def test_run_weekly_returns_the_degradation_reason_instead_of_printing_it(tmp_path, monkeypatch):
-    """service.py never prints - the caller decides how to say it."""
+def test_weekly_review_says_too_early_below_the_attempt_floor(tmp_path, monkeypatch):
     conn = setup_env(tmp_path, monkeypatch)
+    for day in range(4):
+        scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "failed")
 
-    result = service.run_weekly(conn, date(2026, 9, 7))
+    p = service.weekly_review(conn, WEEK_TODAY).patterns[0]
 
-    assert result.degraded is True
-    assert "ANTHROPIC_API_KEY" in result.narrative_skipped
-    assert "LLM unavailable" in result.path.read_text()
-    assert conn.execute("SELECT degraded FROM weekly_runs").fetchone()[0] == 1
+    assert p.attempts_total == 4 < mastery.WEAK_MIN_ATTEMPTS
+    assert p.standing == "too-early"
+
+
+def test_weekly_review_standing_tracks_the_analysis_verdict(tmp_path, monkeypatch):
+    """weak is only ever membership in analysis["weak_patterns"] - never a
+    threshold re-derived here, which is how the two definitions drift apart."""
+    conn = setup_env(tmp_path, monkeypatch)
+    for day in range(5):
+        scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "failed")
+
+    review = service.weekly_review(conn, WEEK_TODAY)
+    analysis = weekly_analyze.analyze(conn, WEEK_TODAY)
+
+    assert analysis["weak_patterns"] == ["hashmap"]
+    assert review.patterns[0].standing == "weak"
+
+    # Five struggled-but-solved attempts are the same struggle rate and not weak.
+    conn.execute("UPDATE attempts SET outcome = 'struggled'")
+    mastery.recompute_all(conn)
+    assert service.weekly_review(conn, WEEK_TODAY).patterns[0].standing == "on-track"
+
+
+def test_weekly_review_measures_the_week_against_where_it_started(tmp_path, monkeypatch):
+    conn = setup_env(tmp_path, monkeypatch)
+    for day in range(12, 7, -1):  # five failures, all before the window
+        scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "failed")
+    scored_attempt(conn, WEEK_TODAY, "clean")
+
+    p = service.weekly_review(conn, WEEK_TODAY).patterns[0]
+
+    assert p.attempts_week == 1
+    assert p.attempts_total == 6
+    assert p.score_before == pytest.approx(1.0)  # five failures
+    assert p.score == pytest.approx(1.8)  # one clean solve, EMA alpha 0.2
+    assert p.delta == pytest.approx(0.8)
+
+
+def test_weekly_review_has_no_delta_for_a_pattern_first_seen_this_week(tmp_path, monkeypatch):
+    conn = setup_env(tmp_path, monkeypatch)
+    scored_attempt(conn, WEEK_TODAY, "clean")
+
+    p = service.weekly_review(conn, WEEK_TODAY).patterns[0]
+
+    assert p.score_before is None
+    assert p.delta is None
+
+
+def test_weekly_review_orders_the_worst_patterns_first(tmp_path, monkeypatch):
+    conn = setup_env(tmp_path, monkeypatch)
+    for day in range(5):
+        scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "failed", pattern="dp-1d")
+        scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "clean", pattern="hashmap")
+    scored_attempt(conn, WEEK_TODAY, "clean", pattern="graphs")
+
+    review = service.weekly_review(conn, WEEK_TODAY)
+
+    assert [(p.pattern, p.standing) for p in review.patterns] == [
+        ("dp-1d", "weak"),
+        ("hashmap", "on-track"),
+        ("graphs", "too-early"),
+    ]
+
+
+def test_weekly_review_writes_nothing(tmp_path, monkeypatch):
+    """Opening this view must stay free, so it can be recomputed on every page load."""
+    conn = setup_env(tmp_path, monkeypatch)
+    scored_attempt(conn, WEEK_TODAY, "clean")
+    before = conn.total_changes
+
+    service.weekly_review(conn, WEEK_TODAY)
+
+    assert conn.total_changes == before
+    assert not (tmp_path / "reports").exists()
 
 
 def test_daily_plan_only_counts_reviews_due_today(tmp_path, monkeypatch):

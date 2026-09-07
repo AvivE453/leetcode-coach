@@ -86,22 +86,3 @@ def parse(
         )
     )
     return response.parsed_output
-
-
-def text(
-    prompt: str,
-    system: str | None = None,
-    max_tokens: int = 4000,
-    model: str | None = None,
-) -> str:
-    """One plain-text call."""
-    kwargs = {"system": system} if system is not None else {}
-    response = _complete(
-        lambda: client().messages.create(
-            model=model or config.MODEL,
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": prompt}],
-            **kwargs,
-        )
-    )
-    return "".join(block.text for block in response.content if block.type == "text").strip()

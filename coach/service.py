@@ -7,16 +7,15 @@ returns data. No printing, no typer, no HTTP. `coach/cli.py` wraps these in
 
 import json
 import sqlite3
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from pathlib import Path
 
-from coach import config, curriculum, embed, enrich, llm, mastery, scheduler
+from coach import curriculum, embed, enrich, llm, mastery, scheduler
 from coach import review as review_llm
 from coach.weekly import analyze as weekly_analyze
 from coach.weekly import collect as weekly_collect
 from coach.weekly import plan as weekly_plan
-from coach.weekly import report as weekly_report
 
 
 class ProblemNotFound(LookupError):
@@ -81,20 +80,42 @@ class ReviewResult:
 
 
 @dataclass(frozen=True)
-class WeeklyRunResult:
-    """One generated weekly report: what was written, and how far it got.
+class WeekPattern:
+    """One pattern practiced this week, and how it is going.
 
-    `narrative_skipped` carries the degradation reason instead of printing it —
-    the caller decides how to say it, the same contract as `EnrichResult`.
+    `score_before` is the same mastery number folded over this pattern's history
+    up to the start of the window, so `delta` says whether the week moved it.
     """
 
-    path: Path
-    week: str
-    degraded: bool
-    narrative_skipped: str | None
-    attempts: int
-    due: int
-    weak_patterns: list[str]
+    pattern: str
+    attempts_week: int
+    attempts_total: int
+    score: float | None
+    score_before: float | None
+    standing: str
+
+    @property
+    def delta(self) -> float | None:
+        """How much mastery moved this week. None when there is nothing to compare."""
+        if self.score is None or self.score_before is None:
+            return None
+        return self.score - self.score_before
+
+
+@dataclass(frozen=True)
+class WeeklyReview:
+    """The last seven days: what was solved, and what each pattern used says.
+
+    Computed on demand and stored nowhere, so logging a solve changes it
+    immediately - the report file and the frozen snapshot it replaced went stale
+    the moment the next problem was solved.
+    """
+
+    start: date
+    end: date
+    attempts: list[sqlite3.Row]
+    distinct_problems: int
+    patterns: list[WeekPattern]
 
 
 @dataclass(frozen=True)
@@ -346,6 +367,20 @@ def also_solvable_with(conn: sqlite3.Connection, solution_id: int, problem) -> l
     )
 
 
+def standing_of(analysis: dict, pattern: str, attempts: int) -> str:
+    """One pattern's verdict as a word: too-early, weak, or on-track.
+
+    The single owner of that reading, shared by the note `coach log` prints and by
+    the weekly review. `weak` is only ever membership in analysis["weak_patterns"] -
+    the threshold itself lives in mastery.is_weak() and is applied once, by analyze().
+    Under WEAK_MIN_ATTEMPTS nothing is claimed at all: too small a sample to call
+    weak is also too small to call solid.
+    """
+    if attempts < mastery.WEAK_MIN_ATTEMPTS:
+        return "too-early"
+    return "weak" if pattern in analysis["weak_patterns"] else "on-track"
+
+
 def pattern_standing(
     conn: sqlite3.Connection, pattern: str | None, today: date | None = None
 ) -> PatternStanding | None:
@@ -361,15 +396,14 @@ def pattern_standing(
     row = next((p for p in analysis["patterns"] if p["pattern"] == pattern), None)
     if row is None:
         return None
+    standing = standing_of(analysis, pattern, row["attempts"])
     return PatternStanding(
         pattern=pattern,
         attempts=row["attempts"],
         struggle_rate=row["struggle_rate"],
         score=row["score"],
-        weak=pattern in analysis["weak_patterns"],
-        # weak is False on a first attempt because the sample is too small, which
-        # would otherwise read as "assessed as solid".
-        enough_data=row["attempts"] >= mastery.WEAK_MIN_ATTEMPTS,
+        weak=standing == "weak",
+        enough_data=standing != "too-early",
     )
 
 
@@ -526,87 +560,51 @@ def daily_plan(conn: sqlite3.Connection, today: date, target: int) -> DailyPlan:
     return DailyPlan(items=weekly_plan.build_plan(conn, analysis, target), analysis=analysis)
 
 
-def last_weekly_run(conn: sqlite3.Connection) -> sqlite3.Row | None:
-    """The most recent weekly run, or None before the first one.
+# Worst first: the patterns needing work are what the week is read for, and
+# nothing can be said yet about the ones still under WEAK_MIN_ATTEMPTS.
+STANDING_ORDER = {"weak": 0, "on-track": 1, "too-early": 2}
 
-    One definition of "the latest run", read by `coach today`'s once-a-week check
-    and by both endpoints that surface it - they each selected their own subset of
-    the same row. Callers project the columns they serve, so /api/plan does not
-    start shipping the stats blob.
+
+def weekly_review(conn: sqlite3.Connection, today: date | None = None) -> WeeklyReview:
+    """The last seven days: every solve, and every pattern those solves used.
+
+    Purely backward-looking and entirely free - pure SQL, no LLM, no writes, so it
+    can be recomputed on every CLI run and every page load. A pattern is listed if
+    it was practiced inside the window, however long ago it was first picked up;
+    its standing and mastery are all-time, because a week of practice is not enough
+    history to judge a pattern on.
     """
-    return conn.execute(
-        """
-        SELECT week_start, generated_at, report_path, stats, degraded, narrative
-        FROM weekly_runs ORDER BY id DESC LIMIT 1
-        """
-    ).fetchone()
-
-
-def weekly_report_needed(conn: sqlite3.Connection, today: date) -> bool:
-    """True when this ISO week has no report yet.
-
-    Keyed on `generated_at`, like the report filename and the /weekly page's label -
-    never `week_start`, which falls in the previous ISO week. Only the newest row
-    matters because `generated_at` only moves forward.
-    """
-    row = last_weekly_run(conn)
-    if row is None:
-        return True
-    last = weekly_report.week_key(date.fromisoformat(row["generated_at"]))
-    return last != weekly_report.week_key(today)
-
-
-def run_weekly(
-    conn: sqlite3.Connection, today: date, no_llm: bool = False
-) -> WeeklyRunResult:
-    """Generate the week's report: collect, analyze, narrate, write, record.
-
-    Purely backward-looking - what happened and what it says about the patterns.
-    It deliberately plans nothing: `daily_plan` owns what to solve next, and a
-    25-problem list frozen into a weekly file went stale the moment one was solved.
-
-    Called by `coach weekly` and, once per ISO week, by `coach today`. The narrative
-    is the only paid call and the only optional part: without it the report is still
-    written and the run is recorded as degraded.
-    """
+    today = today or date.today()
     week = weekly_collect.collect(conn, today)
     analysis = weekly_analyze.analyze(conn, today)
+    # The same replay that produced today's scores, stopped at the start of the
+    # window - so `delta` compares two numbers computed the one way.
+    before = mastery.attempt_scores(conn, before=week["start"])
 
-    note = None
-    skipped = None
-    if not no_llm:
-        try:
-            note = weekly_report.narrative(week, analysis)
-        except llm.LLMUnavailable as exc:
-            skipped = str(exc)
+    all_time = {p["pattern"]: p for p in analysis["patterns"]}
+    # Untagged solves (enrichment was skipped) still count as attempts and still
+    # show in the table; they just have no pattern to say anything about.
+    used = Counter(r["pattern"] for r in week["attempts"] if r["pattern"])
 
-    text = weekly_report.render(week, analysis, note, today)
-    path = weekly_report.write(text, today)
+    patterns = [
+        WeekPattern(
+            pattern=name,
+            attempts_week=count,
+            attempts_total=all_time[name]["attempts"],
+            score=all_time[name]["score"],
+            score_before=mastery.fold(before.get(name, [])),
+            standing=standing_of(analysis, name, all_time[name]["attempts"]),
+        )
+        for name, count in used.items()
+    ]
+    patterns.sort(key=lambda p: (STANDING_ORDER[p.standing], p.pattern))
 
-    conn.execute(
-        """
-        INSERT INTO weekly_runs (week_start, generated_at, report_path, stats, degraded, narrative)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (
-            week["start"].isoformat(),
-            today.isoformat(),
-            str(path.relative_to(config.PROJECT_ROOT)),
-            json.dumps(weekly_report.snapshot(week, analysis)),
-            int(note is None),
-            note,
-        ),
-    )
-    conn.commit()
-
-    return WeeklyRunResult(
-        path=path,
-        week=weekly_report.week_key(today),
-        degraded=note is None,
-        narrative_skipped=skipped,
-        attempts=len(week["attempts"]),
-        due=len(analysis["due"]),
-        weak_patterns=analysis["weak_patterns"],
+    return WeeklyReview(
+        start=week["start"],
+        end=week["end"],
+        attempts=week["attempts"],
+        distinct_problems=week["distinct_problems"],
+        patterns=patterns,
     )
 
 

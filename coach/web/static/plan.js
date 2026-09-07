@@ -58,29 +58,6 @@ function renderTopics(data) {
   const parts = [`${data.items.length} problems today`, `${data.due_count} review${data.due_count === 1 ? "" : "s"} due today`];
   for (const [name, p] of Object.entries(data.curriculum)) parts.push(`${name} ${p.done}/${p.total}`);
   document.getElementById("plan-meta").textContent = parts.join(" · ");
-
-  renderLastReport(data.last_report);
-}
-
-/* The narrative counterpart to the topics above: these cards say which patterns
-   are weak, the weekly review says what to do about it. The week label arrives
-   pre-computed - see /api/plan on why this must not derive it. */
-function renderLastReport(report) {
-  const host = document.getElementById("last-report");
-  host.replaceChildren();
-
-  if (!report) {
-    host.append(
-      el("span", {
-        text: "No weekly review yet — it writes itself on the first `coach today` of the week.",
-      })
-    );
-    return;
-  }
-  host.append(
-    el("span", { text: `Last weekly review: ${report.week} (generated ${report.generated_at}) · ` }),
-    el("a", { href: "/weekly", text: "read the coach's note" })
-  );
 }
 
 function renderPlan(data) {

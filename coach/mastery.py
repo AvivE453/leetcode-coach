@@ -132,22 +132,28 @@ def pattern_stats(conn: sqlite3.Connection) -> list[dict]:
     ]
 
 
-def recompute_all(conn: sqlite3.Connection) -> None:
-    """Rebuild every pattern's score by replaying its attempts in order.
+def attempt_scores(
+    conn: sqlite3.Connection, before: date | None = None
+) -> dict[str, list[float]]:
+    """Every scored attempt per pattern, oldest first - what `fold` reduces.
 
-    Cheap enough to be the only recompute there is (hundreds of rows), which
-    keeps the score a pure function of the data - no incremental bookkeeping to
-    drift, and a late review re-scores the attempt it belongs to.
+    `before` cuts the replay off at a date, which is how the weekly review asks
+    where a pattern stood a week ago: the same history, one week short. A review
+    written this week re-scores the attempt it belongs to on both sides of that
+    cut, because the score is a function of the data, not of when it was read.
     """
+    where = "WHERE a.date < ?" if before else ""
     rows = conn.execute(
-        """
+        f"""
         SELECT en.pattern, a.outcome, rv.verdict, rv.issues
         FROM attempts a
         JOIN solutions s ON s.attempt_id = a.id
         JOIN enrichments en ON en.solution_id = s.id
         LEFT JOIN reviews rv ON rv.solution_id = s.id
+        {where}
         ORDER BY a.date, a.id
-        """
+        """,
+        (before.isoformat(),) if before else (),
     ).fetchall()
 
     by_pattern: dict[str, list[float]] = {}
@@ -156,7 +162,17 @@ def recompute_all(conn: sqlite3.Connection) -> None:
         by_pattern.setdefault(r["pattern"], []).append(
             attempt_score(r["outcome"], r["verdict"], issues)
         )
+    return by_pattern
 
+
+def recompute_all(conn: sqlite3.Connection) -> None:
+    """Rebuild every pattern's score by replaying its attempts in order.
+
+    Cheap enough to be the only recompute there is (hundreds of rows), which
+    keeps the score a pure function of the data - no incremental bookkeeping to
+    drift, and a late review re-scores the attempt it belongs to.
+    """
+    by_pattern = attempt_scores(conn)
     today = date.today().isoformat()
     conn.execute("DELETE FROM pattern_scores")
     conn.executemany(

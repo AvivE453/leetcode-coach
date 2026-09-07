@@ -4,7 +4,7 @@ from datetime import date, timedelta
 import numpy as np
 from typer.testing import CliRunner
 
-from coach import config, db, embed, enrich, review
+from coach import config, db, embed, enrich, mastery, review
 from coach.cli import app
 
 runner = CliRunner()
@@ -15,7 +15,6 @@ CODE = "class Solution:\n    def twoSum(self, nums, target):\n        return []\
 def setup_env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "coach.db")
-    monkeypatch.setattr(config, "REPORTS_DIR", tmp_path / "reports")
     conn = db.connect()
     db.init_schema(conn)
     db.upsert_problems(
@@ -369,93 +368,46 @@ def test_review_without_key_degrades(tmp_path, monkeypatch):
     assert "ANTHROPIC_API_KEY" in result.output
 
 
-def test_weekly_writes_report_and_records_run(tmp_path, monkeypatch):
+def test_weekly_lists_the_week_and_how_each_pattern_is_going(tmp_path, monkeypatch):
+    """The live view: no report file, no stored run, no API call anywhere in it."""
     setup_env(tmp_path, monkeypatch)
     monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: ENRICHMENT)
     monkeypatch.setattr("coach.embed.encode", fake_encode)
     runner.invoke(app, ["log", "1", "--outcome", "struggled"], input=CODE)
-    monkeypatch.setattr("coach.llm.text", lambda prompt, **kw: "Drill hashmap problems.")
 
     result = runner.invoke(app, ["weekly"])
     assert result.exit_code == 0, result.output
 
-    week = date.today().isocalendar()
-    path = tmp_path / "reports" / f"{week.year}-{week.week:02d}.md"
-    assert path.exists()
-    text = path.read_text()
-    assert "#1 Two Sum" in text
-    assert "Drill hashmap problems." in text
-
-    conn = db.connect()
-    run = conn.execute("SELECT * FROM weekly_runs").fetchone()
-    assert run["degraded"] == 0
-    stats = json.loads(run["stats"])
-    assert stats["attempts"] == 1
-    # Stored, not just written to the report - the web page reads it back for free.
-    assert run["narrative"] == "Drill hashmap problems."
-
-    # The stored snapshot mirrors render()'s sections, not a thin summary of
-    # them - the /weekly page must be able to show the same depth as the .md.
-    assert stats["attempts_detail"] == [
-        {
-            "date": date.today().isoformat(),
-            "number": 1,
-            "title": "Two Sum",
-            "difficulty": "Easy",
-            "outcome": "struggled",
-            "minutes": None,
-            "pattern": "hashmap",
-        }
-    ]
-    assert stats["patterns"] == [
-        {"pattern": "hashmap", "attempts": 1, "struggle_rate": 1.0, "score": 3.0,
-         "weak": False, "stale": False}
-    ]
-    assert stats["curriculum"] == {
-        "blind75": {"done": 0, "total": 0},
-        "neetcode150": {"done": 0, "total": 0},
-    }
-    # The report diagnoses the week and plans nothing - `coach today` owns that.
-    assert "plan_items" not in stats
-    assert "planned" not in stats
-    assert "Plan for next week" not in text
+    assert "1 attempt(s) on 1 problem(s)" in result.output
+    assert "#1 Two Sum" in result.output
+    assert "struggled" in result.output
+    # One attempt is far below WEAK_MIN_ATTEMPTS, so nothing is claimed either way.
+    assert "hashmap: too early to call" in result.output
+    assert not (tmp_path / "reports").exists()
 
 
-def test_weekly_degrades_without_llm(tmp_path, monkeypatch):
+def test_weekly_calls_a_pattern_weak_and_shows_the_week_movement(tmp_path, monkeypatch):
     setup_env(tmp_path, monkeypatch)
+    conn = db.connect()
+    # Five failures before this week bottom the score out at 1.0; a clean solve
+    # inside the window lifts it, which is exactly what the trend must report.
+    for day in range(12, 7, -1):
+        add_scored_attempt(conn, date.today() - timedelta(days=day), "failed")
+    add_scored_attempt(conn, date.today(), "clean")
+    conn.close()
 
     result = runner.invoke(app, ["weekly"])
     assert result.exit_code == 0, result.output
-    assert "Narrative skipped" in result.output
-    assert "degraded" in result.output
 
-    conn = db.connect()
-    run = conn.execute("SELECT * FROM weekly_runs").fetchone()
-    assert run["degraded"] == 1
-    assert run["narrative"] is None
-
-    week = date.today().isocalendar()
-    text = (tmp_path / "reports" / f"{week.year}-{week.week:02d}.md").read_text()
-    assert "No attempts logged this week" in text
-    assert "LLM unavailable" in text
-
-
-def test_weekly_no_llm_flag_skips_the_call(tmp_path, monkeypatch):
-    setup_env(tmp_path, monkeypatch)
-
-    def explode(*args, **kwargs):
-        raise AssertionError("--no-llm must not call the API")
-
-    monkeypatch.setattr("coach.llm.text", explode)
-    result = runner.invoke(app, ["weekly", "--no-llm"])
-    assert result.exit_code == 0, result.output
-    assert "degraded" in result.output
+    line = next(ln for ln in result.output.splitlines() if "hashmap:" in ln)
+    assert "WEAK" in line
+    assert "+0.8 since last week" in line  # 1.0 -> 1.8 on one clean solve
+    assert "1 this week, 6 all-time" in line
 
 
 def test_weekly_without_catalog_points_at_init(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "coach.db")
-    monkeypatch.setattr(config, "REPORTS_DIR", tmp_path / "reports")
     conn = db.connect()
     db.init_schema(conn)
     conn.close()
@@ -485,20 +437,31 @@ def add_curriculum_problems(conn):
     conn.commit()
 
 
-def record_weekly_run(conn, day):
-    """A weekly_runs row for `day`'s ISO week, so `coach today` sees the week as done."""
+def add_scored_attempt(conn, day, outcome, pattern="hashmap"):
+    """One enriched solve of #1, scored - the history a mastery number folds over."""
+    attempt_id = conn.execute(
+        "INSERT INTO attempts (problem_number, date, outcome) VALUES (1, ?, ?)",
+        (day.isoformat(), outcome),
+    ).lastrowid
+    solution_id = conn.execute(
+        "INSERT INTO solutions (problem_number, attempt_id, code, created_at) VALUES (1, ?, 'c', ?)",
+        (attempt_id, day.isoformat()),
+    ).lastrowid
     conn.execute(
-        "INSERT INTO weekly_runs (week_start, generated_at, degraded) VALUES (?, ?, 0)",
-        ((day - timedelta(days=6)).isoformat(), day.isoformat()),
+        """
+        INSERT INTO enrichments (solution_id, pattern, secondary_patterns, data_structures)
+        VALUES (?, ?, '[]', '[]')
+        """,
+        (solution_id, pattern),
     )
     conn.commit()
+    mastery.recompute_all(conn)
 
 
 def test_today_lists_due_reviews_before_curriculum_and_respects_target(tmp_path, monkeypatch):
     setup_env(tmp_path, monkeypatch)
     conn = db.connect()
     add_curriculum_problems(conn)
-    record_weekly_run(conn, date.today())
     conn.execute(
         """
         INSERT INTO review_state (problem_number, ease, interval_days, next_due, reps, lapses)
@@ -522,10 +485,10 @@ def test_today_lists_due_reviews_before_curriculum_and_respects_target(tmp_path,
 
 
 def test_today_ignores_reviews_that_are_not_due_yet(tmp_path, monkeypatch):
-    """The daily list means today; `coach weekly` still looks six days ahead."""
+    """The daily list means today: solving a review early re-anchors SM-2 from
+    today and shortens the interval, so Friday's review must not appear now."""
     setup_env(tmp_path, monkeypatch)
     conn = db.connect()
-    record_weekly_run(conn, date.today())
     conn.execute(
         """
         INSERT INTO review_state (problem_number, ease, interval_days, next_due, reps, lapses)
@@ -540,15 +503,11 @@ def test_today_ignores_reviews_that_are_not_due_yet(tmp_path, monkeypatch):
     assert today_out.exit_code == 0, today_out.output
     assert "Nothing to do today" in today_out.output
 
-    weekly_out = runner.invoke(app, ["weekly", "--no-llm"])
-    assert "1 review(s) due" in weekly_out.output
-
 
 def test_today_drops_a_problem_once_it_is_solved(tmp_path, monkeypatch):
     setup_env(tmp_path, monkeypatch)
     conn = db.connect()
     add_curriculum_problems(conn)
-    record_weekly_run(conn, date.today())
     conn.close()
 
     assert "#1 Two Sum" in runner.invoke(app, ["today"]).output
@@ -561,75 +520,30 @@ def test_today_drops_a_problem_once_it_is_solved(tmp_path, monkeypatch):
     assert "#217 Contains Duplicate" in after.output
 
 
-def test_today_never_calls_the_llm_for_the_list(tmp_path, monkeypatch):
+def test_today_never_calls_the_llm_and_writes_nothing(tmp_path, monkeypatch):
+    """The daily list is pure SQL. It used to also generate the week's report on
+    the first run of an ISO week, which is the one thing that ever cost money;
+    now every run of every week is free, so a fresh database is the test."""
     setup_env(tmp_path, monkeypatch)
     conn = db.connect()
     add_curriculum_problems(conn)
-    record_weekly_run(conn, date.today())
     conn.close()
 
     def explode(*args, **kwargs):
         raise AssertionError("the daily list must not call the API")
 
-    monkeypatch.setattr("coach.llm.text", explode)
     monkeypatch.setattr("coach.llm.parse", explode)
 
     result = runner.invoke(app, ["today"])
     assert result.exit_code == 0, result.output
     assert "problem(s) for today" in result.output
     assert "weekly review" not in result.output
-
-
-def test_today_writes_the_weekly_review_once_a_week(tmp_path, monkeypatch):
-    setup_env(tmp_path, monkeypatch)
-    monkeypatch.setattr("coach.llm.text", lambda prompt, **kw: "Drill hashmap problems.")
-
-    first = runner.invoke(app, ["today"])
-    assert first.exit_code == 0, first.output
-    assert "First run this week" in first.output
-    assert "Report written to" in first.output
-
-    second = runner.invoke(app, ["today"])
-    assert second.exit_code == 0, second.output
-    assert "First run this week" not in second.output
-    assert "Report written to" not in second.output
-
-    week = date.today().isocalendar()
-    assert (tmp_path / "reports" / f"{week.year}-{week.week:02d}.md").exists()
-    conn = db.connect()
-    assert conn.execute("SELECT COUNT(*) FROM weekly_runs").fetchone()[0] == 1
-    assert conn.execute("SELECT narrative FROM weekly_runs").fetchone()[0] == "Drill hashmap problems."
-
-
-def test_today_leaves_a_manually_generated_report_alone(tmp_path, monkeypatch):
-    setup_env(tmp_path, monkeypatch)
-    monkeypatch.setattr("coach.llm.text", lambda prompt, **kw: "Drill hashmap problems.")
-    runner.invoke(app, ["weekly"])
-
-    result = runner.invoke(app, ["today"])
-    assert result.exit_code == 0, result.output
-    assert "First run this week" not in result.output
-
-    conn = db.connect()
-    assert conn.execute("SELECT COUNT(*) FROM weekly_runs").fetchone()[0] == 1
-
-
-def test_today_still_writes_the_review_without_a_key(tmp_path, monkeypatch):
-    setup_env(tmp_path, monkeypatch)
-
-    result = runner.invoke(app, ["today"])
-    assert result.exit_code == 0, result.output
-    assert "Narrative skipped" in result.output
-    assert "degraded: no narrative" in result.output
-
-    conn = db.connect()
-    assert conn.execute("SELECT degraded FROM weekly_runs").fetchone()[0] == 1
+    assert not (tmp_path / "reports").exists()
 
 
 def test_today_without_catalog_points_at_init(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "coach.db")
-    monkeypatch.setattr(config, "REPORTS_DIR", tmp_path / "reports")
     conn = db.connect()
     db.init_schema(conn)
     conn.close()

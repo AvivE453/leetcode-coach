@@ -91,7 +91,9 @@ def test_init_schema_migrates_pre_m11_problems_table(tmp_path):
     assert row["intended_secondary_patterns"] == "[]"
 
 
-def test_init_schema_migrates_pre_m9_weekly_runs_table(tmp_path):
+def test_init_schema_drops_the_stored_weekly_runs_table(tmp_path):
+    """The weekly review is recomputed on read now, so the frozen rows it used to
+    be served from - and the LLM note stored beside them - have no reader left."""
     conn = db.connect(tmp_path / "test.db")
     conn.execute(
         """
@@ -101,7 +103,8 @@ def test_init_schema_migrates_pre_m9_weekly_runs_table(tmp_path):
             generated_at TEXT NOT NULL,
             report_path TEXT,
             stats TEXT,
-            degraded INTEGER NOT NULL DEFAULT 0
+            degraded INTEGER NOT NULL DEFAULT 0,
+            narrative TEXT
         )
         """
     )
@@ -110,14 +113,12 @@ def test_init_schema_migrates_pre_m9_weekly_runs_table(tmp_path):
     )
 
     db.init_schema(conn)
-    db.init_schema(conn)
+    db.init_schema(conn)  # and again on a database that never had the table
 
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(weekly_runs)")}
-    assert "narrative" in columns
-    # The pre-migration run survives, with no note attached.
-    row = conn.execute("SELECT * FROM weekly_runs").fetchone()
-    assert row["week_start"] == "2026-08-24"
-    assert row["narrative"] is None
+    tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "weekly_runs" not in tables
+    # The solve history itself is untouched by the migration.
+    assert "attempts" in tables and "solutions" in tables
 
 
 def test_reviews_round_trip_through_the_store(tmp_path):

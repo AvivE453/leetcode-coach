@@ -82,16 +82,6 @@ CREATE TABLE IF NOT EXISTS pattern_scores (
     attempts INTEGER NOT NULL,
     updated_at TEXT NOT NULL
 );
-
-CREATE TABLE IF NOT EXISTS weekly_runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    week_start TEXT NOT NULL,
-    generated_at TEXT NOT NULL,
-    report_path TEXT,
-    stats TEXT,
-    degraded INTEGER NOT NULL DEFAULT 0,
-    narrative TEXT
-);
 """
 
 
@@ -114,9 +104,9 @@ def init_schema(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE problems ADD COLUMN intended_secondary_patterns TEXT NOT NULL DEFAULT '[]'"
         )
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(weekly_runs)")}
-    if "narrative" not in columns:
-        conn.execute("ALTER TABLE weekly_runs ADD COLUMN narrative TEXT")
+    # The weekly review is recomputed on every read now, so the rows that froze one
+    # week's numbers (and the LLM note beside them) have no reader left.
+    conn.execute("DROP TABLE IF EXISTS weekly_runs")
     conn.commit()
 
 

@@ -383,20 +383,14 @@ pre code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-siz
 
 .loading { color: var(--muted); }
 
-/* Weekly Review: one paragraph of prose, set wider and calmer than a stat card. */
-.note-card { margin-top: 14px; border-left: 3px solid var(--accent); }
-.note-card .narrative { margin: 0; font-size: 1.02rem; line-height: 1.7; max-width: 68ch; }
-.note-card .empty { color: var(--muted); margin: 0; }
-.note-card .hint { margin-top: 8px; }
+/* Weekly Review: same palette as the verdicts, so a standing reads at a glance. */
+.standing { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.standing.weak { color: var(--hard); }
+.standing.on-track { color: var(--easy); }
+.standing.too-early { color: var(--muted); }
 #counts { margin-bottom: 14px; }
-.subhead {
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin: 22px 0 8px;
-}
+#verdicts { margin-bottom: 8px; }
+#week-table .empty, #verdicts .empty { color: var(--muted); margin: 0; }
 
 .sr-only {
   position: absolute;

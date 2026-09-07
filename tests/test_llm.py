@@ -85,15 +85,6 @@ def test_an_unforeseen_sdk_error_degrades(api_key, monkeypatch):
         llm.parse("hi", Out)
 
 
-def test_text_calls_translate_failures_too(api_key, monkeypatch):
-    """`text()` is the weekly narrative, and run_weekly degrades on LLMUnavailable
-    alone - an untranslated error there would abort the report mid-write."""
-    raising(monkeypatch, anthropic.AnthropicError("boom"))
-
-    with pytest.raises(llm.LLMUnavailable):
-        llm.text("hi")
-
-
 def test_programming_errors_are_not_swallowed(api_key, monkeypatch):
     """Deliberately not caught: a TypeError is a bug here, not the API degrading.
 

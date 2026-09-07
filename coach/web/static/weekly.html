@@ -13,7 +13,7 @@
   <header class="masthead">
     <div class="brand">
       <h1>leetcode-coach</h1>
-      <span class="sub">last week, read back to you</span>
+      <span class="sub">this week, as it stands</span>
     </div>
     <nav class="pills" aria-label="Sections">
       <a href="/">Home</a>
@@ -24,35 +24,29 @@
   </header>
 
   <main>
-    <section aria-labelledby="note-heading" style="margin-top:0">
+    <section aria-labelledby="week-heading" style="margin-top:0">
       <div class="section-head">
         <div>
-          <h2 id="note-heading">Coach's note</h2>
-          <p class="hint">Written once a week by <code>coach today</code> and stored — opening this page costs nothing.</p>
+          <h2 id="week-heading">The last seven days</h2>
+          <p class="hint">Recomputed every time you open this page — log a solve and it shows up here.</p>
         </div>
-        <p class="hint" id="run-meta"></p>
+        <p class="hint" id="week-meta"></p>
       </div>
-      <div class="card note-card" id="note">
-        <p class="loading">Loading the last weekly run…</p>
+      <div class="grid" id="counts"></div>
+      <div id="week-table">
+        <p class="loading">Loading this week…</p>
       </div>
     </section>
 
-    <section aria-labelledby="snapshot-heading" id="snapshot-section" hidden>
+    <section aria-labelledby="patterns-heading">
       <div class="section-head">
         <div>
-          <h2 id="snapshot-heading">Snapshot when it was written</h2>
-          <p class="hint">Frozen at that run — the same detail as the .md report. Today's live picture is on the <a href="/plan">Daily Plan</a> page.</p>
+          <h2 id="patterns-heading">Patterns you used this week</h2>
+          <p class="hint" id="patterns-hint">Mastery is all-time, so a week of practice moves it rather than defining it.</p>
         </div>
       </div>
-      <div class="grid" id="counts"></div>
-
-      <h3 class="subhead" id="week-heading" hidden>That week, attempt by attempt</h3>
-      <div id="week-table"></div>
-
-      <h3 class="subhead" id="patterns-heading" hidden>Patterns, as they stood then</h3>
+      <div class="topics" id="verdicts"></div>
       <div id="patterns-table"></div>
-
-      <div class="topics" id="snapshot-topics"></div>
     </section>
   </main>
 </div>

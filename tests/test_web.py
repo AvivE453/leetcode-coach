@@ -1,4 +1,3 @@
-import json
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -61,7 +60,6 @@ def client(tmp_path, monkeypatch):
     """A TestClient bound to a scratch database - never data/coach.db."""
     monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "coach.db")
-    monkeypatch.setattr(config, "REPORTS_DIR", tmp_path / "reports")
     conn = db.connect()
     db.init_schema(conn)
     db.upsert_problems(conn, PROBLEMS)
@@ -212,7 +210,7 @@ def test_patterns_endpoint_feeds_the_pattern_table(client, monkeypatch):
     assert client.get("/api/patterns").json() == {"patterns": [{"pattern": "hashmap", "solved": 1}]}
 
 
-def test_plan_endpoint_ranks_problems_and_stays_read_only(client, monkeypatch):
+def test_plan_endpoint_ranks_problems_and_stays_read_only(client, monkeypatch, tmp_path):
     enriched(monkeypatch)
     client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
 
@@ -230,11 +228,7 @@ def test_plan_endpoint_ranks_problems_and_stays_read_only(client, monkeypatch):
     assert plan["items"][0]["kind"] == "review"
     assert plan["items"][1]["kind"] == "curriculum"
     assert plan["topics"] == {"weak": [], "stale": [], "off_pattern": []}
-    assert plan["last_report"] is None
-
-    conn = db.connect()
-    assert conn.execute("SELECT COUNT(*) FROM weekly_runs").fetchone()[0] == 0
-    assert not (config.REPORTS_DIR).exists()
+    assert not (tmp_path / "reports").exists()
 
 
 def test_plan_endpoint_only_counts_reviews_due_today(client, monkeypatch):
@@ -269,34 +263,6 @@ def test_plan_endpoint_serves_the_thresholds_the_page_quotes(client):
         "weak_min_attempts": mastery.WEAK_MIN_ATTEMPTS,
         "stale_days": weekly_analyze.STALE_DAYS,
     }
-
-
-def test_plan_endpoint_labels_the_last_report_by_generated_at(client):
-    """The Today page links to the weekly review and shows its week label.
-
-    The label must come from the endpoint: generated_at and week_start fall in
-    different ISO weeks, so deriving it in the browser would both duplicate
-    week_key() and pick the wrong week.
-    """
-    conn = db.connect()
-    # A run generated Monday 2026-09-07 over the window starting Sunday 2026-08-31:
-    # week_start is ISO week 36, generated_at is ISO week 37.
-    conn.execute(
-        """
-        INSERT INTO weekly_runs (week_start, generated_at, report_path, stats, degraded)
-        VALUES ('2026-08-31', '2026-09-07', 'reports/2026-37.md', '{}', 0)
-        """
-    )
-    conn.commit()
-    conn.close()
-
-    last = client.get("/api/plan").json()["last_report"]
-
-    assert last["week"] == "2026-37"
-    assert last["week_start"] == "2026-08-31"
-    assert last["report_path"] == "reports/2026-37.md"
-    # The stats blob and the narrative stay on /api/weekly.
-    assert set(last) == {"week", "week_start", "generated_at", "report_path"}
 
 
 def test_plan_endpoint_surfaces_off_pattern_topics(client, monkeypatch):
@@ -400,63 +366,46 @@ def test_endpoints_survive_parallel_requests(client, monkeypatch):
     assert codes == [200] * len(paths)
 
 
-def test_weekly_endpoint_is_empty_until_the_first_run(client):
-    assert client.get("/api/weekly").json() == {"run": None}
+def test_weekly_endpoint_is_empty_on_a_fresh_database(client):
+    """No stored run to be missing any more - an empty week is a real answer."""
+    week = client.get("/api/weekly").json()
+
+    assert week["attempts"] == []
+    assert week["patterns"] == []
+    assert week["distinct_problems"] == 0
+    assert week["start"] <= week["end"]
 
 
-def test_weekly_endpoint_serves_the_stored_narrative(client):
-    """The page reads the note back; it never regenerates it (no LLM mock needed)."""
-    conn = db.connect()
-    conn.execute(
-        """
-        INSERT INTO weekly_runs (week_start, generated_at, report_path, stats, degraded, narrative)
-        VALUES ('2026-08-24', '2026-08-30', 'reports/2026-35.md', ?, 0, 'Drill two-pointers.')
-        """,
-        (
-            json.dumps(
-                {
-                    "attempts": 4,
-                    "distinct_problems": 3,
-                    "weak_patterns": ["two-pointers"],
-                    "stale_patterns": [],
-                    "off_pattern": [15],
-                    "due": 2,
-                    "planned": 5,
-                }
-            ),
-        ),
-    )
-    conn.commit()
-    conn.close()
+def test_weekly_endpoint_recomputes_from_the_logged_solves(client, monkeypatch):
+    """Live, not frozen: logging a solve changes this endpoint's answer, and
+    opening it never calls the API - the enrichment mock is for the log call."""
+    enriched(monkeypatch)
+    client.post("/api/log", json={"number": 1, "outcome": "struggled", "code": CODE})
 
-    run = client.get("/api/weekly").json()["run"]
+    week = client.get("/api/weekly").json()
 
-    assert run["narrative"] == "Drill two-pointers."
-    assert run["degraded"] is False
-    assert run["week"] == "2026-35"  # keyed off generated_at, like the report filename
-    assert run["report_path"] == "reports/2026-35.md"
-    assert run["stats"]["weak_patterns"] == ["two-pointers"]
-    # A row written back when the report still planned the next week keeps its
-    # extra keys - the endpoint serves the snapshot verbatim and the page ignores
-    # what it no longer renders.
-    assert run["stats"]["planned"] == 5
+    assert [a["number"] for a in week["attempts"]] == [1]
+    assert week["attempts"][0]["outcome"] == "struggled"
+    assert week["distinct_problems"] == 1
+    assert week["patterns"] == [
+        {
+            "pattern": "hashmap",
+            "attempts_week": 1,
+            "attempts_total": 1,
+            "score": 3.0,
+            "score_before": None,
+            "delta": None,
+            # One attempt is below WEAK_MIN_ATTEMPTS, so nothing is claimed yet.
+            "standing": "too-early",
+        }
+    ]
 
 
-def test_weekly_endpoint_reports_a_degraded_run(client):
-    conn = db.connect()
-    conn.execute(
-        """
-        INSERT INTO weekly_runs (week_start, generated_at, stats, degraded, narrative)
-        VALUES ('2026-08-24', '2026-08-30', NULL, 1, NULL)
-        """
-    )
-    conn.commit()
-    conn.close()
+def test_weekly_endpoint_serves_the_thresholds_the_page_quotes(client):
+    week = client.get("/api/weekly").json()
 
-    run = client.get("/api/weekly").json()["run"]
-    assert run["narrative"] is None
-    assert run["degraded"] is True
-    assert run["stats"] == {}
+    assert week["thresholds"]["weak_score"] == mastery.WEAK_SCORE
+    assert week["thresholds"]["weak_min_attempts"] == mastery.WEAK_MIN_ATTEMPTS
 
 
 def test_pages_are_served(client):

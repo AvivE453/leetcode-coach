@@ -7,7 +7,6 @@ from coach import db, mastery
 from coach.weekly import analyze as weekly_analyze
 from coach.weekly import collect as weekly_collect
 from coach.weekly import plan as weekly_plan
-from coach.weekly import report as weekly_report
 
 TODAY = date(2026, 8, 31)
 
@@ -50,22 +49,6 @@ def add_attempt(conn, number, day, outcome="clean", pattern=None, minutes=None):
         # enrich path recomputes right there.
         mastery.recompute_all(conn)
     return solution_id
-
-
-def add_review(conn, solution_id, verdict, issues=()):
-    conn.execute(
-        """
-        INSERT INTO reviews (solution_id, verdict, strengths, issues, time_complexity,
-                             space_complexity, optimal_time_complexity, created_at)
-        VALUES (?, ?, '[]', ?, 'O(n)', 'O(1)', 'O(n)', '2026-08-30')
-        """,
-        (
-            solution_id,
-            verdict,
-            json.dumps([{"category": c, "description": d} for c, d in issues]),
-        ),
-    )
-    mastery.recompute_all(conn)
 
 
 def set_due(conn, number, day):
@@ -227,106 +210,3 @@ def test_plan_keeps_due_reviews_even_when_hard(tmp_path):
     items = weekly_plan.build_plan(conn, analysis, target=10)
     assert len(items) == 5
     assert all("review due" in i.reason for i in items)
-
-
-def test_render_handles_empty_week(tmp_path):
-    conn = make_db(tmp_path)
-    add_problem(conn, 1, "two-sum", "Two Sum", tags=["hash-table"])
-
-    week = weekly_collect.collect(conn, TODAY)
-    analysis = weekly_analyze.analyze(conn, TODAY)
-    text = weekly_report.render(week, analysis, None, TODAY)
-
-    assert "# Weekly report — 2026-36" in text
-    assert "No attempts logged this week" in text
-    assert "LLM unavailable" in text
-
-
-def test_render_includes_tables_and_narrative(tmp_path):
-    conn = make_db(tmp_path)
-    add_problem(conn, 1, "two-sum", "Two Sum", tags=["hash-table"], intended="hashmap")
-    add_problem(conn, 2, "maximum-subarray", "Maximum Subarray", intended="dp-1d")
-    add_attempt(conn, 1, TODAY - timedelta(days=1), outcome="clean", pattern="hashmap", minutes=12)
-    add_attempt(conn, 2, TODAY - timedelta(days=1), outcome="struggled", pattern="prefix-sum")
-
-    week = weekly_collect.collect(conn, TODAY)
-    analysis = weekly_analyze.analyze(conn, TODAY)
-    text = weekly_report.render(week, analysis, "Focus on dp-1d.", TODAY)
-
-    assert "| 2026-08-30 | #1 Two Sum | Easy | clean | 12 | hashmap |" in text
-    assert "canonical approach is **dp-1d**" in text
-    assert "Focus on dp-1d." in text
-    assert "blind75: 2/2" in text
-
-
-def test_render_plans_nothing_and_says_where_planning_lives(tmp_path):
-    """The report diagnoses the week; `coach today` picks what to solve next."""
-    conn = make_db(tmp_path)
-    add_problem(conn, 1, "two-sum", "Two Sum", tags=["hash-table"])
-    add_problem(conn, 2, "valid-anagram", "Valid Anagram", tags=["hash-table"])
-    set_due(conn, 1, TODAY)
-
-    week = weekly_collect.collect(conn, TODAY)
-    analysis = weekly_analyze.analyze(conn, TODAY)
-    text = weekly_report.render(week, analysis, "Drill hashmaps.", TODAY)
-
-    assert "Plan for next week" not in text
-    assert "https://leetcode.com/problems/" not in text
-    assert "coach today" in text
-
-
-def test_summarize_feeds_llm_the_key_facts(tmp_path):
-    conn = make_db(tmp_path)
-    add_problem(conn, 1, "two-sum", "Two Sum", intended="hashmap")
-    add_attempt(conn, 1, TODAY - timedelta(days=1), outcome="struggled", pattern="hashmap")
-
-    week = weekly_collect.collect(conn, TODAY)
-    analysis = weekly_analyze.analyze(conn, TODAY)
-    summary = weekly_report.summarize(week, analysis)
-
-    assert "Attempts this week: 1" in summary
-    assert "#1 Two Sum" in summary
-    assert "outcome=struggled" in summary
-    assert "review=" not in summary
-
-
-def test_summarize_carries_stored_reviews(tmp_path):
-    conn = make_db(tmp_path)
-    add_problem(conn, 1, "two-sum", "Two Sum")
-    add_problem(conn, 2, "valid-palindrome", "Valid Palindrome")
-    reviewed = add_attempt(conn, 1, TODAY - timedelta(days=1), outcome="clean", pattern="hashmap")
-    add_review(
-        conn,
-        reviewed,
-        "needs-work",
-        [("edge-case", "wrong on an empty array"), ("complexity", "sorts unnecessarily")],
-    )
-    add_attempt(conn, 2, TODAY - timedelta(days=1), outcome="struggled", pattern="two-pointers")
-
-    week = weekly_collect.collect(conn, TODAY)
-    summary = weekly_report.summarize(week, weekly_analyze.analyze(conn, TODAY))
-
-    reviewed_line = next(line for line in summary.splitlines() if "#1 Two Sum" in line)
-    assert "review=needs-work" in reviewed_line
-    assert "edge-case: wrong on an empty array" in reviewed_line
-    assert "complexity: sorts unnecessarily" in reviewed_line
-    # The unreviewed solve is unchanged - a missing review is not an empty one.
-    assert "review=" not in next(line for line in summary.splitlines() if "#2" in line)
-
-
-def test_summarize_notes_a_clean_review_without_issues(tmp_path):
-    conn = make_db(tmp_path)
-    add_problem(conn, 1, "two-sum", "Two Sum")
-    solution_id = add_attempt(conn, 1, TODAY - timedelta(days=1), pattern="hashmap")
-    add_review(conn, solution_id, "optimal")
-
-    week = weekly_collect.collect(conn, TODAY)
-    summary = weekly_report.summarize(week, weekly_analyze.analyze(conn, TODAY))
-
-    assert "review=optimal" in summary
-    assert "()" not in summary
-
-
-def test_week_key_uses_iso_week():
-    assert weekly_report.week_key(date(2026, 8, 31)) == "2026-36"
-    assert weekly_report.week_key(date(2026, 1, 1)) == "2026-01"

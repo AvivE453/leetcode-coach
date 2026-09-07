@@ -10,12 +10,11 @@ def collect(conn: sqlite3.Connection, today: date) -> dict:
     attempts = conn.execute(
         """
         SELECT a.date, a.problem_number, p.title, p.difficulty, a.outcome, a.minutes,
-               en.pattern, rv.verdict AS review_verdict, rv.issues AS review_issues
+               en.pattern
         FROM attempts a
         JOIN problems p ON p.number = a.problem_number
         LEFT JOIN solutions s ON s.attempt_id = a.id
         LEFT JOIN enrichments en ON en.solution_id = s.id
-        LEFT JOIN reviews rv ON rv.solution_id = s.id
         WHERE a.date >= ?
         ORDER BY a.date, a.id
         """,

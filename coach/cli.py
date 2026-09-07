@@ -371,34 +371,43 @@ def require_catalog(conn: sqlite3.Connection) -> None:
         raise typer.Exit(1)
 
 
-def echo_weekly_run(result: service.WeeklyRunResult) -> None:
-    """The outcome of one generated report - printed by `weekly` and by `today`."""
-    if result.narrative_skipped:
-        typer.echo(f"Narrative skipped ({result.narrative_skipped}) - writing the report without it.")
+def echo_trend(p: service.WeekPattern) -> str:
+    """How much this week moved a pattern's mastery, as one trailing clause."""
+    if p.delta is None:
+        return " (first week of this pattern)"
+    if round(p.delta, 1) == 0:
+        return " (unchanged since last week)"
+    return f" ({p.delta:+.1f} since last week)"
+
+
+def echo_week_pattern(p: service.WeekPattern) -> None:
+    score = f"mastery {p.score:.1f}/5" if p.score is not None else "unscored"
+    if p.standing == "too-early":
+        typer.echo(
+            f"  {p.pattern}: too early to call - {score} over only"
+            f" {p.attempts_total} attempt(s)."
+        )
+        return
+    verdict = "WEAK" if p.standing == "weak" else "on track"
     typer.echo(
-        f"Week {result.week}: {result.attempts} attempt(s), {result.due} review(s) due."
+        f"  {p.pattern}: {verdict} - {score}{echo_trend(p)},"
+        f" {p.attempts_week} this week, {p.attempts_total} all-time."
     )
-    if result.weak_patterns:
-        typer.echo("Weak patterns: " + ", ".join(result.weak_patterns))
-    typer.echo(f"Report written to {result.path.relative_to(config.PROJECT_ROOT)}"
-               + (" (degraded: no narrative)" if result.degraded else ""))
 
 
 @app.command()
 def today(
     target: int = typer.Option(config.DAILY_TARGET, "--target", help="Problems to plan for today"),
 ):
-    """Today's problems, in priority order. Writes the weekly review once a week.
+    """Today's problems, in priority order.
 
-    The list itself is free - pure SQL, recomputed every run, so solved problems
-    drop off and the next one takes the slot. The first run of each ISO week also
-    generates reports/YYYY-WW.md, which is the only call that costs anything.
+    Free and stateless - pure SQL, recomputed every run, so solved problems drop
+    off and the next one takes the slot.
     """
     conn = db.connect()
     require_catalog(conn)
 
-    now = date.today()
-    items = service.daily_plan(conn, now, target).items
+    items = service.daily_plan(conn, date.today(), target).items
     if items:
         typer.echo(f"{len(items)} problem(s) for today:")
         for item in items:
@@ -406,23 +415,36 @@ def today(
     else:
         typer.echo("Nothing to do today - no reviews due and the curriculum is finished.")
 
-    if service.weekly_report_needed(conn, now):
-        typer.echo("")
-        typer.echo("First run this week - writing the weekly review ...")
-        echo_weekly_run(service.run_weekly(conn, now))
-
 
 @app.command()
-def weekly(
-    no_llm: bool = typer.Option(False, "--no-llm", help="Skip the narrative call (offline report)"),
-):
-    """Write reports/YYYY-WW.md by hand: the week's solves, the patterns, the note.
+def weekly():
+    """The last seven days: what you solved, and how each pattern you used is going.
 
-    `coach today` already does this once a week; this is for running it early or offline.
+    The same live view the web UI's Weekly Review page shows. Costs nothing and
+    stores nothing, so it is current every time you run it.
     """
     conn = db.connect()
     require_catalog(conn)
-    echo_weekly_run(service.run_weekly(conn, date.today(), no_llm=no_llm))
+    review = service.weekly_review(conn, date.today())
+
+    typer.echo(
+        f"This week ({review.start.isoformat()} to {review.end.isoformat()}):"
+        f" {len(review.attempts)} attempt(s) on {review.distinct_problems} problem(s)"
+    )
+    for r in review.attempts:
+        minutes = f" {r['minutes']}m" if r["minutes"] else ""
+        typer.echo(
+            f"  {r['date']} #{r['problem_number']} {r['title']} [{r['difficulty']}]"
+            f" {r['outcome']}{minutes} {r['pattern'] or 'untagged'}"
+        )
+
+    if not review.patterns:
+        typer.echo("No tagged patterns this week yet.")
+        return
+
+    typer.echo("Patterns you used this week:")
+    for p in review.patterns:
+        echo_week_pattern(p)
 
 
 if __name__ == "__main__":

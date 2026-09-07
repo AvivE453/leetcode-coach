@@ -31,12 +31,12 @@ flowchart TB
 
     subgraph todayp ["coach today — free, every day"]
         direction LR
-        ta["analyze<br/>due today only"] --> tp["plan<br/>fill 4 slots"]
+        ta["analyze<br/>due today only"] --> tp["plan<br/>fill the day's slots"]
     end
 
-    subgraph weeklyp ["weekly review — deterministic pipeline, once a week"]
+    subgraph weeklyp ["coach weekly — free, recomputed on every read"]
         direction LR
-        c["collect<br/>last 7 days<br/>+ stored reviews"] --> a["analyze<br/>mastery scores,<br/>weak + stale patterns"] --> r["report<br/>diagnosis, no plan"]
+        c["collect<br/>last 7 days"] --> a["analyze<br/>mastery now vs<br/>a week ago"]
     end
 
     api{{"Claude API<br/>structured outputs"}}
@@ -46,11 +46,8 @@ flowchart TB
     emb --> db
     db --> ta
     db --> c
-    tp -.->|"first run of the ISO week"| c
-    r --> md["reports/YYYY-WW.md"]
 
     enr -.-> api
-    r -.->|"1 call: narrative"| api
 
     db --> sim["coach similar<br/>numpy cosine, top-5"]
     db --> rev["coach review"]
@@ -66,15 +63,15 @@ of them degrades to a working non-LLM path when the API is unavailable.
 
 | Command | What it gives you |
 |---|---|
-| `coach today` | **The daily entry point.** Four problems to solve today, in priority order — and, on the first run of each ISO week, the weekly review |
+| `coach today` | **The daily entry point.** Today's problems, in priority order |
 | `coach log <n>` | Paste a solution → stores it, tags the pattern, embeds it, schedules the review, shows similar past solves, and flags the solve if you used the wrong approach |
 | `coach due` | What to re-solve today, by spaced repetition |
 | `coach similar <n>` / `--paste` | Your five most similar past solutions, by *algorithmic pattern* rather than text |
 | `coach review <n>` | Structured feedback on a stored solution: what it got right, complexity, bugs, edge cases, better approach. Stored after the first run, so looking again is free |
 | `coach stats` | Pattern coverage, mastery scores, struggle rates, off-pattern solves, curriculum progress |
-| `coach weekly` | The same report by hand, early, or offline with `--no-llm`. `coach today` writes it for you once a week |
+| `coach weekly` | The last seven days: every solve, and whether each pattern you used is going well, needs work, or has too little history to call |
 | `coach enrich` | Backfills tags and embeddings for anything logged while offline |
-| `coach-web` | The same data in a browser: progress, a table of your practiced patterns, a form to log a solve, today's list, and last week's coach's note |
+| `coach-web` | The same data in a browser: progress, a table of your practiced patterns, a form to log a solve, today's list, and this week in review |
 
 ---
 
@@ -97,15 +94,14 @@ Four pages, no build step — FastAPI serving plain HTML/CSS/JS:
   a review — what it got right, what to improve, your complexity against optimal — stored once and
   shown for free thereafter. Asking for a new one is always an explicit click, never something
   opening the page pays for.
-- **Today** — the browser version of `coach today`: today's focus topics (weak patterns, stale
+- **Daily Plan** — the browser version of `coach today`: today's focus topics (weak patterns, stale
   patterns, off-pattern solves) and today's problems in priority order, each with the reason it was
-  picked. Recomputed live and read-only — unlike the CLI command, opening this page never writes
-  `reports/YYYY-WW.md` or records a run, even on the week's first visit.
-- **Weekly Review** — the coach's note from the last weekly report, plus the full picture it
-  was written against: that week's attempts, the per-pattern table, off-pattern solves and
-  curriculum progress — the same detail as `reports/YYYY-WW.md`, not a thinner summary of it.
-  Frozen rather than live: all of it was computed once when the report was generated, so this
-  page reads it back and never calls the API. It diagnoses only; what to solve is on **Today**.
+  picked. Recomputed live on every load and read-only.
+- **Weekly Review** — the last seven days: every solve with its outcome and pattern, then each
+  pattern you practised with its all-time mastery, its standing, and how much this week moved it.
+  A pattern is only called *needs work* or *going well* once it has enough history to judge —
+  below that it says so instead of guessing. Recomputed on every load like everything else, so
+  logging a solve changes it immediately. It diagnoses only; what to solve is on **Daily Plan**.
 
 The CLI and the web UI share one implementation ([`coach/service.py`](coach/service.py)); the web
 layer only translates it to JSON. Degradation is the same too — with no API key a solve still
@@ -176,21 +172,28 @@ Brute-force numpy cosine over float32 blobs in SQLite. At a few hundred solution
 takes microseconds; a vector DB would be infrastructure bought to solve a problem this
 project does not have.
 
-**The weekly "agent" is a deterministic pipeline, not an agentic loop.**
-collect → analyze → report, with exactly one LLM call at the end for the
-narrative. The steps are fixed and known in advance, which makes a pipeline more
-testable and more robust than letting a model decide the control flow.
+**Nothing about the week is written down.**
+The weekly review used to be a once-a-week pipeline: it wrote `reports/YYYY-WW.md`,
+stored a frozen snapshot of that week's numbers, and paid for one LLM call to narrate
+them. Both halves aged badly. The snapshot was stale the moment the next problem was
+solved — the same failure that had already killed the frozen weekly *plan* — and the
+narrative was the one output nothing ever read back, since what it advised was a
+restatement of numbers the tables beside it already showed. Both are gone. `coach
+weekly` and the Weekly Review page now run the same SQL on demand, so the week is
+correct by construction rather than as of whenever it was last generated, and no
+scheduler, no report file and no API key are involved in looking at it.
 
-**Planning is daily and live; the weekly report only diagnoses.**
-The report used to end with 25 problems for the coming week, which went stale the
-moment one of them was solved and silently truncated mandatory reviews once the
-backlog passed 25. `coach today` recomputes a short list on every run instead, so
-the weekly file is now purely a record of what happened and what it means.
+**Comparison instead of narration.**
+The question the note was there to answer — *is this pattern getting better?* — is a
+subtraction, not a paragraph. Mastery is already a replay of every scored attempt, so
+replaying it a second time up to the start of the window gives what the pattern scored
+a week ago, and the difference is the answer. It is exact, it costs nothing, and unlike
+prose it cannot be vague.
 
 **Everything degrades.**
 No API key, rate limit, refusal, or network failure ever loses a logged solve. `coach
-log` stores the solution and queues enrichment; `coach weekly` writes the full report
-minus the narrative and records `degraded = true`.
+log` stores the solution and queues enrichment, then `coach enrich` backfills the tags
+and embeddings later. Only enrichment and `coach review` ever call the API at all.
 
 ---
 
@@ -281,7 +284,7 @@ uv run coach-web                              # the same data in a browser
 Development:
 
 ```bash
-uv run pytest                  # 163 tests; every LLM call mocked, API key stripped
+uv run pytest                  # 169 tests; every LLM call mocked, API key stripped
 uv run ruff check .
 uv run python -m evals.validate_bank        # re-label the fixture bank, no API calls
 uv run python -m evals.run_evals --all --dry-run   # count the calls and cost first
@@ -300,32 +303,26 @@ as the solve timeline.
 
 ---
 
-## Automation
+## No automation, by design
 
-The weekly review writes itself, with no scheduler at all: the first `coach today` of each
-ISO week generates `reports/YYYY-WW.md` as a side effect, and every run after that in the
-same week sees the recorded run and does nothing. The check is one indexed row lookup, so
-the other six days cost nothing.
+Nothing here runs unattended. There is no cron job, no systemd timer, and no scheduled
+writer, because there is nothing left to schedule: the weekly review is computed the
+moment you ask for it, from the database, in a few milliseconds.
 
-This is deliberately *pull-based* rather than a background job. It works on any machine
-that can run the tool — no systemd, no launchd, no OS-specific install step — and nothing
-holding an API key ever runs unattended: the report is only ever written while you are at
-the keyboard, which is the same reason the GitHub Actions cron was dropped in M5. A
-scheduled writer also turned out to be actively worse in practice: the systemd timer this
-replaced fired on a Sunday with no network, wrote a report with no narrative, and
-overwrote that week's good one.
-
-`coach weekly` still exists for running the report early, by hand, or offline
-(`--no-llm`); a report generated that way also satisfies the week, so `coach today` will
-not write a second one. Reports are reviewed and pushed by hand.
+That is the second time this project has arrived at *pull, don't push*. A GitHub Actions
+cron wrote the report first, and was dropped because it meant leaving a live API key and
+an automated writer on a repo run by hand. The systemd timer that replaced it then proved
+the point on its own: it fired on a Sunday with no network, wrote a report missing the
+one part that needed the network, and overwrote that week's good one. Removing the stored
+report removed the last thing a scheduler was for.
 
 ## Layout
 
 ```
 coach/          CLI, service layer, SQLite schema, scheduler, LLM wrapper, enrichment, embeddings
-coach/weekly/   collect → analyze → report (plan.py builds the daily list)
-coach/web/      FastAPI app + the static Home, Solutions, Today and Weekly Review pages
+coach/weekly/   collect → analyze (plan.py builds the daily list)
+coach/web/      FastAPI app + the static Home, Solutions, Daily Plan and Weekly Review pages
 evals/          execution oracle, fixture bank, corpus, scorers, RESULTS.md
-tests/          163 tests, no network
+tests/          169 tests, no network
 docs/PLAN.md    full design record and milestone history
 ```
