@@ -1,4 +1,4 @@
-/* Today page: focus topics, then today's ranked problem list. */
+/* Daily Plan page: focus topics, then today's ranked problem list. */
 
 function el(tag, props = {}, children = []) {
   const node = document.createElement(tag);
