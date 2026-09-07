@@ -396,6 +396,9 @@ def test_weekly_endpoint_serves_the_stored_narrative(client):
     assert run["week"] == "2026-35"  # keyed off generated_at, like the report filename
     assert run["report_path"] == "reports/2026-35.md"
     assert run["stats"]["weak_patterns"] == ["two-pointers"]
+    # A row written back when the report still planned the next week keeps its
+    # extra keys - the endpoint serves the snapshot verbatim and the page ignores
+    # what it no longer renders.
     assert run["stats"]["planned"] == 5
 
 

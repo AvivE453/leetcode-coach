@@ -2,7 +2,7 @@
 
 A personal interview-prep coach that closes the loop on LeetCode practice: it remembers
 what you solved and *how*, tells you when to re-solve it, retrieves your own past
-solutions by algorithmic pattern, and plans each week around your measured weaknesses.
+solutions by algorithmic pattern, and plans each day around your measured weaknesses.
 
 The practice problem it fixes: solving 20–30 problems a week leaks. There is no record
 of which patterns are strong, no signal when a problem was "solved" without learning
@@ -36,7 +36,7 @@ flowchart TB
 
     subgraph weeklyp ["weekly review — deterministic pipeline, once a week"]
         direction LR
-        c["collect<br/>last 7 days<br/>+ stored reviews"] --> a["analyze<br/>mastery scores,<br/>weak + stale patterns"] --> p["plan<br/>fill ~25 slots"] --> r["report"]
+        c["collect<br/>last 7 days<br/>+ stored reviews"] --> a["analyze<br/>mastery scores,<br/>weak + stale patterns"] --> r["report<br/>diagnosis, no plan"]
     end
 
     api{{"Claude API<br/>structured outputs"}}
@@ -74,7 +74,7 @@ of them degrades to a working non-LLM path when the API is unavailable.
 | `coach stats` | Pattern coverage, mastery scores, struggle rates, off-pattern solves, curriculum progress |
 | `coach weekly` | The same report by hand, early, or offline with `--no-llm`. `coach today` writes it for you once a week |
 | `coach enrich` | Backfills tags and embeddings for anything logged while offline |
-| `coach-web` | The same data in a browser: progress, a table of your practiced patterns, a form to log a solve, the weekly plan, and last week's coach's note |
+| `coach-web` | The same data in a browser: progress, a table of your practiced patterns, a form to log a solve, today's list, and last week's coach's note |
 
 ---
 
@@ -102,10 +102,10 @@ Four pages, no build step — FastAPI serving plain HTML/CSS/JS:
   picked. Recomputed live and read-only — unlike the CLI command, opening this page never writes
   `reports/YYYY-WW.md` or records a run, even on the week's first visit.
 - **Weekly Review** — the coach's note from the last weekly report, plus the full picture it
-  was written against: that week's attempts, the per-pattern table, off-pattern solves, curriculum
-  progress, and the plan itself — the same detail as `reports/YYYY-WW.md`, not a thinner summary
-  of it. Frozen rather than live: all of it was computed once when the report was generated, so
-  this page reads it back and never calls the API.
+  was written against: that week's attempts, the per-pattern table, off-pattern solves and
+  curriculum progress — the same detail as `reports/YYYY-WW.md`, not a thinner summary of it.
+  Frozen rather than live: all of it was computed once when the report was generated, so this
+  page reads it back and never calls the API. It diagnoses only; what to solve is on **Today**.
 
 The CLI and the web UI share one implementation ([`coach/service.py`](coach/service.py)); the web
 layer only translates it to JSON. Degradation is the same too — with no API key a solve still
@@ -177,9 +177,15 @@ takes microseconds; a vector DB would be infrastructure bought to solve a proble
 project does not have.
 
 **The weekly "agent" is a deterministic pipeline, not an agentic loop.**
-collect → analyze → plan → report, with exactly one LLM call at the end for the
+collect → analyze → report, with exactly one LLM call at the end for the
 narrative. The steps are fixed and known in advance, which makes a pipeline more
 testable and more robust than letting a model decide the control flow.
+
+**Planning is daily and live; the weekly report only diagnoses.**
+The report used to end with 25 problems for the coming week, which went stale the
+moment one of them was solved and silently truncated mandatory reviews once the
+backlog passed 25. `coach today` recomputes a short list on every run instead, so
+the weekly file is now purely a record of what happened and what it means.
 
 **Everything degrades.**
 No API key, rate limit, refusal, or network failure ever loses a logged solve. `coach
@@ -275,7 +281,7 @@ uv run coach-web                              # the same data in a browser
 Development:
 
 ```bash
-uv run pytest                  # 160 tests; every LLM call mocked, API key stripped
+uv run pytest                  # 163 tests; every LLM call mocked, API key stripped
 uv run ruff check .
 uv run python -m evals.validate_bank        # re-label the fixture bank, no API calls
 uv run python -m evals.run_evals --all --dry-run   # count the calls and cost first
@@ -317,9 +323,9 @@ not write a second one. Reports are reviewed and pushed by hand.
 
 ```
 coach/          CLI, service layer, SQLite schema, scheduler, LLM wrapper, enrichment, embeddings
-coach/weekly/   collect → analyze → plan → report
+coach/weekly/   collect → analyze → report (plan.py builds the daily list)
 coach/web/      FastAPI app + the static Home, Solutions, Today and Weekly Review pages
 evals/          execution oracle, fixture bank, corpus, scorers, RESULTS.md
-tests/          160 tests, no network
+tests/          163 tests, no network
 docs/PLAN.md    full design record and milestone history
 ```

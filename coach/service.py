@@ -96,7 +96,6 @@ class WeeklyRunResult:
     narrative_skipped: str | None
     attempts: int
     due: int
-    planned: int
     weak_patterns: list[str]
 
 
@@ -552,9 +551,13 @@ def weekly_report_needed(conn: sqlite3.Connection, today: date) -> bool:
 
 
 def run_weekly(
-    conn: sqlite3.Connection, today: date, target: int, no_llm: bool = False
+    conn: sqlite3.Connection, today: date, no_llm: bool = False
 ) -> WeeklyRunResult:
-    """Generate the week's report: collect, analyze, plan, narrate, write, record.
+    """Generate the week's report: collect, analyze, narrate, write, record.
+
+    Purely backward-looking - what happened and what it says about the patterns.
+    It deliberately plans nothing: `daily_plan` owns what to solve next, and a
+    25-problem list frozen into a weekly file went stale the moment one was solved.
 
     Called by `coach weekly` and, once per ISO week, by `coach today`. The narrative
     is the only paid call and the only optional part: without it the report is still
@@ -562,17 +565,16 @@ def run_weekly(
     """
     week = weekly_collect.collect(conn, today)
     analysis = weekly_analyze.analyze(conn, today)
-    items = weekly_plan.build_plan(conn, analysis, target)
 
     note = None
     skipped = None
     if not no_llm:
         try:
-            note = weekly_report.narrative(week, analysis, items)
+            note = weekly_report.narrative(week, analysis)
         except llm.LLMUnavailable as exc:
             skipped = str(exc)
 
-    text = weekly_report.render(week, analysis, items, note, today)
+    text = weekly_report.render(week, analysis, note, today)
     path = weekly_report.write(text, today)
 
     conn.execute(
@@ -584,7 +586,7 @@ def run_weekly(
             week["start"].isoformat(),
             today.isoformat(),
             str(path.relative_to(config.PROJECT_ROOT)),
-            json.dumps(weekly_report.snapshot(week, analysis, items)),
+            json.dumps(weekly_report.snapshot(week, analysis)),
             int(note is None),
             note,
         ),
@@ -598,7 +600,6 @@ def run_weekly(
         narrative_skipped=skipped,
         attempts=len(week["attempts"]),
         due=len(analysis["due"]),
-        planned=len(items),
         weak_patterns=analysis["weak_patterns"],
     )
 

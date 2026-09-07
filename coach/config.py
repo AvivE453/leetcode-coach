@@ -36,7 +36,6 @@ MODEL = "claude-sonnet-5"
 EVAL_MODEL = "claude-sonnet-5"
 
 EMBED_MODEL = "all-MiniLM-L6-v2"
-WEEKLY_TARGET = 25
 DAILY_TARGET = 4
 CURRICULUM = "blind75"
 

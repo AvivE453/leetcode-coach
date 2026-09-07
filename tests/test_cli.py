@@ -376,7 +376,7 @@ def test_weekly_writes_report_and_records_run(tmp_path, monkeypatch):
     runner.invoke(app, ["log", "1", "--outcome", "struggled"], input=CODE)
     monkeypatch.setattr("coach.llm.text", lambda prompt, **kw: "Drill hashmap problems.")
 
-    result = runner.invoke(app, ["weekly", "--target", "5"])
+    result = runner.invoke(app, ["weekly"])
     assert result.exit_code == 0, result.output
 
     week = date.today().isocalendar()
@@ -415,10 +415,10 @@ def test_weekly_writes_report_and_records_run(tmp_path, monkeypatch):
         "blind75": {"done": 0, "total": 0},
         "neetcode150": {"done": 0, "total": 0},
     }
-    # A first "struggled" solve schedules its review 7 days out (see
-    # coach/scheduler.py), past the 6-day lookahead in analyze() - so it's not
-    # due yet and the plan has nothing to fill (no curriculum problems either).
-    assert stats["plan_items"] == []
+    # The report diagnoses the week and plans nothing - `coach today` owns that.
+    assert "plan_items" not in stats
+    assert "planned" not in stats
+    assert "Plan for next week" not in text
 
 
 def test_weekly_degrades_without_llm(tmp_path, monkeypatch):

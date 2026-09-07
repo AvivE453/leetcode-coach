@@ -384,7 +384,7 @@ def test_weekly_report_needed_is_true_once_per_iso_week(tmp_path, monkeypatch):
 
     assert service.weekly_report_needed(conn, today) is True
 
-    service.run_weekly(conn, today, target=5)
+    service.run_weekly(conn, today)
     assert service.weekly_report_needed(conn, today) is False
     assert service.weekly_report_needed(conn, date(2026, 9, 13)) is False  # Sunday, same week
     assert service.weekly_report_needed(conn, date(2026, 9, 14)) is True  # next Monday
@@ -395,7 +395,7 @@ def test_run_weekly_writes_the_report_and_records_the_run(tmp_path, monkeypatch)
     monkeypatch.setattr("coach.llm.text", lambda prompt, **kw: "Drill hashmap problems.")
     today = date(2026, 9, 7)
 
-    result = service.run_weekly(conn, today, target=5)
+    result = service.run_weekly(conn, today)
 
     assert result.week == "2026-37"
     assert result.degraded is False
@@ -411,7 +411,7 @@ def test_run_weekly_returns_the_degradation_reason_instead_of_printing_it(tmp_pa
     """service.py never prints - the caller decides how to say it."""
     conn = setup_env(tmp_path, monkeypatch)
 
-    result = service.run_weekly(conn, date(2026, 9, 7), target=5)
+    result = service.run_weekly(conn, date(2026, 9, 7))
 
     assert result.degraded is True
     assert "ANTHROPIC_API_KEY" in result.narrative_skipped

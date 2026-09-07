@@ -373,8 +373,7 @@ def echo_weekly_run(result: service.WeeklyRunResult) -> None:
     if result.narrative_skipped:
         typer.echo(f"Narrative skipped ({result.narrative_skipped}) - writing the report without it.")
     typer.echo(
-        f"Week {result.week}: {result.attempts} attempt(s),"
-        f" {result.due} review(s) due, {result.planned} problem(s) planned."
+        f"Week {result.week}: {result.attempts} attempt(s), {result.due} review(s) due."
     )
     if result.weak_patterns:
         typer.echo("Weak patterns: " + ", ".join(result.weak_patterns))
@@ -407,18 +406,20 @@ def today(
     if service.weekly_report_needed(conn, now):
         typer.echo("")
         typer.echo("First run this week - writing the weekly review ...")
-        echo_weekly_run(service.run_weekly(conn, now, config.WEEKLY_TARGET))
+        echo_weekly_run(service.run_weekly(conn, now))
 
 
 @app.command()
 def weekly(
-    target: int = typer.Option(config.WEEKLY_TARGET, "--target", help="Problems to plan for next week"),
     no_llm: bool = typer.Option(False, "--no-llm", help="Skip the narrative call (offline report)"),
 ):
-    """Collect the week, analyze patterns, plan the next one, write reports/YYYY-WW.md."""
+    """Write reports/YYYY-WW.md by hand: the week's solves, the patterns, the note.
+
+    `coach today` already does this once a week; this is for running it early or offline.
+    """
     conn = db.connect()
     require_catalog(conn)
-    echo_weekly_run(service.run_weekly(conn, date.today(), target, no_llm=no_llm))
+    echo_weekly_run(service.run_weekly(conn, date.today(), no_llm=no_llm))
 
 
 if __name__ == "__main__":

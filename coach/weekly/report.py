@@ -3,12 +3,14 @@ from datetime import date
 from pathlib import Path
 
 from coach import config, llm
-from coach.weekly.plan import PlanItem, plan_kind
 
 NARRATIVE_PROMPT = """\
 You are a direct, supportive LeetCode interview-prep coach. Based on this week's data,
-write ONE paragraph (4-6 sentences) telling the student what to focus on next week and
-why. Be specific about patterns and problems. No headers, no lists, no filler praise.
+write ONE paragraph (4-6 sentences) diagnosing how the week went and what the student
+should work on next, and why. Ground every claim in the attempts and patterns below -
+name the problems they actually solved and the patterns that are weak, stale or solved
+off-pattern. Do not hand out a list of problems to solve: a separate daily command picks
+those. No headers, no lists, no filler praise.
 
 {summary}\
 """
@@ -33,7 +35,7 @@ def review_note(row) -> str:
     return f" review={row['review_verdict']}" + (f" ({issues})" if issues else "")
 
 
-def summarize(week: dict, analysis: dict, items: list[PlanItem]) -> str:
+def summarize(week: dict, analysis: dict) -> str:
     """Compact plain-text digest of the week - input for the narrative LLM call."""
     lines = [f"Attempts this week: {len(week['attempts'])} on {week['distinct_problems']} problems"]
     for r in week["attempts"]:
@@ -51,17 +53,15 @@ def summarize(week: dict, analysis: dict, items: list[PlanItem]) -> str:
         )
     for name, (done, total) in analysis["curriculum"].items():
         lines.append(f"Curriculum {name}: {done}/{total}")
-    lines.append(f"Planned for next week ({len(items)} problems):")
-    for item in items:
-        lines.append(f"  #{item.number} {item.title} [{item.difficulty}] - {item.reason}")
+    lines.append(f"Reviews coming due: {len(analysis['due'])}")
     return "\n".join(lines)
 
 
-def narrative(week: dict, analysis: dict, items: list[PlanItem]) -> str:
-    return llm.text(NARRATIVE_PROMPT.format(summary=summarize(week, analysis, items)))
+def narrative(week: dict, analysis: dict) -> str:
+    return llm.text(NARRATIVE_PROMPT.format(summary=summarize(week, analysis)))
 
 
-def snapshot(week: dict, analysis: dict, items: list[PlanItem]) -> dict:
+def snapshot(week: dict, analysis: dict) -> dict:
     """Everything render() shows, as JSON - the frozen picture /weekly serves.
 
     Stored once by `coach weekly` alongside the narrative, so the web page never
@@ -103,28 +103,10 @@ def snapshot(week: dict, analysis: dict, items: list[PlanItem]) -> dict:
         ],
         "curriculum": {name: {"done": d, "total": t} for name, (d, t) in analysis["curriculum"].items()},
         "due": len(analysis["due"]),
-        "planned": len(items),
-        "plan_items": [
-            {
-                "number": i.number,
-                "slug": i.slug,
-                "title": i.title,
-                "difficulty": i.difficulty,
-                "reason": i.reason,
-                "kind": plan_kind(i.reason),
-            }
-            for i in items
-        ],
     }
 
 
-def render(
-    week: dict,
-    analysis: dict,
-    items: list[PlanItem],
-    note: str | None,
-    today: date,
-) -> str:
+def render(week: dict, analysis: dict, note: str | None, today: date) -> str:
     lines = [f"# Weekly report — {week_key(today)}", ""]
     lines.append(f"Window: {week['start'].isoformat()} to {week['end'].isoformat()}"
                  f" · generated {today.isoformat()}")
@@ -143,8 +125,8 @@ def render(
                 f" | {r['outcome']} | {r['minutes'] or ''} | {r['pattern'] or ''} |"
             )
     else:
-        lines.append("**No attempts logged this week.** The plan below leans on reviews"
-                     " and easy curriculum wins to rebuild momentum.")
+        lines.append("**No attempts logged this week.** Run `coach today` to pick the"
+                     " next few problems up again.")
     lines.append("")
 
     if analysis["patterns"]:
@@ -172,24 +154,18 @@ def render(
                          f" **{r['intended_pattern']}**, never used")
         lines.append("")
 
-    lines.append("## Curriculum")
+    lines.append("## Where you stand")
     lines.append("")
     for name, (done, total) in analysis["curriculum"].items():
         lines.append(f"- {name}: {done}/{total}")
-    lines.append("")
-
-    lines.append(f"## Plan for next week ({len(items)} problems)")
-    lines.append("")
-    for i, item in enumerate(items, 1):
-        lines.append(
-            f"{i}. [#{item.number} {item.title}](https://leetcode.com/problems/{item.slug}/)"
-            f" — {item.difficulty} — {item.reason}"
-        )
+    lines.append(f"- reviews coming due: {len(analysis['due'])}")
     lines.append("")
 
     lines.append("## Coach's note")
     lines.append("")
-    lines.append(note if note else "_LLM unavailable this week — plan generated without narrative._")
+    lines.append(note if note else "_LLM unavailable this week — report written without narrative._")
+    lines.append("")
+    lines.append("_What to solve next is picked daily: run `coach today`._")
     lines.append("")
     return "\n".join(lines)
 

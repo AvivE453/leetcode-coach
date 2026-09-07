@@ -1,9 +1,11 @@
-/* Weekly Review page: the last `coach weekly` run, frozen as it was written.
+/* Weekly Review page: the last weekly run, frozen as it was written.
 
 Rows written before this depth existed only carry the thin fields (counts,
 weak/stale pattern names, pattern_scores, bare off-pattern numbers) - every
 section below falls back to exactly what it showed before rather than
-breaking, so an old run still renders correctly. */
+breaking, so an old run still renders correctly. Old rows may also carry a
+`plan_items` list from when the report planned the following week; it is
+ignored now that `coach today` owns that. */
 
 function el(tag, props = {}, children = []) {
   const node = document.createElement(tag);
@@ -111,28 +113,12 @@ function curriculumCard(curriculum) {
   );
 }
 
-function planItem(item) {
-  return el("li", {}, [
-    el("span", { class: "title" }, [
-      el("span", { class: "num", text: `#${item.number} ` }),
-      el("a", {
-        href: `https://leetcode.com/problems/${item.slug}/`,
-        target: "_blank",
-        rel: "noreferrer",
-        text: item.title,
-      }),
-    ]),
-    el("span", { class: `diff ${item.difficulty}`, text: item.difficulty }),
-    el("span", { class: `chip ${item.kind}`, text: item.reason }),
-  ]);
-}
-
 function renderEmpty() {
   document.getElementById("note").replaceChildren(
-    el("p", { class: "empty", text: "No weekly run yet — `coach weekly` runs every Sunday on this machine." }),
+    el("p", { class: "empty", text: "No weekly run yet — the first `coach today` of the week writes one." }),
     el("p", {
       class: "hint",
-      text: "Run it by hand any time with `coach weekly`; the note it writes shows up here.",
+      text: "You can also run `coach weekly` by hand; the note it writes shows up here.",
     })
   );
   document.getElementById("run-meta").textContent = "";
@@ -165,8 +151,7 @@ function renderSnapshot(run) {
   document.getElementById("counts").replaceChildren(
     countCard("Attempts that week", s.attempts),
     countCard("Distinct problems", s.distinct_problems),
-    countCard("Reviews due", s.due),
-    countCard("Problems planned", s.planned)
+    countCard("Reviews due", s.due)
   );
 
   const hasFullPatterns = Array.isArray(s.patterns) && s.patterns.length > 0;
@@ -211,14 +196,6 @@ function renderSnapshot(run) {
   );
   if (s.curriculum) topics.push(curriculumCard(s.curriculum));
   document.getElementById("snapshot-topics").replaceChildren(...topics);
-
-  if (Array.isArray(s.plan_items) && s.plan_items.length) {
-    document.getElementById("weekly-plan-heading").hidden = false;
-    document.getElementById("weekly-plan-list").replaceChildren(...s.plan_items.map(planItem));
-  } else {
-    document.getElementById("weekly-plan-heading").hidden = true;
-    document.getElementById("weekly-plan-list").replaceChildren();
-  }
 }
 
 async function load() {
