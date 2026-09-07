@@ -228,9 +228,17 @@ def api_plan(target: int = config.DAILY_TARGET) -> dict:
             "stale_days": weekly_analyze.STALE_DAYS,
         },
         # Projected, not the whole row: /weekly serves the stats blob and the
-        # narrative, and this endpoint has no reason to ship them too.
+        # narrative, and this endpoint has no reason to ship them too. The `week`
+        # label ships pre-computed for the same reason the thresholds do - keyed
+        # off generated_at, never week_start, and deriving an ISO week in the
+        # browser would be a second implementation of week_key().
         "last_report": (
-            {k: last_run[k] for k in ("week_start", "generated_at", "report_path")}
+            {
+                "week": weekly_report.week_key(date.fromisoformat(last_run["generated_at"])),
+                "week_start": last_run["week_start"],
+                "generated_at": last_run["generated_at"],
+                "report_path": last_run["report_path"],
+            }
             if last_run
             else None
         ),

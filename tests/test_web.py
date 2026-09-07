@@ -271,6 +271,34 @@ def test_plan_endpoint_serves_the_thresholds_the_page_quotes(client):
     }
 
 
+def test_plan_endpoint_labels_the_last_report_by_generated_at(client):
+    """The Today page links to the weekly review and shows its week label.
+
+    The label must come from the endpoint: generated_at and week_start fall in
+    different ISO weeks, so deriving it in the browser would both duplicate
+    week_key() and pick the wrong week.
+    """
+    conn = db.connect()
+    # A run generated Monday 2026-09-07 over the window starting Sunday 2026-08-31:
+    # week_start is ISO week 36, generated_at is ISO week 37.
+    conn.execute(
+        """
+        INSERT INTO weekly_runs (week_start, generated_at, report_path, stats, degraded)
+        VALUES ('2026-08-31', '2026-09-07', 'reports/2026-37.md', '{}', 0)
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    last = client.get("/api/plan").json()["last_report"]
+
+    assert last["week"] == "2026-37"
+    assert last["week_start"] == "2026-08-31"
+    assert last["report_path"] == "reports/2026-37.md"
+    # The stats blob and the narrative stay on /api/weekly.
+    assert set(last) == {"week", "week_start", "generated_at", "report_path"}
+
+
 def test_plan_endpoint_surfaces_off_pattern_topics(client, monkeypatch):
     enriched(monkeypatch, pattern="prefix-sum", intended_pattern="dp-1d")
     client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
