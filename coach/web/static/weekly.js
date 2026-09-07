@@ -144,16 +144,24 @@ function renderPatterns(data) {
     return;
   }
 
+  // An empty card has two very different causes, and saying the wrong one misleads
+  // exactly the reader who can least afford it. With nothing judged yet, "nothing
+  // is below the line" reads as reassurance while the table underneath shows a
+  // mastery well below it - so until at least one pattern is judged, both cards
+  // say only that, and neither claims anything about the scores.
+  const anyJudged = data.patterns.some((p) => p.standing !== "too-early");
+  const tooEarly = "Not enough history yet.";
+
   verdicts.replaceChildren(
     topicCard(
       "Needs more work",
-      `Nothing you practiced this week is below ${th.weak_score}/5.`,
+      anyJudged ? "Nothing you practiced this week needs work." : tooEarly,
       data.patterns.filter((p) => p.standing === "weak"),
       verdictItem
     ),
     topicCard(
       "Going well",
-      `Nothing yet — a pattern needs ${th.weak_min_attempts} attempts before this page will call it either way.`,
+      anyJudged ? "Nothing you practiced this week is there yet." : tooEarly,
       data.patterns.filter((p) => p.standing === "on-track"),
       verdictItem
     )

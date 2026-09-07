@@ -461,6 +461,30 @@ def test_weekly_review_says_too_early_below_the_attempt_floor(tmp_path, monkeypa
     assert p.standing == "too-early"
 
 
+def test_weekly_review_claims_nothing_for_a_pattern_with_no_score(tmp_path, monkeypatch):
+    """pattern_scores is a derived cache, so it can be empty (dropped, or not yet
+    rebuilt). A missing score makes is_weak false, exactly like a good score does,
+    so without a guard five failed solves would report as on-track - a verdict
+    nothing measured. Unknown reads as too-early until a recompute says otherwise.
+    """
+    conn = setup_env(tmp_path, monkeypatch)
+    for day in range(5):
+        scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "failed")
+    conn.execute("DELETE FROM pattern_scores")
+    conn.commit()
+
+    p = service.weekly_review(conn, WEEK_TODAY).patterns[0]
+
+    assert p.attempts_total == 5 >= mastery.WEAK_MIN_ATTEMPTS
+    assert p.score is None
+    assert p.standing == "too-early"
+
+    mastery.recompute_all(conn)
+    after = service.weekly_review(conn, WEEK_TODAY).patterns[0]
+    assert after.score == 1.0
+    assert after.standing == "weak"
+
+
 def test_weekly_review_standing_tracks_the_analysis_verdict(tmp_path, monkeypatch):
     """weak is only ever membership in analysis["weak_patterns"] - never a
     threshold re-derived here, which is how the two definitions drift apart."""

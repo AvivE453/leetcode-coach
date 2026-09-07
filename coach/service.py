@@ -367,16 +367,21 @@ def also_solvable_with(conn: sqlite3.Connection, solution_id: int, problem) -> l
     )
 
 
-def standing_of(analysis: dict, pattern: str, attempts: int) -> str:
+def standing_of(analysis: dict, pattern: str, attempts: int, score: float | None) -> str:
     """One pattern's verdict as a word: too-early, weak, or on-track.
 
     The single owner of that reading, shared by the note `coach log` prints and by
     the weekly review. `weak` is only ever membership in analysis["weak_patterns"] -
     the threshold itself lives in mastery.is_weak() and is applied once, by analyze().
-    Under WEAK_MIN_ATTEMPTS nothing is claimed at all: too small a sample to call
-    weak is also too small to call solid.
+
+    Both ways of having nothing to say collapse into "too-early", because the only
+    honest alternative would be to guess. Too small a sample to call weak is also
+    too small to call solid; and a missing score means `pattern_scores` has not been
+    rebuilt yet, not that the pattern is fine - `weak` is false either way, so
+    without this the two are indistinguishable and five failed solves report as
+    on-track.
     """
-    if attempts < mastery.WEAK_MIN_ATTEMPTS:
+    if score is None or attempts < mastery.WEAK_MIN_ATTEMPTS:
         return "too-early"
     return "weak" if pattern in analysis["weak_patterns"] else "on-track"
 
@@ -396,7 +401,7 @@ def pattern_standing(
     row = next((p for p in analysis["patterns"] if p["pattern"] == pattern), None)
     if row is None:
         return None
-    standing = standing_of(analysis, pattern, row["attempts"])
+    standing = standing_of(analysis, pattern, row["attempts"], row["score"])
     return PatternStanding(
         pattern=pattern,
         attempts=row["attempts"],
@@ -593,7 +598,9 @@ def weekly_review(conn: sqlite3.Connection, today: date | None = None) -> Weekly
             attempts_total=all_time[name]["attempts"],
             score=all_time[name]["score"],
             score_before=mastery.fold(before.get(name, [])),
-            standing=standing_of(analysis, name, all_time[name]["attempts"]),
+            standing=standing_of(
+                analysis, name, all_time[name]["attempts"], all_time[name]["score"]
+            ),
         )
         for name, count in used.items()
     ]
