@@ -9,10 +9,6 @@ import numpy as np
 import typer
 
 from coach import catalog, config, curriculum, db, embed, enrich, llm, mastery, service
-from coach.weekly import analyze as weekly_analyze
-from coach.weekly import collect as weekly_collect
-from coach.weekly import plan as weekly_plan
-from coach.weekly import report as weekly_report
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -366,6 +362,54 @@ def stats():
         typer.echo(f"{name}: {progress['done']}/{progress['total']}")
 
 
+def require_catalog(conn: sqlite3.Connection) -> None:
+    if conn.execute("SELECT COUNT(*) FROM problems").fetchone()[0] == 0:
+        typer.echo("No problem catalog in the database - run `coach init` first.")
+        raise typer.Exit(1)
+
+
+def echo_weekly_run(result: service.WeeklyRunResult) -> None:
+    """The outcome of one generated report - printed by `weekly` and by `today`."""
+    if result.narrative_skipped:
+        typer.echo(f"Narrative skipped ({result.narrative_skipped}) - writing the report without it.")
+    typer.echo(
+        f"Week {result.week}: {result.attempts} attempt(s),"
+        f" {result.due} review(s) due, {result.planned} problem(s) planned."
+    )
+    if result.weak_patterns:
+        typer.echo("Weak patterns: " + ", ".join(result.weak_patterns))
+    typer.echo(f"Report written to {result.path.relative_to(config.PROJECT_ROOT)}"
+               + (" (degraded: no narrative)" if result.degraded else ""))
+
+
+@app.command()
+def today(
+    target: int = typer.Option(config.DAILY_TARGET, "--target", help="Problems to plan for today"),
+):
+    """Today's problems, in priority order. Writes the weekly review once a week.
+
+    The list itself is free - pure SQL, recomputed every run, so solved problems
+    drop off and the next one takes the slot. The first run of each ISO week also
+    generates reports/YYYY-WW.md, which is the only call that costs anything.
+    """
+    conn = db.connect()
+    require_catalog(conn)
+
+    now = date.today()
+    items = service.daily_plan(conn, now, target)
+    if items:
+        typer.echo(f"{len(items)} problem(s) for today:")
+        for item in items:
+            typer.echo(f"  #{item.number} {item.title} [{item.difficulty}]  {item.reason}")
+    else:
+        typer.echo("Nothing to do today - no reviews due and the curriculum is finished.")
+
+    if service.weekly_report_needed(conn, now):
+        typer.echo("")
+        typer.echo("First run this week - writing the weekly review ...")
+        echo_weekly_run(service.run_weekly(conn, now, config.WEEKLY_TARGET))
+
+
 @app.command()
 def weekly(
     target: int = typer.Option(config.WEEKLY_TARGET, "--target", help="Problems to plan for next week"),
@@ -373,53 +417,8 @@ def weekly(
 ):
     """Collect the week, analyze patterns, plan the next one, write reports/YYYY-WW.md."""
     conn = db.connect()
-    if conn.execute("SELECT COUNT(*) FROM problems").fetchone()[0] == 0:
-        typer.echo("No problem catalog in the database - run `coach init` first.")
-        raise typer.Exit(1)
-
-    today = date.today()
-    week = weekly_collect.collect(conn, today)
-    analysis = weekly_analyze.analyze(conn, today)
-    items = weekly_plan.build_plan(conn, analysis, target)
-
-    degraded = False
-    note = None
-    if no_llm:
-        degraded = True
-    else:
-        try:
-            note = weekly_report.narrative(week, analysis, items)
-        except llm.LLMUnavailable as exc:
-            typer.echo(f"Narrative skipped ({exc}) - writing the report without it.")
-            degraded = True
-
-    text = weekly_report.render(week, analysis, items, note, today)
-    path = weekly_report.write(text, today)
-
-    conn.execute(
-        """
-        INSERT INTO weekly_runs (week_start, generated_at, report_path, stats, degraded, narrative)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (
-            week["start"].isoformat(),
-            today.isoformat(),
-            str(path.relative_to(config.PROJECT_ROOT)),
-            json.dumps(weekly_report.snapshot(week, analysis, items)),
-            int(degraded),
-            note,
-        ),
-    )
-    conn.commit()
-
-    typer.echo(
-        f"Week {weekly_report.week_key(today)}: {len(week['attempts'])} attempt(s),"
-        f" {len(analysis['due'])} review(s) due, {len(items)} problem(s) planned."
-    )
-    if analysis["weak_patterns"]:
-        typer.echo("Weak patterns: " + ", ".join(analysis["weak_patterns"]))
-    typer.echo(f"Report written to {path.relative_to(config.PROJECT_ROOT)}"
-               + (" (degraded: no narrative)" if degraded else ""))
+    require_catalog(conn)
+    echo_weekly_run(service.run_weekly(conn, date.today(), target, no_llm=no_llm))
 
 
 if __name__ == "__main__":

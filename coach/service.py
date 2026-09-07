@@ -9,10 +9,14 @@ import json
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from pathlib import Path
 
-from coach import curriculum, embed, enrich, llm, mastery, scheduler
+from coach import config, curriculum, embed, enrich, llm, mastery, scheduler
 from coach import review as review_llm
 from coach.weekly import analyze as weekly_analyze
+from coach.weekly import collect as weekly_collect
+from coach.weekly import plan as weekly_plan
+from coach.weekly import report as weekly_report
 
 OUTCOMES = ("clean", "struggled", "hints", "failed")
 
@@ -76,6 +80,24 @@ class ReviewResult:
     review: review_llm.Review | None = None
     cached: bool = False
     skipped: str | None = None
+
+
+@dataclass(frozen=True)
+class WeeklyRunResult:
+    """One generated weekly report: what was written, and how far it got.
+
+    `narrative_skipped` carries the degradation reason instead of printing it —
+    the caller decides how to say it, the same contract as `EnrichResult`.
+    """
+
+    path: Path
+    week: str
+    degraded: bool
+    narrative_skipped: str | None
+    attempts: int
+    due: int
+    planned: int
+    weak_patterns: list[str]
 
 
 @dataclass(frozen=True)
@@ -497,6 +519,88 @@ def solution_history(conn: sqlite3.Connection, number: int) -> dict:
         "intended_secondary_patterns": intended_secondary,
         "solves": solves,
     }
+
+
+def daily_plan(
+    conn: sqlite3.Connection, today: date, target: int
+) -> list[weekly_plan.PlanItem]:
+    """What to solve today, ranked by the same rules as the weekly plan.
+
+    The only difference is the horizon: `lookahead_days=0` counts a review as due
+    today rather than any time this week, so a short list is not filled with
+    reviews that are not owed yet. Recomputed on every call and stored nowhere -
+    a solved problem simply stops appearing.
+    """
+    analysis = weekly_analyze.analyze(conn, today, lookahead_days=0)
+    return weekly_plan.build_plan(conn, analysis, target)
+
+
+def weekly_report_needed(conn: sqlite3.Connection, today: date) -> bool:
+    """True when this ISO week has no report yet.
+
+    Keyed on `generated_at`, like the report filename and the /weekly page's label -
+    never `week_start`, which falls in the previous ISO week. Only the newest row
+    matters because `generated_at` only moves forward.
+    """
+    row = conn.execute(
+        "SELECT generated_at FROM weekly_runs ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if row is None:
+        return True
+    last = weekly_report.week_key(date.fromisoformat(row["generated_at"]))
+    return last != weekly_report.week_key(today)
+
+
+def run_weekly(
+    conn: sqlite3.Connection, today: date, target: int, no_llm: bool = False
+) -> WeeklyRunResult:
+    """Generate the week's report: collect, analyze, plan, narrate, write, record.
+
+    Called by `coach weekly` and, once per ISO week, by `coach today`. The narrative
+    is the only paid call and the only optional part: without it the report is still
+    written and the run is recorded as degraded.
+    """
+    week = weekly_collect.collect(conn, today)
+    analysis = weekly_analyze.analyze(conn, today)
+    items = weekly_plan.build_plan(conn, analysis, target)
+
+    note = None
+    skipped = None
+    if not no_llm:
+        try:
+            note = weekly_report.narrative(week, analysis, items)
+        except llm.LLMUnavailable as exc:
+            skipped = str(exc)
+
+    text = weekly_report.render(week, analysis, items, note, today)
+    path = weekly_report.write(text, today)
+
+    conn.execute(
+        """
+        INSERT INTO weekly_runs (week_start, generated_at, report_path, stats, degraded, narrative)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            week["start"].isoformat(),
+            today.isoformat(),
+            str(path.relative_to(config.PROJECT_ROOT)),
+            json.dumps(weekly_report.snapshot(week, analysis, items)),
+            int(note is None),
+            note,
+        ),
+    )
+    conn.commit()
+
+    return WeeklyRunResult(
+        path=path,
+        week=weekly_report.week_key(today),
+        degraded=note is None,
+        narrative_skipped=skipped,
+        attempts=len(week["attempts"]),
+        due=len(analysis["due"]),
+        planned=len(items),
+        weak_patterns=analysis["weak_patterns"],
+    )
 
 
 def pattern_counts(conn: sqlite3.Connection) -> list[dict]:

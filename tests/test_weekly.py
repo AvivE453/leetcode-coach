@@ -152,6 +152,24 @@ def test_analyze_reports_due_and_curriculum(tmp_path):
     assert analysis["curriculum"]["blind75"] == (1, 2)
 
 
+def test_analyze_lookahead_narrows_due_to_today(tmp_path):
+    """The daily plan passes lookahead_days=0 so it only sees what is owed today.
+
+    Solving a review early re-anchors SM-2 from today and shortens the interval,
+    so a four-slot list must not be padded with Friday's reviews.
+    """
+    conn = make_db(tmp_path)
+    add_problem(conn, 1, "two-sum", "Two Sum")
+    add_problem(conn, 2, "coin-change", "Coin Change")
+    set_due(conn, 1, TODAY)
+    set_due(conn, 2, TODAY + timedelta(days=3))
+
+    assert [r["number"] for r in weekly_analyze.analyze(conn, TODAY)["due"]] == [1, 2]
+    assert [
+        r["number"] for r in weekly_analyze.analyze(conn, TODAY, lookahead_days=0)["due"]
+    ] == [1]
+
+
 def test_plan_orders_reviews_then_off_pattern_then_weak(tmp_path):
     conn = make_db(tmp_path)
     add_problem(conn, 1, "two-sum", "Two Sum", tags=["hash-table"])

@@ -5,9 +5,15 @@ from coach import curriculum, enrich, mastery
 
 STALE_DAYS = 30
 WEAK_MIN_ATTEMPTS = 5
+# How far ahead a plan counts a review as due. The weekly plan covers the next
+# seven days, so it pulls in everything through today+6; a daily plan passes 0,
+# because solving a review early re-anchors SM-2 from today and shortens it.
+PLAN_LOOKAHEAD_DAYS = 6
 
 
-def analyze(conn: sqlite3.Connection, today: date) -> dict:
+def analyze(
+    conn: sqlite3.Connection, today: date, lookahead_days: int = PLAN_LOOKAHEAD_DAYS
+) -> dict:
     rows = conn.execute(
         """
         SELECT en.pattern,
@@ -54,7 +60,7 @@ def analyze(conn: sqlite3.Connection, today: date) -> dict:
         WHERE r.next_due <= ?
         ORDER BY r.next_due
         """,
-        ((today + timedelta(days=6)).isoformat(),),
+        ((today + timedelta(days=lookahead_days)).isoformat(),),
     ).fetchall()
 
     progress = {}

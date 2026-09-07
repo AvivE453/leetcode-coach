@@ -37,6 +37,7 @@ EVAL_MODEL = "claude-sonnet-5"
 
 EMBED_MODEL = "all-MiniLM-L6-v2"
 WEEKLY_TARGET = 25
+DAILY_TARGET = 4
 CURRICULUM = "blind75"
 
 WEB_HOST = os.environ.get("COACH_WEB_HOST", "127.0.0.1")

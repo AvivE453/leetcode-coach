@@ -1,5 +1,5 @@
 import importlib
-from datetime import date
+from datetime import date, timedelta
 
 import numpy as np
 import pytest
@@ -374,6 +374,76 @@ def test_solved_problems_aggregates_one_row_per_problem(tmp_path, monkeypatch):
     assert rows[0]["solves"] == 2
     assert rows[0]["last_outcome"] == "clean"
     assert rows[0]["pattern"] == "hashmap"
+
+
+def test_weekly_report_needed_is_true_once_per_iso_week(tmp_path, monkeypatch):
+    """Keyed on generated_at, like the report filename - not week_start, which
+    falls in the previous ISO week."""
+    conn = setup_env(tmp_path, monkeypatch)
+    today = date(2026, 9, 7)  # a Monday, ISO week 37
+
+    assert service.weekly_report_needed(conn, today) is True
+
+    service.run_weekly(conn, today, target=5)
+    assert service.weekly_report_needed(conn, today) is False
+    assert service.weekly_report_needed(conn, date(2026, 9, 13)) is False  # Sunday, same week
+    assert service.weekly_report_needed(conn, date(2026, 9, 14)) is True  # next Monday
+
+
+def test_run_weekly_writes_the_report_and_records_the_run(tmp_path, monkeypatch):
+    conn = setup_env(tmp_path, monkeypatch)
+    monkeypatch.setattr("coach.llm.text", lambda prompt, **kw: "Drill hashmap problems.")
+    today = date(2026, 9, 7)
+
+    result = service.run_weekly(conn, today, target=5)
+
+    assert result.week == "2026-37"
+    assert result.degraded is False
+    assert result.narrative_skipped is None
+    assert result.path.read_text().count("Drill hashmap problems.") == 1
+
+    run = conn.execute("SELECT * FROM weekly_runs").fetchone()
+    assert run["degraded"] == 0
+    assert run["narrative"] == "Drill hashmap problems."
+
+
+def test_run_weekly_returns_the_degradation_reason_instead_of_printing_it(tmp_path, monkeypatch):
+    """service.py never prints - the caller decides how to say it."""
+    conn = setup_env(tmp_path, monkeypatch)
+
+    result = service.run_weekly(conn, date(2026, 9, 7), target=5)
+
+    assert result.degraded is True
+    assert "ANTHROPIC_API_KEY" in result.narrative_skipped
+    assert "LLM unavailable" in result.path.read_text()
+    assert conn.execute("SELECT degraded FROM weekly_runs").fetchone()[0] == 1
+
+
+def test_daily_plan_only_counts_reviews_due_today(tmp_path, monkeypatch):
+    conn = setup_env(
+        tmp_path,
+        monkeypatch,
+        problems=[
+            {"number": 1, "slug": "two-sum", "title": "Two Sum", "difficulty": "Easy",
+             "official_tags": '["array"]', "paid_only": 0},
+            {"number": 2, "slug": "coin-change", "title": "Coin Change", "difficulty": "Medium",
+             "official_tags": '["array"]', "paid_only": 0},
+        ],
+    )
+    today = date(2026, 9, 7)
+    for number, due in ((1, today), (2, today + timedelta(days=3))):
+        conn.execute(
+            """
+            INSERT INTO review_state (problem_number, ease, interval_days, next_due, reps, lapses)
+            VALUES (?, 2.5, 7.0, ?, 1, 0)
+            """,
+            (number, due.isoformat()),
+        )
+
+    items = service.daily_plan(conn, today, target=4)
+
+    assert [i.number for i in items] == [1]
+    assert items[0].reason == f"review due {today.isoformat()}"
 
 
 def test_coach_db_env_var_redirects_the_database(tmp_path, monkeypatch):

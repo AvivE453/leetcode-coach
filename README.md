@@ -29,7 +29,12 @@ flowchart TB
         db[("data/coach.db<br/>SQLite")]
     end
 
-    subgraph weeklyp ["coach weekly — deterministic pipeline"]
+    subgraph todayp ["coach today — free, every day"]
+        direction LR
+        ta["analyze<br/>due today only"] --> tp["plan<br/>fill 4 slots"]
+    end
+
+    subgraph weeklyp ["weekly review — deterministic pipeline, once a week"]
         direction LR
         c["collect<br/>last 7 days<br/>+ stored reviews"] --> a["analyze<br/>mastery scores,<br/>weak + stale patterns"] --> p["plan<br/>fill ~25 slots"] --> r["report"]
     end
@@ -39,7 +44,9 @@ flowchart TB
     sm2 --> db
     enr --> db
     emb --> db
+    db --> ta
     db --> c
+    tp -.->|"first run of the ISO week"| c
     r --> md["reports/YYYY-WW.md"]
 
     enr -.-> api
@@ -59,12 +66,13 @@ of them degrades to a working non-LLM path when the API is unavailable.
 
 | Command | What it gives you |
 |---|---|
+| `coach today` | **The daily entry point.** Four problems to solve today, in priority order — and, on the first run of each ISO week, the weekly review |
 | `coach log <n>` | Paste a solution → stores it, tags the pattern, embeds it, schedules the review, shows similar past solves, and flags the solve if you used the wrong approach |
 | `coach due` | What to re-solve today, by spaced repetition |
 | `coach similar <n>` / `--paste` | Your five most similar past solutions, by *algorithmic pattern* rather than text |
 | `coach review <n>` | Structured feedback on a stored solution: what it got right, complexity, bugs, edge cases, better approach. Stored after the first run, so looking again is free |
 | `coach stats` | Pattern coverage, mastery scores, struggle rates, off-pattern solves, curriculum progress |
-| `coach weekly` | Writes `reports/YYYY-WW.md`: the week, the diagnosis, and next week's plan |
+| `coach weekly` | The same report by hand, early, or offline with `--no-llm`. `coach today` writes it for you once a week |
 | `coach enrich` | Backfills tags and embeddings for anything logged while offline |
 | `coach-web` | The same data in a browser: progress, a table of your practiced patterns, a form to log a solve, the weekly plan, and last week's coach's note |
 
@@ -256,17 +264,17 @@ uv sync --extra web            # optional: FastAPI + uvicorn for the browser UI
 cp .env.example .env           # then add your key; .env is gitignored
 uv run coach init              # download the catalog, create the database
 
+uv run coach today                            # what to solve today (free, no LLM)
 uv run coach log 1 --outcome clean --time 8   # paste your solution, then Ctrl+D
 uv run coach due
 uv run coach similar 1
-uv run coach weekly
 uv run coach-web                              # the same data in a browser
 ```
 
 Development:
 
 ```bash
-uv run pytest                  # 130 tests; every LLM call mocked, API key stripped
+uv run pytest                  # 160 tests; every LLM call mocked, API key stripped
 uv run ruff check .
 uv run python -m evals.validate_bank        # re-label the fixture bank, no API calls
 uv run python -m evals.run_evals --all --dry-run   # count the calls and cost first
@@ -287,13 +295,22 @@ as the solve timeline.
 
 ## Automation
 
-`coach weekly` ran on a schedule via GitHub Actions through M5; that workflow has since
-been removed in favor of a systemd user timer that runs the same command weekly on the
-machine that owns `data/coach.db` — one writer, no CI secret holding an API key it barely
-used, and one less piece of infrastructure to keep working. The report is reviewed and
-pushed by hand, alongside whatever other changes accumulated that week.
+The weekly review writes itself, with no scheduler at all: the first `coach today` of each
+ISO week generates `reports/YYYY-WW.md` as a side effect, and every run after that in the
+same week sees the recorded run and does nothing. The check is one indexed row lookup, so
+the other six days cost nothing.
 
-Unit files: `~/.config/systemd/user/coach-weekly.{service,timer}`.
+This is deliberately *pull-based* rather than a background job. It works on any machine
+that can run the tool — no systemd, no launchd, no OS-specific install step — and nothing
+holding an API key ever runs unattended: the report is only ever written while you are at
+the keyboard, which is the same reason the GitHub Actions cron was dropped in M5. A
+scheduled writer also turned out to be actively worse in practice: the systemd timer this
+replaced fired on a Sunday with no network, wrote a report with no narrative, and
+overwrote that week's good one.
+
+`coach weekly` still exists for running the report early, by hand, or offline
+(`--no-llm`); a report generated that way also satisfies the week, so `coach today` will
+not write a second one. Reports are reviewed and pushed by hand.
 
 ## Layout
 
@@ -302,6 +319,6 @@ coach/          CLI, service layer, SQLite schema, scheduler, LLM wrapper, enric
 coach/weekly/   collect → analyze → plan → report
 coach/web/      FastAPI app + the static Home, Solutions, Weekly Plan and Weekly Review pages
 evals/          execution oracle, fixture bank, corpus, scorers, RESULTS.md
-tests/          130 tests, no network
+tests/          160 tests, no network
 docs/PLAN.md    full design record and milestone history
 ```
