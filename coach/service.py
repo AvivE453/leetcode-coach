@@ -379,9 +379,12 @@ def stats_summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
     total = conn.execute("SELECT COUNT(*) FROM problems").fetchone()[0]
     solved = conn.execute("SELECT COUNT(DISTINCT problem_number) FROM attempts").fetchone()[0]
     attempts = conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0]
+    # The same window the weekly report collects, not a second definition of it:
+    # `days=7` counted today and the seven days before it - eight - so the home
+    # page said 8 where the report said 7 for the same solves.
     week = conn.execute(
         "SELECT COUNT(*) FROM attempts WHERE date >= ?",
-        ((today - timedelta(days=7)).isoformat(),),
+        ((today - timedelta(days=weekly_collect.WINDOW_DAYS - 1)).isoformat(),),
     ).fetchone()[0]
     due_count = conn.execute(
         "SELECT COUNT(*) FROM review_state WHERE next_due <= ?", (today.isoformat(),)

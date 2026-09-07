@@ -1,6 +1,7 @@
 import os
 
 import anthropic
+from pydantic import ValidationError
 
 from coach import config
 
@@ -32,6 +33,13 @@ def _complete(request):
 
     The SDK already retries rate limits and 5xx with backoff; anything that
     still fails is wrapped so callers can degrade gracefully.
+
+    The three specific handlers exist for their wording; the last two are the
+    ones that make the contract true. A model that answers with output the
+    schema rejects used to raise ValidationError straight through `coach log`,
+    which had already committed the solve - so the tool reported a traceback
+    for work it had saved. Programming errors (TypeError, AttributeError) are
+    deliberately NOT caught: those are bugs here, not the API degrading.
     """
     if not have_api_key():
         raise LLMUnavailable("ANTHROPIC_API_KEY is not set - add it to .env at the project root")
@@ -43,6 +51,14 @@ def _complete(request):
         raise LLMUnavailable(f"API error {e.status_code}: {e.message}") from e
     except anthropic.APIConnectionError as e:
         raise LLMUnavailable(f"could not reach the API: {e}") from e
+    except ValidationError as e:
+        raise LLMUnavailable(
+            f"the model's answer did not fit the expected schema ({e.error_count()} field error(s))"
+        ) from e
+    except anthropic.AnthropicError as e:
+        # Base class of every SDK error - the catch-all so a new or rarer
+        # failure mode degrades instead of surfacing as a crash.
+        raise LLMUnavailable(f"the API call failed: {e}") from e
 
     if response.stop_reason == "refusal":
         raise LLMUnavailable("the model declined this request")

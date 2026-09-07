@@ -127,10 +127,31 @@ def save_intended(
 ) -> None:
     """Store the problem's canonical approaches: the central one plus any alternates.
 
-    `pattern` is dropped from `secondary` defensively - the two columns are read back
-    as one set, and a duplicate there would show up as a repeated note.
+    The alternates ACCUMULATE across enrichments rather than replacing what is
+    stored. Every re-solve re-enriches and calls this, and the model does not
+    always name the same alternates twice - so replacing let a later enrichment
+    narrow the canonical set and re-flag a solve that had legitimately used one
+    of the dropped approaches, handing it a forced re-solve slot in `coach today`.
+    Accumulating makes the set a record of every approach ever judged canonical,
+    which is what off_pattern_problems() reads it as.
+
+    `intended_pattern` still takes the newest answer, since it is the single
+    central approach the off-pattern warning names; a previous central pattern
+    is demoted into the alternates rather than dropped. `pattern` is dropped from
+    the alternates - the two columns are read back as one set, and a duplicate
+    would show up as a repeated note.
     """
-    extra = [p for p in dict.fromkeys(secondary or []) if p != pattern]
+    row = conn.execute(
+        "SELECT intended_pattern, intended_secondary_patterns FROM problems WHERE number = ?",
+        (problem_number,),
+    ).fetchone()
+    known: list[str] = []
+    if row is not None:
+        if row["intended_pattern"]:
+            known.append(row["intended_pattern"])
+        known.extend(json.loads(row["intended_secondary_patterns"] or "[]"))
+
+    extra = [p for p in dict.fromkeys([*(secondary or []), *known]) if p != pattern]
     conn.execute(
         "UPDATE problems SET intended_pattern = ?, intended_secondary_patterns = ? WHERE number = ?",
         (pattern, json.dumps(extra), problem_number),

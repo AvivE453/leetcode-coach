@@ -72,6 +72,41 @@ def test_save_intended_stores_alternates_without_repeating_the_central_one(tmp_p
     assert json.loads(row["intended_secondary_patterns"]) == ["greedy"]
 
 
+def test_save_intended_accumulates_alternates_across_enrichments(tmp_path):
+    """A re-enrichment must not narrow the canonical set.
+
+    Every re-solve enriches again, and the model does not always name the same
+    alternates twice. Replacing the column let the second answer drop an approach
+    the first had accepted.
+    """
+    conn = make_db(tmp_path)
+    enrich.save_intended(conn, 1, "greedy", ["dp-1d"])
+    enrich.save_intended(conn, 1, "dp-1d", [])
+
+    row = conn.execute("SELECT * FROM problems WHERE number = 1").fetchone()
+    # the newest answer owns the central slot; the previous central one is demoted,
+    # not discarded, so both approaches stay canonical
+    assert row["intended_pattern"] == "dp-1d"
+    assert json.loads(row["intended_secondary_patterns"]) == ["greedy"]
+
+
+def test_re_enriching_does_not_re_flag_a_cleared_solve(tmp_path):
+    """The bug this guards: a solved-correctly problem reappearing as off-pattern.
+
+    #121 is solved with greedy while greedy is canonical. A later enrichment names
+    only dp-1d. Before, that re-flagged the greedy solve and earned it a forced
+    re-solve slot in `coach today`.
+    """
+    conn = make_db(tmp_path)
+    enrich.save_intended(conn, 1, "greedy", ["dp-1d"])
+    enrich_solution_row(conn, "greedy")
+    assert enrich.off_pattern_problems(conn) == []
+
+    enrich.save_intended(conn, 1, "dp-1d", [])
+
+    assert [r["number"] for r in enrich.off_pattern_problems(conn)] == []
+
+
 CANONICAL = ("hashmap", ["two-pointers"])
 
 

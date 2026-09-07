@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from coach import config, db, embed, enrich, review, service
+from coach.weekly import collect as weekly_collect
 
 CODE = "class Solution:\n    def twoSum(self, nums, target):\n        return []\n"
 
@@ -312,6 +313,26 @@ def test_stats_summary_counts_distinct_problems_and_curriculum(tmp_path, monkeyp
         "off_pattern": [],
         "curriculum": {"blind75": {"done": 2, "total": 2}, "neetcode150": {"done": 0, "total": 0}},
     }
+
+
+def test_last_7_days_covers_the_same_window_the_weekly_report_collects(tmp_path, monkeypatch):
+    """One definition of "the last week", not two.
+
+    `date >= today - 7` counted today plus the seven days before it - eight - so
+    the home page reported 8 where the weekly report reported 7 for the same solves.
+    """
+    conn = setup_env(tmp_path, monkeypatch)
+    today = date(2026, 9, 7)
+    for days_ago in range(10):
+        service.log_solve(conn, 1, "clean", CODE, today=today - timedelta(days=days_ago))
+
+    counted = service.stats_summary(conn, today)["last_7_days"]
+    week = weekly_collect.collect(conn, today)
+
+    assert counted == weekly_collect.WINDOW_DAYS == 7
+    assert counted == len(week["attempts"])
+    # the eighth day back is outside the window on both sides
+    assert week["start"] == today - timedelta(days=6)
 
 
 def test_solution_history_returns_every_solve_newest_first(tmp_path, monkeypatch):
