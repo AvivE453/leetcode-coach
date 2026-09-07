@@ -97,10 +97,11 @@ Four pages, no build step — FastAPI serving plain HTML/CSS/JS:
   a review — what it got right, what to improve, your complexity against optimal — stored once and
   shown for free thereafter. Asking for a new one is always an explicit click, never something
   opening the page pays for.
-- **Weekly Plan** — this week's focus topics (weak patterns, stale patterns, off-pattern solves)
-  and the planned problems in priority order, each with the reason it was picked. Recomputed live
-  and read-only: unlike `coach weekly` it writes no report and records no run.
-- **Weekly Review** — the coach's note from the last `coach weekly` run, plus the full picture it
+- **Today** — the browser version of `coach today`: today's focus topics (weak patterns, stale
+  patterns, off-pattern solves) and today's problems in priority order, each with the reason it was
+  picked. Recomputed live and read-only — unlike the CLI command, opening this page never writes
+  `reports/YYYY-WW.md` or records a run, even on the week's first visit.
+- **Weekly Review** — the coach's note from the last weekly report, plus the full picture it
   was written against: that week's attempts, the per-pattern table, off-pattern solves, curriculum
   progress, and the plan itself — the same detail as `reports/YYYY-WW.md`, not a thinner summary
   of it. Frozen rather than live: all of it was computed once when the report was generated, so
@@ -317,7 +318,7 @@ not write a second one. Reports are reviewed and pushed by hand.
 ```
 coach/          CLI, service layer, SQLite schema, scheduler, LLM wrapper, enrichment, embeddings
 coach/weekly/   collect → analyze → plan → report
-coach/web/      FastAPI app + the static Home, Solutions, Weekly Plan and Weekly Review pages
+coach/web/      FastAPI app + the static Home, Solutions, Today and Weekly Review pages
 evals/          execution oracle, fixture bank, corpus, scorers, RESULTS.md
 tests/          160 tests, no network
 docs/PLAN.md    full design record and milestone history

@@ -183,12 +183,13 @@ def api_review(number: int, body: ReviewRequest) -> dict:
 
 
 @app.get("/api/plan")
-def api_plan(target: int = config.WEEKLY_TARGET) -> dict:
-    """Recompute this week's plan live. Read-only: unlike `coach weekly`, it
-    writes no report and records no weekly_runs row."""
+def api_plan(target: int = config.DAILY_TARGET) -> dict:
+    """Recompute today's plan live. Read-only: unlike `coach today`, it never
+    writes reports/YYYY-WW.md or touches weekly_runs, even on the week's first
+    call - `last_report` below only ever reports what a CLI run has produced."""
     today = date.today()
     with open_db() as conn:
-        analysis = weekly_analyze.analyze(conn, today)
+        analysis = weekly_analyze.analyze(conn, today, lookahead_days=0)
         items = weekly_plan.build_plan(conn, analysis, target)
         last_run = conn.execute(
             "SELECT week_start, generated_at, report_path FROM weekly_runs ORDER BY id DESC LIMIT 1"

@@ -236,6 +236,29 @@ def test_plan_endpoint_ranks_problems_and_stays_read_only(client, monkeypatch):
     assert not (config.REPORTS_DIR).exists()
 
 
+def test_plan_endpoint_only_counts_reviews_due_today(client, monkeypatch):
+    """The page is /plan's "Today", not the old weekly view: a review owed in
+    three days must not appear, even though `coach weekly` would show it."""
+    enriched(monkeypatch)
+    client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
+
+    conn = db.connect()
+    conn.execute(
+        "UPDATE review_state SET next_due = date('now', '+3 days') WHERE problem_number = 1"
+    )
+    conn.commit()
+    conn.close()
+
+    plan = client.get("/api/plan").json()
+
+    assert plan["due_count"] == 0
+    assert 1 not in [i["number"] for i in plan["items"]]
+
+
+def test_plan_endpoint_defaults_to_the_daily_target(client, monkeypatch):
+    assert client.get("/api/plan").json()["target"] == config.DAILY_TARGET
+
+
 def test_plan_endpoint_surfaces_off_pattern_topics(client, monkeypatch):
     enriched(monkeypatch, pattern="prefix-sum", intended_pattern="dp-1d")
     client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})

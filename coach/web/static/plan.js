@@ -1,4 +1,4 @@
-/* Weekly Plan page: focus topics, then the ranked problem list. */
+/* Today page: focus topics, then today's ranked problem list. */
 
 function el(tag, props = {}, children = []) {
   const node = document.createElement(tag);
@@ -53,7 +53,7 @@ function renderTopics(data) {
     )
   );
 
-  const parts = [`${data.items.length} problems planned`, `${data.due_count} review${data.due_count === 1 ? "" : "s"} due`];
+  const parts = [`${data.items.length} problems today`, `${data.due_count} review${data.due_count === 1 ? "" : "s"} due today`];
   for (const [name, p] of Object.entries(data.curriculum)) parts.push(`${name} ${p.done}/${p.total}`);
   document.getElementById("plan-meta").textContent = parts.join(" · ");
 }
@@ -65,7 +65,7 @@ function renderPlan(data) {
 
   if (!data.items.length) {
     empty.hidden = false;
-    empty.textContent = "Nothing to plan — the curriculum is finished and no reviews are due.";
+    empty.textContent = "Nothing to plan — the curriculum is finished and no reviews are due today.";
     return;
   }
   empty.hidden = true;
