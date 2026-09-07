@@ -28,8 +28,24 @@ OUTCOME_WEIGHT = 0.7
 REVIEW_WEIGHT = 0.3
 EMA_ALPHA = 0.2
 WEAK_SCORE = 2.5
+WEAK_MIN_ATTEMPTS = 5
 
 VERDICT_MASTERY = {"optimal": 5, "acceptable": 4}
+
+
+def is_weak(score: float | None, attempts: int) -> bool:
+    """Whether one pattern's aggregates read as weak.
+
+    Both halves of the rule live here because both are about what a mastery score
+    means: how low it has to be, and how much practice it takes before the number
+    is worth believing. They were split across two modules, so four files had to
+    import from both to state one rule.
+
+    This is a predicate on numbers, not the answer for a pattern - analyze() stays
+    the only thing that produces `weak_patterns`, and callers still read weak as
+    `pattern in analysis["weak_patterns"]` rather than calling this themselves.
+    """
+    return score is not None and attempts >= WEAK_MIN_ATTEMPTS and score < WEAK_SCORE
 
 
 def issue_ceiling(count: int) -> int:
@@ -76,6 +92,44 @@ def fold(scores: Iterable[float]) -> float | None:
     for s in scores:
         score = s if score is None else (1 - EMA_ALPHA) * score + EMA_ALPHA * s
     return score
+
+
+def pattern_stats(conn: sqlite3.Connection) -> list[dict]:
+    """Per-pattern practice aggregates, one row per pattern, ordered by name.
+
+    The single answer to "how is each pattern going": how many attempts, how many
+    were not clean (raw as `rough`, and as `struggle_rate`), the folded mastery
+    score, and when it was last practiced. `coach stats` and the weekly analysis
+    both read this - they ran near-identical copies of this SQL and differed only
+    in the sort order and in which of rough/struggle_rate they kept, so each
+    caller now sorts the shared rows itself.
+    """
+    rows = conn.execute(
+        """
+        SELECT en.pattern,
+               COUNT(*) AS attempts,
+               SUM(a.outcome != 'clean') AS rough,
+               MAX(a.date) AS last_date,
+               ps.score
+        FROM attempts a
+        JOIN solutions s ON s.attempt_id = a.id
+        JOIN enrichments en ON en.solution_id = s.id
+        LEFT JOIN pattern_scores ps ON ps.pattern = en.pattern
+        GROUP BY en.pattern
+        ORDER BY en.pattern
+        """
+    ).fetchall()
+    return [
+        {
+            "pattern": r["pattern"],
+            "attempts": r["attempts"],
+            "rough": r["rough"],
+            "struggle_rate": r["rough"] / r["attempts"],
+            "score": r["score"],
+            "last_date": date.fromisoformat(r["last_date"]),
+        }
+        for r in rows
+    ]
 
 
 def recompute_all(conn: sqlite3.Connection) -> None:

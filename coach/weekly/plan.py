@@ -8,6 +8,12 @@ from coach import config, curriculum
 # practicing a weak pattern (design decision #1: official tags pick problems,
 # our tags diagnose weaknesses). Patterns without a usable official tag fall
 # through to plain curriculum progression.
+#
+# Deliberately a subset of enrich.PATTERNS, not a copy of it: `intervals` is
+# absent because LeetCode has no matching topic tag to search on (those problems
+# are tagged array/sorting), so a weak `intervals` gets no targeted picks and
+# falls through. A test keeps the keys a subset, so a typo here cannot silently
+# stop targeting a pattern the way a missing entry deliberately does.
 PATTERN_TO_TAG = {
     "two-pointers": "two-pointers",
     "sliding-window": "sliding-window",

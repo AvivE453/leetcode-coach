@@ -1,3 +1,4 @@
+import sqlite3
 from dataclasses import dataclass
 from datetime import date, timedelta
 
@@ -47,3 +48,28 @@ def review(state: ReviewState | None, outcome: str, today: date) -> ReviewState:
         reps=reps,
         lapses=lapses,
     )
+
+
+def due_reviews(
+    conn: sqlite3.Connection, today: date, lookahead_days: int = 0
+) -> list[sqlite3.Row]:
+    """Problems whose review is owed by today+lookahead_days, soonest first.
+
+    The read half of this module: review() decides when a problem comes back,
+    this reads back which ones have. `coach due` and the weekly analysis asked
+    the same question with two copies of the query, which differed only in the
+    horizon - so the horizon is the parameter and the query is shared.
+
+    lookahead_days=0 means "owed today or overdue"; the weekly analysis passes
+    its own default to cover the days ahead. See PLAN_LOOKAHEAD_DAYS for why a
+    daily list must not widen it.
+    """
+    return conn.execute(
+        """
+        SELECT p.number, p.slug, p.title, p.difficulty, r.next_due
+        FROM review_state r JOIN problems p ON p.number = r.problem_number
+        WHERE r.next_due <= ?
+        ORDER BY r.next_due
+        """,
+        ((today + timedelta(days=lookahead_days)).isoformat(),),
+    ).fetchall()

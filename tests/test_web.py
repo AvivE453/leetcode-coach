@@ -266,7 +266,7 @@ def test_plan_endpoint_serves_the_thresholds_the_page_quotes(client):
 
     assert thresholds == {
         "weak_score": mastery.WEAK_SCORE,
-        "weak_min_attempts": weekly_analyze.WEAK_MIN_ATTEMPTS,
+        "weak_min_attempts": mastery.WEAK_MIN_ATTEMPTS,
         "stale_days": weekly_analyze.STALE_DAYS,
     }
 

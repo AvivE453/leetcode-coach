@@ -440,7 +440,7 @@ def test_daily_plan_only_counts_reviews_due_today(tmp_path, monkeypatch):
             (number, due.isoformat()),
         )
 
-    items = service.daily_plan(conn, today, target=4)
+    items = service.daily_plan(conn, today, target=4).items
 
     assert [i.number for i in items] == [1]
     assert items[0].reason == f"review due {today.isoformat()}"

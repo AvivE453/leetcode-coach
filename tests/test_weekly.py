@@ -149,7 +149,7 @@ def test_analyze_reports_due_and_curriculum(tmp_path):
 
     analysis = weekly_analyze.analyze(conn, TODAY)
     assert [r["number"] for r in analysis["due"]] == [1]
-    assert analysis["curriculum"]["blind75"] == (1, 2)
+    assert analysis["curriculum"]["blind75"] == {"done": 1, "total": 2}
 
 
 def test_analyze_lookahead_narrows_due_to_today(tmp_path):

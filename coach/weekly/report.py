@@ -49,7 +49,7 @@ def summarize(week: dict, analysis: dict) -> str:
         # definition of "weak", and a hand-written one went stale once already.
         lines.append(
             f"Weak patterns (mastery below {mastery.WEAK_SCORE} over"
-            f" {analyze.WEAK_MIN_ATTEMPTS}+ attempts): " + ", ".join(analysis["weak_patterns"])
+            f" {mastery.WEAK_MIN_ATTEMPTS}+ attempts): " + ", ".join(analysis["weak_patterns"])
         )
     if analysis["stale_patterns"]:
         lines.append(
@@ -60,8 +60,8 @@ def summarize(week: dict, analysis: dict) -> str:
         lines.append(
             f"Solved off-pattern: #{r['number']} {r['title']} (canonical: {r['intended_pattern']})"
         )
-    for name, (done, total) in analysis["curriculum"].items():
-        lines.append(f"Curriculum {name}: {done}/{total}")
+    for name, p in analysis["curriculum"].items():
+        lines.append(f"Curriculum {name}: {p['done']}/{p['total']}")
     lines.append(f"Reviews coming due: {len(analysis['due'])}")
     return "\n".join(lines)
 
@@ -110,7 +110,7 @@ def snapshot(week: dict, analysis: dict) -> dict:
             {"number": r["number"], "title": r["title"], "intended_pattern": r["intended_pattern"]}
             for r in analysis["off_pattern"]
         ],
-        "curriculum": {name: {"done": d, "total": t} for name, (d, t) in analysis["curriculum"].items()},
+        "curriculum": analysis["curriculum"],
         "due": len(analysis["due"]),
     }
 
@@ -165,8 +165,8 @@ def render(week: dict, analysis: dict, note: str | None, today: date) -> str:
 
     lines.append("## Where you stand")
     lines.append("")
-    for name, (done, total) in analysis["curriculum"].items():
-        lines.append(f"- {name}: {done}/{total}")
+    for name, p in analysis["curriculum"].items():
+        lines.append(f"- {name}: {p['done']}/{p['total']}")
     lines.append(f"- reviews coming due: {len(analysis['due'])}")
     lines.append("")
 

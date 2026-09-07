@@ -18,8 +18,6 @@ from coach.weekly import collect as weekly_collect
 from coach.weekly import plan as weekly_plan
 from coach.weekly import report as weekly_report
 
-OUTCOMES = ("clean", "struggled", "hints", "failed")
-
 
 class ProblemNotFound(LookupError):
     """No catalog row for that problem number."""
@@ -97,6 +95,19 @@ class WeeklyRunResult:
     attempts: int
     due: int
     weak_patterns: list[str]
+
+
+@dataclass(frozen=True)
+class DailyPlan:
+    """Today's ranked list, plus the analysis that ranked it.
+
+    The two travel together because the horizon that produced them is a property
+    of the pair: reading `items` against a differently-analyzed `analysis` is the
+    bug this replaced.
+    """
+
+    items: list[weekly_plan.PlanItem]
+    analysis: dict
 
 
 @dataclass(frozen=True)
@@ -358,7 +369,7 @@ def pattern_standing(
         weak=pattern in analysis["weak_patterns"],
         # weak is False on a first attempt because the sample is too small, which
         # would otherwise read as "assessed as solid".
-        enough_data=row["attempts"] >= weekly_analyze.WEAK_MIN_ATTEMPTS,
+        enough_data=row["attempts"] >= mastery.WEAK_MIN_ATTEMPTS,
     )
 
 
@@ -382,24 +393,12 @@ def stats_summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
             "SELECT outcome, COUNT(*) AS n FROM attempts GROUP BY outcome ORDER BY n DESC"
         )
     ]
+    # Shared rows, sorted the way this view wants them: most-practiced first.
     patterns = [
-        {
-            "pattern": r["pattern"],
-            "attempts": r["attempts"],
-            "rough": r["rough"],
-            "score": r["score"],
-        }
-        for r in conn.execute(
-            """
-            SELECT en.pattern, COUNT(*) AS attempts, SUM(a.outcome != 'clean') AS rough,
-                   ps.score
-            FROM attempts a
-            JOIN solutions s ON s.attempt_id = a.id
-            JOIN enrichments en ON en.solution_id = s.id
-            LEFT JOIN pattern_scores ps ON ps.pattern = en.pattern
-            GROUP BY en.pattern
-            ORDER BY attempts DESC, en.pattern
-            """
+        {"pattern": p["pattern"], "attempts": p["attempts"], "rough": p["rough"],
+         "score": p["score"]}
+        for p in sorted(
+            mastery.pattern_stats(conn), key=lambda p: (-p["attempts"], p["pattern"])
         )
     ]
     off_pattern = [
@@ -412,18 +411,6 @@ def stats_summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
         for r in enrich.off_pattern_problems(conn)
     ]
 
-    progress = {}
-    for name, column in curriculum.FLAG_COLUMNS.items():
-        in_list = conn.execute(f"SELECT COUNT(*) FROM problems WHERE {column} = 1").fetchone()[0]
-        done = conn.execute(
-            f"""
-            SELECT COUNT(DISTINCT a.problem_number)
-            FROM attempts a JOIN problems p ON p.number = a.problem_number
-            WHERE p.{column} = 1
-            """
-        ).fetchone()[0]
-        progress[name] = {"done": done, "total": in_list}
-
     return {
         "catalog": total,
         "solved": solved,
@@ -433,7 +420,7 @@ def stats_summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
         "outcomes": outcomes,
         "patterns": patterns,
         "off_pattern": off_pattern,
-        "curriculum": progress,
+        "curriculum": curriculum.progress(conn),
     }
 
 
@@ -520,18 +507,36 @@ def solution_history(conn: sqlite3.Connection, number: int) -> dict:
     }
 
 
-def daily_plan(
-    conn: sqlite3.Connection, today: date, target: int
-) -> list[weekly_plan.PlanItem]:
+def daily_plan(conn: sqlite3.Connection, today: date, target: int) -> DailyPlan:
     """What to solve today, ranked by the same rules as the weekly plan.
 
     The only difference is the horizon: `lookahead_days=0` counts a review as due
     today rather than any time this week, so a short list is not filled with
     reviews that are not owed yet. Recomputed on every call and stored nowhere -
     a solved problem simply stops appearing.
+
+    Returns the analysis alongside the list because /api/plan needs both, and
+    composing them itself is how it ended up with its own copy of the horizon -
+    which then had to be fixed twice on the day the daily plan landed.
     """
     analysis = weekly_analyze.analyze(conn, today, lookahead_days=0)
-    return weekly_plan.build_plan(conn, analysis, target)
+    return DailyPlan(items=weekly_plan.build_plan(conn, analysis, target), analysis=analysis)
+
+
+def last_weekly_run(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    """The most recent weekly run, or None before the first one.
+
+    One definition of "the latest run", read by `coach today`'s once-a-week check
+    and by both endpoints that surface it - they each selected their own subset of
+    the same row. Callers project the columns they serve, so /api/plan does not
+    start shipping the stats blob.
+    """
+    return conn.execute(
+        """
+        SELECT week_start, generated_at, report_path, stats, degraded, narrative
+        FROM weekly_runs ORDER BY id DESC LIMIT 1
+        """
+    ).fetchone()
 
 
 def weekly_report_needed(conn: sqlite3.Connection, today: date) -> bool:
@@ -541,9 +546,7 @@ def weekly_report_needed(conn: sqlite3.Connection, today: date) -> bool:
     never `week_start`, which falls in the previous ISO week. Only the newest row
     matters because `generated_at` only moves forward.
     """
-    row = conn.execute(
-        "SELECT generated_at FROM weekly_runs ORDER BY id DESC LIMIT 1"
-    ).fetchone()
+    row = last_weekly_run(conn)
     if row is None:
         return True
     last = weekly_report.week_key(date.fromisoformat(row["generated_at"]))

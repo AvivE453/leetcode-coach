@@ -17,7 +17,6 @@ from pydantic import BaseModel, Field
 
 from coach import config, db, mastery, service
 from coach.weekly import analyze as weekly_analyze
-from coach.weekly import plan as weekly_plan
 from coach.weekly import report as weekly_report
 from coach.weekly.plan import plan_kind
 
@@ -189,11 +188,9 @@ def api_plan(target: int = config.DAILY_TARGET) -> dict:
     call - `last_report` below only ever reports what a CLI run has produced."""
     today = date.today()
     with open_db() as conn:
-        analysis = weekly_analyze.analyze(conn, today, lookahead_days=0)
-        items = weekly_plan.build_plan(conn, analysis, target)
-        last_run = conn.execute(
-            "SELECT week_start, generated_at, report_path FROM weekly_runs ORDER BY id DESC LIMIT 1"
-        ).fetchone()
+        plan = service.daily_plan(conn, today, target)
+        last_run = service.last_weekly_run(conn)
+    items, analysis = plan.items, plan.analysis
 
     return {
         "generated_for": today.isoformat(),
@@ -222,15 +219,21 @@ def api_plan(target: int = config.DAILY_TARGET) -> dict:
             ],
         },
         "due_count": len(analysis["due"]),
-        "curriculum": {name: {"done": d, "total": t} for name, (d, t) in analysis["curriculum"].items()},
+        "curriculum": analysis["curriculum"],
         # Served so the page can word its empty states from the numbers that
         # actually decide weak/stale, instead of restating them in English.
         "thresholds": {
             "weak_score": mastery.WEAK_SCORE,
-            "weak_min_attempts": weekly_analyze.WEAK_MIN_ATTEMPTS,
+            "weak_min_attempts": mastery.WEAK_MIN_ATTEMPTS,
             "stale_days": weekly_analyze.STALE_DAYS,
         },
-        "last_report": dict(last_run) if last_run else None,
+        # Projected, not the whole row: /weekly serves the stats blob and the
+        # narrative, and this endpoint has no reason to ship them too.
+        "last_report": (
+            {k: last_run[k] for k in ("week_start", "generated_at", "report_path")}
+            if last_run
+            else None
+        ),
     }
 
 
@@ -242,12 +245,7 @@ def api_weekly() -> dict:
     recomputes it and never calls the API. `null` until the first run.
     """
     with open_db() as conn:
-        row = conn.execute(
-            """
-            SELECT week_start, generated_at, report_path, stats, degraded, narrative
-            FROM weekly_runs ORDER BY id DESC LIMIT 1
-            """
-        ).fetchone()
+        row = service.last_weekly_run(conn)
 
     if row is None:
         return {"run": None}

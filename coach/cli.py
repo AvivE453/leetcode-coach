@@ -8,7 +8,18 @@ from pathlib import Path
 import numpy as np
 import typer
 
-from coach import catalog, config, curriculum, db, embed, enrich, llm, mastery, service
+from coach import (
+    catalog,
+    config,
+    curriculum,
+    db,
+    embed,
+    enrich,
+    llm,
+    mastery,
+    scheduler,
+    service,
+)
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -155,15 +166,7 @@ def due():
     """Problems whose review is due today (or overdue)."""
     conn = db.connect()
     today = date.today()
-    rows = conn.execute(
-        """
-        SELECT p.number, p.title, p.difficulty, r.next_due
-        FROM review_state r JOIN problems p ON p.number = r.problem_number
-        WHERE r.next_due <= ?
-        ORDER BY r.next_due
-        """,
-        (today.isoformat(),),
-    ).fetchall()
+    rows = scheduler.due_reviews(conn, today)
     if not rows:
         typer.echo("Nothing due for review today.")
         return
@@ -395,7 +398,7 @@ def today(
     require_catalog(conn)
 
     now = date.today()
-    items = service.daily_plan(conn, now, target)
+    items = service.daily_plan(conn, now, target).items
     if items:
         typer.echo(f"{len(items)} problem(s) for today:")
         for item in items:
