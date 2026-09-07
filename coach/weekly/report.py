@@ -2,7 +2,8 @@ import json
 from datetime import date
 from pathlib import Path
 
-from coach import config, llm
+from coach import config, llm, mastery
+from coach.weekly import analyze
 
 NARRATIVE_PROMPT = """\
 You are a direct, supportive LeetCode interview-prep coach. Based on this week's data,
@@ -44,9 +45,17 @@ def summarize(week: dict, analysis: dict) -> str:
             f" outcome={r['outcome']} pattern={r['pattern'] or 'untagged'}{review_note(r)}"
         )
     if analysis["weak_patterns"]:
-        lines.append("Weak patterns (>=50% non-clean): " + ", ".join(analysis["weak_patterns"]))
+        # Worded from the constants that decide it - this line is the LLM's only
+        # definition of "weak", and a hand-written one went stale once already.
+        lines.append(
+            f"Weak patterns (mastery below {mastery.WEAK_SCORE} over"
+            f" {analyze.WEAK_MIN_ATTEMPTS}+ attempts): " + ", ".join(analysis["weak_patterns"])
+        )
     if analysis["stale_patterns"]:
-        lines.append("Stale patterns (untouched >30d): " + ", ".join(analysis["stale_patterns"]))
+        lines.append(
+            f"Stale patterns (untouched >{analyze.STALE_DAYS}d): "
+            + ", ".join(analysis["stale_patterns"])
+        )
     for r in analysis["off_pattern"]:
         lines.append(
             f"Solved off-pattern: #{r['number']} {r['title']} (canonical: {r['intended_pattern']})"

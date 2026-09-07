@@ -5,8 +5,9 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from coach import config, db, enrich, review
+from coach import config, db, enrich, mastery, review
 from coach.web.app import app
+from coach.weekly import analyze as weekly_analyze
 
 CODE = "class Solution:\n    def twoSum(self, nums, target):\n        return []\n"
 
@@ -257,6 +258,17 @@ def test_plan_endpoint_only_counts_reviews_due_today(client, monkeypatch):
 
 def test_plan_endpoint_defaults_to_the_daily_target(client, monkeypatch):
     assert client.get("/api/plan").json()["target"] == config.DAILY_TARGET
+
+
+def test_plan_endpoint_serves_the_thresholds_the_page_quotes(client):
+    """The page words its empty states from these, so they must be the real ones."""
+    thresholds = client.get("/api/plan").json()["thresholds"]
+
+    assert thresholds == {
+        "weak_score": mastery.WEAK_SCORE,
+        "weak_min_attempts": weekly_analyze.WEAK_MIN_ATTEMPTS,
+        "stale_days": weekly_analyze.STALE_DAYS,
+    }
 
 
 def test_plan_endpoint_surfaces_off_pattern_topics(client, monkeypatch):

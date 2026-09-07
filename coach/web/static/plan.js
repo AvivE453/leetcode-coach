@@ -27,11 +27,13 @@ function renderTopics(data) {
   const host = document.getElementById("topics");
   host.replaceChildren();
   const t = data.topics;
+  // Thresholds come from the API so this copy tracks the Python constants.
+  const th = data.thresholds || {};
 
   host.append(
     topicCard(
       "Weak patterns",
-      "Nothing weak yet — a pattern needs five attempts and a mastery score below 2.5 to count.",
+      `Nothing weak yet — a pattern needs ${th.weak_min_attempts} attempts and a mastery score below ${th.weak_score} to count.`,
       t.weak,
       (p) => el("li", { text: p })
     )
@@ -39,7 +41,7 @@ function renderTopics(data) {
   host.append(
     topicCard(
       "Stale patterns",
-      "Nothing has gone stale (30+ days untouched).",
+      `Nothing has gone stale (${th.stale_days}+ days untouched).`,
       t.stale,
       (p) => el("li", { text: p })
     )

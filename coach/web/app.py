@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from coach import config, db, service
+from coach import config, db, mastery, service
 from coach.weekly import analyze as weekly_analyze
 from coach.weekly import plan as weekly_plan
 from coach.weekly import report as weekly_report
@@ -223,6 +223,13 @@ def api_plan(target: int = config.DAILY_TARGET) -> dict:
         },
         "due_count": len(analysis["due"]),
         "curriculum": {name: {"done": d, "total": t} for name, (d, t) in analysis["curriculum"].items()},
+        # Served so the page can word its empty states from the numbers that
+        # actually decide weak/stale, instead of restating them in English.
+        "thresholds": {
+            "weak_score": mastery.WEAK_SCORE,
+            "weak_min_attempts": weekly_analyze.WEAK_MIN_ATTEMPTS,
+            "stale_days": weekly_analyze.STALE_DAYS,
+        },
         "last_report": dict(last_run) if last_run else None,
     }
 
