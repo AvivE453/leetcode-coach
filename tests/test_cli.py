@@ -2,35 +2,18 @@ import json
 from datetime import date, timedelta
 
 import numpy as np
+from conftest import CODE, seed_db
 from typer.testing import CliRunner
 
-from coach import config, db, embed, enrich, mastery, review
+from coach import db, embed, enrich, mastery, review
 from coach.cli import app
 
 runner = CliRunner()
 
-CODE = "class Solution:\n    def twoSum(self, nums, target):\n        return []\n"
-
 
 def setup_env(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(config, "DB_PATH", tmp_path / "coach.db")
-    conn = db.connect()
-    db.init_schema(conn)
-    db.upsert_problems(
-        conn,
-        [
-            {
-                "number": 1,
-                "slug": "two-sum",
-                "title": "Two Sum",
-                "difficulty": "Easy",
-                "official_tags": '["array"]',
-                "paid_only": 0,
-            }
-        ],
-    )
-    conn.close()
+    """Seed the scratch database and let go of it - every CLI command opens its own."""
+    seed_db(tmp_path, monkeypatch).close()
 
 
 def test_log_stores_attempt_solution_and_schedule(tmp_path, monkeypatch):
@@ -406,11 +389,7 @@ def test_weekly_calls_a_pattern_weak_and_shows_the_week_movement(tmp_path, monke
 
 
 def test_weekly_without_catalog_points_at_init(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(config, "DB_PATH", tmp_path / "coach.db")
-    conn = db.connect()
-    db.init_schema(conn)
-    conn.close()
+    seed_db(tmp_path, monkeypatch, []).close()  # schema, but no catalog
 
     result = runner.invoke(app, ["weekly"])
     assert result.exit_code == 1
@@ -542,11 +521,7 @@ def test_today_never_calls_the_llm_and_writes_nothing(tmp_path, monkeypatch):
 
 
 def test_today_without_catalog_points_at_init(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(config, "DB_PATH", tmp_path / "coach.db")
-    conn = db.connect()
-    db.init_schema(conn)
-    conn.close()
+    seed_db(tmp_path, monkeypatch, []).close()  # schema, but no catalog
 
     result = runner.invoke(app, ["today"])
     assert result.exit_code == 1

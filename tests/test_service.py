@@ -3,12 +3,11 @@ from datetime import date, timedelta
 
 import numpy as np
 import pytest
+from conftest import CODE, seed_db
 
-from coach import config, db, embed, enrich, mastery, review, service
+from coach import config, embed, enrich, mastery, review, service
 from coach.weekly import analyze as weekly_analyze
 from coach.weekly import collect as weekly_collect
-
-CODE = "class Solution:\n    def twoSum(self, nums, target):\n        return []\n"
 
 ENRICHMENT = enrich.Enrichment(
     pattern="hashmap",
@@ -39,30 +38,8 @@ def fake_encode(texts):
     return np.tile(np.array([1.0, 0.0, 0.0], dtype=np.float32), (len(texts), 1))
 
 
-def setup_env(tmp_path, monkeypatch, problems=None):
-    monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(config, "DB_PATH", tmp_path / "coach.db")
-    conn = db.connect()
-    db.init_schema(conn)
-    db.upsert_problems(
-        conn,
-        problems
-        or [
-            {
-                "number": 1,
-                "slug": "two-sum",
-                "title": "Two Sum",
-                "difficulty": "Easy",
-                "official_tags": '["array"]',
-                "paid_only": 0,
-            }
-        ],
-    )
-    return conn
-
-
 def test_log_solve_stores_attempt_solution_and_schedule(tmp_path, monkeypatch):
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
 
     result = service.log_solve(conn, 1, "struggled", CODE, minutes=25, today=date(2026, 9, 1))
 
@@ -73,7 +50,7 @@ def test_log_solve_stores_attempt_solution_and_schedule(tmp_path, monkeypatch):
 
 
 def test_log_solve_rejects_unknown_problem_and_empty_code(tmp_path, monkeypatch):
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
 
     with pytest.raises(service.ProblemNotFound):
         service.log_solve(conn, 99999, "clean", CODE)
@@ -83,7 +60,7 @@ def test_log_solve_rejects_unknown_problem_and_empty_code(tmp_path, monkeypatch)
 
 
 def test_enrich_solution_now_reports_llm_degradation(tmp_path, monkeypatch):
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     result = service.log_solve(conn, 1, "clean", CODE)
     problem = service.get_problem(conn, 1)
 
@@ -95,7 +72,7 @@ def test_enrich_solution_now_reports_llm_degradation(tmp_path, monkeypatch):
 
 
 def test_enrich_solution_now_reports_embedding_degradation(tmp_path, monkeypatch):
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: ENRICHMENT)
 
     def no_embeddings(texts):
@@ -114,7 +91,7 @@ def test_enrich_solution_now_reports_embedding_degradation(tmp_path, monkeypatch
 
 
 def test_enrich_solution_now_flags_off_pattern(tmp_path, monkeypatch):
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     off = ENRICHMENT.model_copy(update={"pattern": "prefix-sum", "intended_pattern": "dp-1d"})
     monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: off)
     monkeypatch.setattr("coach.embed.encode", fake_encode)
@@ -130,7 +107,7 @@ def test_enrich_solution_now_flags_off_pattern(tmp_path, monkeypatch):
 def test_enrich_solution_now_accepts_a_canonical_alternate_approach(tmp_path, monkeypatch):
     """The whole point of intended_secondary_patterns: a different but still
     canonical route is not off-pattern, and earns no forced re-solve."""
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     alternate = ENRICHMENT.model_copy(update={"pattern": "two-pointers"})
     monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: alternate)
     monkeypatch.setattr("coach.embed.encode", fake_encode)
@@ -147,7 +124,7 @@ def test_enrich_solution_now_accepts_a_canonical_alternate_approach(tmp_path, mo
 
 def test_enrich_solution_now_carries_both_signals_when_embedding_fails(tmp_path, monkeypatch):
     """The early return path must not drop the new fields."""
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     off = ENRICHMENT.model_copy(update={"pattern": "prefix-sum", "intended_pattern": "dp-1d"})
     monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: off)
     monkeypatch.setattr(
@@ -165,7 +142,7 @@ def test_enrich_solution_now_carries_both_signals_when_embedding_fails(tmp_path,
 
 
 def test_pattern_counts_credits_every_pattern_a_problem_was_practiced_with(tmp_path, monkeypatch):
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     monkeypatch.setattr("coach.embed.encode", fake_encode)
 
     # one problem solved three times: two approaches, the second one repeated
@@ -183,7 +160,7 @@ def test_pattern_counts_credits_every_pattern_a_problem_was_practiced_with(tmp_p
 
 
 def test_pattern_counts_includes_a_solutions_secondary_patterns(tmp_path, monkeypatch):
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     monkeypatch.setattr("coach.embed.encode", fake_encode)
     e = ENRICHMENT.model_copy(update={"secondary_patterns": ["two-pointers"]})
     monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: e)
@@ -206,14 +183,14 @@ def log_and_enrich(conn, monkeypatch, outcome, pattern="hashmap"):
 
 def test_pattern_standing_is_none_without_a_pattern(tmp_path, monkeypatch):
     """No pattern means enrichment was skipped - there is nothing to stand on."""
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
 
     assert service.pattern_standing(conn, None) is None
     assert service.pattern_standing(conn, "never-solved") is None
 
 
 def test_pattern_standing_withholds_a_verdict_on_a_first_attempt(tmp_path, monkeypatch):
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     log_and_enrich(conn, monkeypatch, "failed")
 
     assert service.pattern_standing(conn, "hashmap") == service.PatternStanding(
@@ -222,7 +199,7 @@ def test_pattern_standing_withholds_a_verdict_on_a_first_attempt(tmp_path, monke
 
 
 def test_pattern_standing_calls_a_pattern_weak_once_there_is_data(tmp_path, monkeypatch):
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     for _ in range(5):
         log_and_enrich(conn, monkeypatch, "failed")
 
@@ -232,7 +209,7 @@ def test_pattern_standing_calls_a_pattern_weak_once_there_is_data(tmp_path, monk
 
 
 def test_pattern_standing_stays_clear_of_weak_on_clean_solves(tmp_path, monkeypatch):
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     for _ in range(5):
         log_and_enrich(conn, monkeypatch, "clean")
 
@@ -243,7 +220,7 @@ def test_pattern_standing_stays_clear_of_weak_on_clean_solves(tmp_path, monkeypa
 
 def test_pattern_standing_separates_struggling_from_failing(tmp_path, monkeypatch):
     """Same 100% struggle rate as the weak case above, a very different score."""
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     for _ in range(5):
         log_and_enrich(conn, monkeypatch, "struggled")
 
@@ -255,7 +232,7 @@ def test_pattern_standing_separates_struggling_from_failing(tmp_path, monkeypatc
 
 def test_a_stored_review_pulls_the_pattern_score_down(tmp_path, monkeypatch):
     """A solve can feel clean and still carry a bug - that is what the review adds."""
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     for _ in range(4):
         log_and_enrich(conn, monkeypatch, "clean")
     result = service.log_solve(conn, 1, "clean", CODE)
@@ -272,7 +249,7 @@ def test_a_stored_review_pulls_the_pattern_score_down(tmp_path, monkeypatch):
 
 
 def test_stats_summary_counts_distinct_problems_and_curriculum(tmp_path, monkeypatch):
-    conn = setup_env(
+    conn = seed_db(
         tmp_path,
         monkeypatch,
         problems=[
@@ -321,7 +298,7 @@ def test_last_7_days_covers_the_same_window_the_weekly_report_collects(tmp_path,
     `date >= today - 7` counted today plus the seven days before it - eight - so
     the home page reported 8 where the weekly report reported 7 for the same solves.
     """
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     today = date(2026, 9, 7)
     for days_ago in range(10):
         service.log_solve(conn, 1, "clean", CODE, today=today - timedelta(days=days_ago))
@@ -336,7 +313,7 @@ def test_last_7_days_covers_the_same_window_the_weekly_report_collects(tmp_path,
 
 
 def test_solution_history_returns_every_solve_newest_first(tmp_path, monkeypatch):
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     service.log_solve(conn, 1, "failed", "first attempt\n")
     log_and_enrich(conn, monkeypatch, "clean")
 
@@ -352,7 +329,7 @@ def test_solution_history_returns_every_solve_newest_first(tmp_path, monkeypatch
 def test_solution_history_notes_the_canonical_approaches_not_used(tmp_path, monkeypatch):
     """Computed per load rather than frozen, so widening the problem's canonical
     set later widens the note on solves that were stored before it."""
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     service.log_solve(conn, 1, "failed", "first attempt\n")  # never enriched
     log_and_enrich(conn, monkeypatch, "clean")
 
@@ -368,7 +345,7 @@ def test_solution_history_notes_the_canonical_approaches_not_used(tmp_path, monk
 
 
 def test_also_solvable_with_is_empty_for_an_unenriched_solve(tmp_path, monkeypatch):
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     result = service.log_solve(conn, 1, "failed", CODE)
 
     problem = service.get_problem(conn, 1)
@@ -376,7 +353,7 @@ def test_also_solvable_with_is_empty_for_an_unenriched_solve(tmp_path, monkeypat
 
 
 def test_solution_history_rejects_an_unknown_problem(tmp_path, monkeypatch):
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
 
     with pytest.raises(service.ProblemNotFound):
         service.solution_history(conn, 99999)
@@ -384,7 +361,7 @@ def test_solution_history_rejects_an_unknown_problem(tmp_path, monkeypatch):
 
 
 def test_solved_problems_aggregates_one_row_per_problem(tmp_path, monkeypatch):
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     log_and_enrich(conn, monkeypatch, "struggled")
     log_and_enrich(conn, monkeypatch, "clean")
 
@@ -424,7 +401,7 @@ def scored_attempt(conn, day, outcome, pattern="hashmap", number=1):
 
 
 def test_weekly_review_collects_the_window_and_the_patterns_in_it(tmp_path, monkeypatch):
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     scored_attempt(conn, WEEK_TODAY - timedelta(days=2), "clean")
     scored_attempt(conn, WEEK_TODAY - timedelta(days=20), "failed", pattern="dp-1d")
 
@@ -440,7 +417,7 @@ def test_weekly_review_collects_the_window_and_the_patterns_in_it(tmp_path, monk
 
 def test_weekly_review_counts_an_untagged_solve_without_inventing_a_pattern(tmp_path, monkeypatch):
     """Enrichment can be skipped (no API key), and the solve is still a solve."""
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     scored_attempt(conn, WEEK_TODAY, "clean", pattern=None)
 
     review = service.weekly_review(conn, WEEK_TODAY)
@@ -451,7 +428,7 @@ def test_weekly_review_counts_an_untagged_solve_without_inventing_a_pattern(tmp_
 
 
 def test_weekly_review_says_too_early_below_the_attempt_floor(tmp_path, monkeypatch):
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     for day in range(4):
         scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "failed")
 
@@ -467,7 +444,7 @@ def test_weekly_review_claims_nothing_for_a_pattern_with_no_score(tmp_path, monk
     so without a guard five failed solves would report as on-track - a verdict
     nothing measured. Unknown reads as too-early until a recompute says otherwise.
     """
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     for day in range(5):
         scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "failed")
     conn.execute("DELETE FROM pattern_scores")
@@ -488,7 +465,7 @@ def test_weekly_review_claims_nothing_for_a_pattern_with_no_score(tmp_path, monk
 def test_weekly_review_standing_tracks_the_analysis_verdict(tmp_path, monkeypatch):
     """weak is only ever membership in analysis["weak_patterns"] - never a
     threshold re-derived here, which is how the two definitions drift apart."""
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     for day in range(5):
         scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "failed")
 
@@ -505,7 +482,7 @@ def test_weekly_review_standing_tracks_the_analysis_verdict(tmp_path, monkeypatc
 
 
 def test_weekly_review_measures_the_week_against_where_it_started(tmp_path, monkeypatch):
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     for day in range(12, 7, -1):  # five failures, all before the window
         scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "failed")
     scored_attempt(conn, WEEK_TODAY, "clean")
@@ -520,7 +497,7 @@ def test_weekly_review_measures_the_week_against_where_it_started(tmp_path, monk
 
 
 def test_weekly_review_has_no_delta_for_a_pattern_first_seen_this_week(tmp_path, monkeypatch):
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     scored_attempt(conn, WEEK_TODAY, "clean")
 
     p = service.weekly_review(conn, WEEK_TODAY).patterns[0]
@@ -530,7 +507,7 @@ def test_weekly_review_has_no_delta_for_a_pattern_first_seen_this_week(tmp_path,
 
 
 def test_weekly_review_orders_the_worst_patterns_first(tmp_path, monkeypatch):
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     for day in range(5):
         scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "failed", pattern="dp-1d")
         scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "clean", pattern="hashmap")
@@ -547,7 +524,7 @@ def test_weekly_review_orders_the_worst_patterns_first(tmp_path, monkeypatch):
 
 def test_weekly_review_writes_nothing(tmp_path, monkeypatch):
     """Opening this view must stay free, so it can be recomputed on every page load."""
-    conn = setup_env(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch)
     scored_attempt(conn, WEEK_TODAY, "clean")
     before = conn.total_changes
 
@@ -558,7 +535,7 @@ def test_weekly_review_writes_nothing(tmp_path, monkeypatch):
 
 
 def test_daily_plan_only_counts_reviews_due_today(tmp_path, monkeypatch):
-    conn = setup_env(
+    conn = seed_db(
         tmp_path,
         monkeypatch,
         problems=[

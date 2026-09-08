@@ -3,34 +3,15 @@
 Nothing here is stored - /api/weekly runs the same SQL the CLI does, so this
 page is current the moment a solve is logged. Mastery and standing are all-time
 numbers; only `delta` is about this week, and it is the difference between the
-score now and the same score folded over history up to the window's start. */
+score now and the same score folded over history up to the window's start.
 
-function el(tag, props = {}, children = []) {
-  const node = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k === "class") node.className = v;
-    else if (k === "text") node.textContent = v;
-    else if (v !== null && v !== undefined) node.setAttribute(k, v);
-  }
-  for (const child of children) node.append(child);
-  return node;
-}
+el()/getJSON()/topicCard() come from dom.js, loaded before this script. */
 
 function countCard(label, value) {
   return el("div", { class: "card" }, [
     el("p", { class: "k", text: label }),
     el("p", { class: "v", text: String(value ?? 0) }),
   ]);
-}
-
-function topicCard(title, hint, items, render) {
-  const card = el("div", { class: "card" }, [el("p", { class: "k", text: title })]);
-  if (!items.length) {
-    card.append(el("p", { class: "empty", text: hint }));
-    return card;
-  }
-  card.append(el("ul", {}, items.map(render)));
-  return card;
 }
 
 function score(value) {
@@ -171,9 +152,7 @@ function renderPatterns(data) {
 
 async function load() {
   try {
-    const res = await fetch("/api/weekly");
-    if (!res.ok) throw new Error(`the coach returned ${res.status}`);
-    const data = await res.json();
+    const data = await getJSON("/api/weekly");
     renderWeek(data);
     renderPatterns(data);
   } catch (err) {

@@ -180,11 +180,3 @@ def recompute_all(conn: sqlite3.Connection) -> None:
         [(p, fold(scores), len(scores), today) for p, scores in by_pattern.items()],
     )
     conn.commit()
-
-
-def scores(conn: sqlite3.Connection) -> dict[str, float]:
-    """Every stored pattern score, for the weekly snapshot and the CLI."""
-    return {
-        r["pattern"]: r["score"]
-        for r in conn.execute("SELECT pattern, score FROM pattern_scores")
-    }

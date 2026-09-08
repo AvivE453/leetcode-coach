@@ -15,10 +15,9 @@ def progress(conn: sqlite3.Connection) -> dict[str, dict[str, int]]:
     """{"done": n, "total": n} per curriculum list.
 
     One definition of "how far along am I", shared by `coach stats` and the weekly
-    analysis - they computed it with separate copies of this SQL. The named keys are
-    the shape every consumer already wanted: all three web pages read .done/.total,
-    so this is what /api/stats, /api/plan and the frozen weekly snapshot serve
-    without reshaping it on the way out.
+    analysis - they used to compute it with separate copies of this SQL. The named
+    keys are the shape both consumers want: /api/stats and /api/plan both read
+    .done/.total straight through, without reshaping it on the way out.
     """
     out = {}
     for name, column in FLAG_COLUMNS.items():

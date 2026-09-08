@@ -9,6 +9,14 @@ def issues(*categories):
     return [{"category": c, "description": "..."} for c in categories]
 
 
+def stored_scores(conn) -> dict[str, float]:
+    """What recompute_all() wrote to pattern_scores, keyed by pattern."""
+    return {
+        r["pattern"]: r["score"]
+        for r in conn.execute("SELECT pattern, score FROM pattern_scores")
+    }
+
+
 @pytest.mark.parametrize(
     "verdict,found,expected",
     [
@@ -102,7 +110,7 @@ def test_recompute_scores_each_pattern_in_date_order(tmp_path):
 
     mastery.recompute_all(conn)
 
-    assert mastery.scores(conn) == pytest.approx({"hashmap": 4.2, "dp-1d": 3.0})
+    assert stored_scores(conn) == pytest.approx({"hashmap": 4.2, "dp-1d": 3.0})
     row = conn.execute("SELECT * FROM pattern_scores WHERE pattern = 'hashmap'").fetchone()
     assert row["attempts"] == 2
 
@@ -114,11 +122,11 @@ def test_recompute_is_a_pure_replay_of_history(tmp_path):
     add_solve(conn, "2026-08-02", "struggled", "hashmap")
 
     mastery.recompute_all(conn)
-    once = mastery.scores(conn)
+    once = stored_scores(conn)
     mastery.recompute_all(conn)
     mastery.recompute_all(conn)
 
-    assert mastery.scores(conn) == once
+    assert stored_scores(conn) == once
 
 
 def test_a_late_review_rescores_the_solve_it_belongs_to(tmp_path):
@@ -127,7 +135,7 @@ def test_a_late_review_rescores_the_solve_it_belongs_to(tmp_path):
     add_solve(conn, "2026-08-01", "clean", "hashmap")
     solution_id = add_solve(conn, "2026-08-02", "clean", "hashmap")
     mastery.recompute_all(conn)
-    assert mastery.scores(conn)["hashmap"] == 5.0
+    assert stored_scores(conn)["hashmap"] == 5.0
 
     conn.execute(
         """
@@ -140,7 +148,7 @@ def test_a_late_review_rescores_the_solve_it_belongs_to(tmp_path):
     mastery.recompute_all(conn)
 
     # the second solve is now 3.8, folded onto the 5.0 seed
-    assert mastery.scores(conn)["hashmap"] == pytest.approx(4.76)
+    assert stored_scores(conn)["hashmap"] == pytest.approx(4.76)
 
 
 def test_recompute_ignores_solves_that_were_never_tagged(tmp_path):
@@ -156,7 +164,7 @@ def test_recompute_ignores_solves_that_were_never_tagged(tmp_path):
 
     mastery.recompute_all(conn)
 
-    assert mastery.scores(conn) == {}
+    assert stored_scores(conn) == {}
 
 
 def test_recompute_drops_scores_for_patterns_that_are_gone(tmp_path):
@@ -167,4 +175,4 @@ def test_recompute_drops_scores_for_patterns_that_are_gone(tmp_path):
     conn.execute("DELETE FROM enrichments")
     mastery.recompute_all(conn)
 
-    assert mastery.scores(conn) == {}
+    assert stored_scores(conn) == {}

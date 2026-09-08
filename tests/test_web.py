@@ -2,13 +2,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pytest
+from conftest import CODE, seed_db
 from fastapi.testclient import TestClient
 
 from coach import config, db, enrich, mastery, review
 from coach.web.app import app
 from coach.weekly import analyze as weekly_analyze
-
-CODE = "class Solution:\n    def twoSum(self, nums, target):\n        return []\n"
 
 ENRICHMENT = enrich.Enrichment(
     pattern="hashmap",
@@ -57,12 +56,12 @@ def fake_encode(texts):
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    """A TestClient bound to a scratch database - never data/coach.db."""
-    monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(config, "DB_PATH", tmp_path / "coach.db")
-    conn = db.connect()
-    db.init_schema(conn)
-    db.upsert_problems(conn, PROBLEMS)
+    """A TestClient bound to a scratch database - never data/coach.db.
+
+    Two problems rather than conftest's one, both on the curriculum, so the plan
+    endpoint has something unsolved to rank behind a solved one.
+    """
+    conn = seed_db(tmp_path, monkeypatch, PROBLEMS)
     conn.execute("UPDATE problems SET in_blind75 = 1")
     conn.commit()
     conn.close()
@@ -229,6 +228,25 @@ def test_plan_endpoint_ranks_problems_and_stays_read_only(client, monkeypatch, t
     assert plan["items"][1]["kind"] == "curriculum"
     assert plan["topics"] == {"weak": [], "stale": [], "off_pattern": []}
     assert not (tmp_path / "reports").exists()
+
+
+def test_plan_endpoint_labels_a_weak_pattern_pick(client, monkeypatch):
+    """The one chip class no test reached: a pick made to practice a weak pattern.
+
+    It is the branch furthest from the endpoint - a pattern has to go weak, and an
+    unsolved problem has to carry the matching official tag - which is exactly why
+    it went uncovered while the kind was recovered by parsing the reason sentence.
+    """
+    enriched(monkeypatch, pattern="two-pointers")
+    for _ in range(mastery.WEAK_MIN_ATTEMPTS):
+        client.post("/api/log", json={"number": 1, "outcome": "failed", "code": CODE})
+
+    plan = client.get("/api/plan").json()
+
+    assert plan["topics"]["weak"] == ["two-pointers"]
+    # #15 is unsolved, on the curriculum, and officially tagged two-pointers.
+    assert [(i["number"], i["kind"]) for i in plan["items"]] == [(15, "weak-pattern")]
+    assert plan["items"][0]["reason"] == "weak pattern: two-pointers"
 
 
 def test_plan_endpoint_only_counts_reviews_due_today(client, monkeypatch):

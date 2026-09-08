@@ -176,6 +176,34 @@ def test_plan_orders_reviews_then_off_pattern_then_weak(tmp_path):
     assert {i.number for i in weak} == {3, 4}
 
 
+def test_plan_labels_every_item_with_the_rule_that_picked_it(tmp_path):
+    """`kind` is what the web UI styles, and it is set where the rule fires.
+
+    All four rules in one plan: the chip a reader sees must say which one put the
+    problem there, and no wording change to `reason` can move an item between them.
+    """
+    conn = make_db(tmp_path)
+    add_problem(conn, 1, "two-sum", "Two Sum", tags=["hash-table"])
+    add_problem(conn, 2, "maximum-subarray", "Maximum Subarray", tags=["dynamic-programming"],
+                intended="dp-1d")
+    add_problem(conn, 3, "coin-change", "Coin Change", tags=["dynamic-programming"])
+    add_problem(conn, 4, "valid-anagram", "Valid Anagram", tags=["string"])
+    add_attempt(conn, 1, TODAY - timedelta(days=1), pattern="hashmap")
+    add_attempt(conn, 2, TODAY - timedelta(days=1), outcome="struggled", pattern="prefix-sum")
+    set_due(conn, 1, TODAY)
+
+    analysis = weekly_analyze.analyze(conn, TODAY)
+    analysis["weak_patterns"] = ["dp-1d"]
+    kinds = {i.number: i.kind for i in weekly_plan.build_plan(conn, analysis, target=10)}
+
+    assert kinds[1] == "review"
+    assert kinds[2] == "re-solve"
+    # #3 carries the dynamic-programming tag, so the weak dp-1d pattern claims it;
+    # #4 has no weak tag and falls through to plain curriculum progression.
+    assert kinds[3] == "weak-pattern"
+    assert kinds[4] == "curriculum"
+
+
 def test_plan_respects_target_and_dedupes(tmp_path):
     conn = make_db(tmp_path)
     for n in range(1, 8):

@@ -16,7 +16,6 @@ from pydantic import BaseModel, Field
 
 from coach import config, db, mastery, service
 from coach.weekly import analyze as weekly_analyze
-from coach.weekly.plan import plan_kind
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -210,7 +209,7 @@ def api_plan(target: int = config.DAILY_TARGET) -> dict:
                 "title": i.title,
                 "difficulty": i.difficulty,
                 "reason": i.reason,
-                "kind": plan_kind(i.reason),
+                "kind": i.kind,
             }
             for i in items
         ],

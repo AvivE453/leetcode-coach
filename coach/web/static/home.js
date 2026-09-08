@@ -1,21 +1,5 @@
-/* Home page: progress numbers, the pattern table, and the log form. */
-
-function el(tag, props = {}, children = []) {
-  const node = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k === "class") node.className = v;
-    else if (k === "text") node.textContent = v;
-    else if (v !== null && v !== undefined) node.setAttribute(k, v);
-  }
-  for (const child of children) node.append(child);
-  return node;
-}
-
-async function getJSON(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${url} returned ${res.status}`);
-  return res.json();
-}
+/* Home page: progress numbers, the pattern table, and the log form.
+   el()/getJSON() come from dom.js, loaded before this script. */
 
 /* ---------- stats ---------- */
 

@@ -1,27 +1,5 @@
-/* Daily Plan page: focus topics, then today's ranked problem list. */
-
-function el(tag, props = {}, children = []) {
-  const node = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k === "class") node.className = v;
-    else if (k === "text") node.textContent = v;
-    else if (v !== null && v !== undefined) node.setAttribute(k, v);
-  }
-  for (const child of children) node.append(child);
-  return node;
-}
-
-function topicCard(title, hint, items, render) {
-  const card = el("div", { class: "card" }, [
-    el("p", { class: "k", text: title }),
-  ]);
-  if (!items.length) {
-    card.append(el("p", { class: "empty", text: hint }));
-    return card;
-  }
-  card.append(el("ul", {}, items.map(render)));
-  return card;
-}
+/* Daily Plan page: focus topics, then today's ranked problem list.
+   el()/getJSON()/topicCard() come from dom.js, loaded before this script. */
 
 function renderTopics(data) {
   const host = document.getElementById("topics");
@@ -93,9 +71,7 @@ function renderPlan(data) {
 
 async function load() {
   try {
-    const res = await fetch("/api/plan");
-    if (!res.ok) throw new Error(`the coach returned ${res.status}`);
-    const data = await res.json();
+    const data = await getJSON("/api/plan");
     renderTopics(data);
     renderPlan(data);
   } catch (err) {

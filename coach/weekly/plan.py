@@ -1,6 +1,7 @@
 import json
 import sqlite3
 from dataclasses import dataclass
+from typing import Literal
 
 from coach import config, curriculum
 
@@ -45,6 +46,14 @@ PATTERN_TO_TAG = {
 MAX_PER_WEAK_PATTERN = 3
 
 
+# Which of build_plan's four rules put an item on the list. It doubles as the
+# chip class the web UI styles, so it is set where the rule fires and travels
+# with the item. It used to be recovered afterwards by matching the prefix of
+# `reason` - which meant rewording a sentence meant for a human silently
+# reclassified the item, with nothing to fail.
+Kind = Literal["review", "re-solve", "weak-pattern", "curriculum"]
+
+
 @dataclass(frozen=True)
 class PlanItem:
     number: int
@@ -52,21 +61,11 @@ class PlanItem:
     title: str
     difficulty: str
     reason: str
+    kind: Kind
 
 
 def hard_cap(target: int) -> int:
     return max(1, target // 5)
-
-
-def plan_kind(reason: str) -> str:
-    """Reason string -> chip class. Mirrors the four reasons build_plan emits."""
-    if reason.startswith("review due"):
-        return "review"
-    if reason.startswith("re-solve"):
-        return "re-solve"
-    if reason.startswith("weak pattern"):
-        return "weak-pattern"
-    return "curriculum"
 
 
 def build_plan(conn: sqlite3.Connection, analysis: dict, target: int) -> list[PlanItem]:
@@ -77,7 +76,7 @@ def build_plan(conn: sqlite3.Connection, analysis: dict, target: int) -> list[Pl
     seen: set[int] = set()
     hards = 0
 
-    def add(row, reason: str, mandatory: bool = False) -> None:
+    def add(row, reason: str, kind: Kind, mandatory: bool = False) -> None:
         nonlocal hards
         if row["number"] in seen or len(items) >= target:
             return
@@ -86,12 +85,19 @@ def build_plan(conn: sqlite3.Connection, analysis: dict, target: int) -> list[Pl
         if row["difficulty"] == "Hard":
             hards += 1
         seen.add(row["number"])
-        items.append(PlanItem(row["number"], row["slug"], row["title"], row["difficulty"], reason))
+        items.append(
+            PlanItem(row["number"], row["slug"], row["title"], row["difficulty"], reason, kind)
+        )
 
     for row in analysis["due"]:
-        add(row, f"review due {row['next_due']}", mandatory=True)
+        add(row, f"review due {row['next_due']}", "review", mandatory=True)
     for row in analysis["off_pattern"]:
-        add(row, f"re-solve with the intended pattern ({row['intended_pattern']})", mandatory=True)
+        add(
+            row,
+            f"re-solve with the intended pattern ({row['intended_pattern']})",
+            "re-solve",
+            mandatory=True,
+        )
 
     order = {slug: i for i, slug in enumerate(curriculum.load(config.CURRICULUM))}
     unsolved = conn.execute(
@@ -115,10 +121,10 @@ def build_plan(conn: sqlite3.Connection, analysis: dict, target: int) -> list[Pl
                 break
             if row["number"] not in seen and tag in json.loads(row["official_tags"]):
                 before = len(items)
-                add(row, f"weak pattern: {pattern}")
+                add(row, f"weak pattern: {pattern}", "weak-pattern")
                 picked += len(items) - before
 
     for row in unsolved:
-        add(row, f"{config.CURRICULUM} progression")
+        add(row, f"{config.CURRICULUM} progression", "curriculum")
 
     return items

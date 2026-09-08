@@ -135,16 +135,27 @@ def echo_also_solvable(patterns: list[str]) -> None:
         typer.echo(f"This problem can also be solved with: {', '.join(patterns)}")
 
 
+def format_mastery(score: float | None) -> str:
+    return f"mastery {score:.1f}/5" if score is not None else "unscored"
+
+
+def format_attempts(n: int) -> str:
+    return f"{n} attempt" if n == 1 else f"{n} attempts"
+
+
+def format_too_early(score: float | None, attempts: int) -> str:
+    return f"{format_mastery(score)} over only {format_attempts(attempts)}"
+
+
 def echo_standing(standing: service.PatternStanding | None) -> None:
     """How this pattern is going overall - the weekly analysis, one solve early."""
     if standing is None:
         return
-    mastery_note = f"mastery {standing.score:.1f}/5" if standing.score is not None else "unscored"
+    mastery_note = format_mastery(standing.score)
     if not standing.enough_data:
-        plural = "" if standing.attempts == 1 else "s"
         typer.echo(
-            f"Standing: {standing.pattern} - {mastery_note} over only {standing.attempts}"
-            f" attempt{plural}, too early to call."
+            f"Standing: {standing.pattern} - {format_too_early(standing.score, standing.attempts)},"
+            " too early to call."
         )
         return
     verdict = "WEAK" if standing.weak else "on track"
@@ -351,7 +362,7 @@ def stats():
     if s["patterns"]:
         typer.echo("Patterns practiced (by your solutions):")
         for r in s["patterns"]:
-            score = f"mastery {r['score']:.1f}/5" if r["score"] is not None else "unscored"
+            score = format_mastery(r["score"])
             typer.echo(
                 f"  {r['pattern']}: {score}, {r['attempts']} attempt(s), {r['rough']} not clean"
             )
@@ -381,13 +392,10 @@ def echo_trend(p: service.WeekPattern) -> str:
 
 
 def echo_week_pattern(p: service.WeekPattern) -> None:
-    score = f"mastery {p.score:.1f}/5" if p.score is not None else "unscored"
     if p.standing == "too-early":
-        typer.echo(
-            f"  {p.pattern}: too early to call - {score} over only"
-            f" {p.attempts_total} attempt(s)."
-        )
+        typer.echo(f"  {p.pattern}: too early to call - {format_too_early(p.score, p.attempts_total)}.")
         return
+    score = format_mastery(p.score)
     verdict = "WEAK" if p.standing == "weak" else "on track"
     typer.echo(
         f"  {p.pattern}: {verdict} - {score}{echo_trend(p)},"
