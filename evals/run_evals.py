@@ -149,6 +149,29 @@ def build_bank():
     return fixtures
 
 
+def miss_line(fixture, found) -> str:
+    """One flaw the model did not report, with the execution proof of the label.
+
+    A miss is a disagreement between the model and a label, and which side is wrong
+    is unanswerable from the two category names alone - so the evidence that
+    produced the label travels with it. That is not decoration: every ground-truth
+    defect ever found in this bank was found by reading one of these lines and
+    deciding the model had the better argument.
+    """
+    return (f"{fixture['slug']}/{fixture['id']} — planted {fixture['category']}"
+            f" ({fixture['evidence']}), reported {sorted(found) or 'nothing'}")
+
+
+def false_positive_line(fixture, issues) -> str:
+    """An issue reported against code the oracle proved correct, in the model's words.
+
+    The category alone ("complexity") says only which box was ticked; on code known
+    to be correct, the claim itself is the part worth arguing with.
+    """
+    return f"{fixture['slug']} — " + "; ".join(
+        f"{i['category']}: {i['description']}" for i in issues)
+
+
 def run_feedback(refresh: bool, model: str) -> dict:
     print("\n[feedback] labelling fixtures by execution ...")
     fixtures = build_bank()
@@ -190,8 +213,7 @@ def run_feedback(refresh: bool, model: str) -> dict:
         caught = fixture["category"] in found
         per_category.setdefault(fixture["category"], []).append(caught)
         if not caught:
-            misses.append(f"{fixture['slug']}/{fixture['id']} "
-                          f"(planted {fixture['category']}, reported {sorted(found) or 'nothing'})")
+            misses.append(miss_line(fixture, found))
 
     false_positives = []
     optimal_verdicts = 0
@@ -201,8 +223,7 @@ def run_feedback(refresh: bool, model: str) -> dict:
             continue
         scored_clean += 1
         if result["issues"]:
-            false_positives.append(f"{fixture['slug']} "
-                                   f"({', '.join(i['category'] for i in result['issues'])})")
+            false_positives.append(false_positive_line(fixture, result["issues"]))
         if result["verdict"] == "optimal":
             optimal_verdicts += 1
 
@@ -358,10 +379,16 @@ def append_results(sections: dict, model: str) -> None:
         lines.append(f"| verdict `optimal` on clean controls | {f['optimal_verdict_rate']:.0%} |"
                      f" {f['clean_controls']} |")
         lines.append("")
+        # One bullet each: these now carry the execution evidence behind the label
+        # and the model's own words, which do not fit on a joined line.
         if f["misses"]:
-            lines.append("Missed flaws: " + "; ".join(f["misses"]) + "\n")
+            lines.append("**Missed flaws**\n")
+            lines.extend(f"- {miss}" for miss in f["misses"])
+            lines.append("")
         if f["false_positives"]:
-            lines.append("False positives: " + "; ".join(f["false_positives"]) + "\n")
+            lines.append("**False positives** (on code the oracle proved correct)\n")
+            lines.extend(f"- {fp}" for fp in f["false_positives"])
+            lines.append("")
 
     if "enrichment" in sections:
         e = sections["enrichment"]

@@ -54,7 +54,6 @@ def load_entry_point(code: str):
 
 @dataclass(frozen=True)
 class TestOutcome:
-    index: int
     kind: str
     passed: bool
     detail: str
@@ -63,7 +62,7 @@ class TestOutcome:
 def run_tests(code: str, tests, normalize=None) -> list[TestOutcome]:
     fn = load_entry_point(code)
     outcomes = []
-    for i, (args, expected, kind) in enumerate(tests):
+    for args, expected, kind in tests:
         try:
             got = with_timeout(lambda a=args: fn(*copy.deepcopy(a)), TEST_TIMEOUT)
             equal = normalize(got) == normalize(expected) if normalize else got == expected
@@ -72,7 +71,7 @@ def run_tests(code: str, tests, normalize=None) -> list[TestOutcome]:
             equal, detail = False, f"input={args!r} timed out"
         except Exception as exc:  # noqa: BLE001 - a crashing mutant is a failing mutant
             equal, detail = False, f"input={args!r} raised {type(exc).__name__}: {exc}"
-        outcomes.append(TestOutcome(i, kind, equal, detail))
+        outcomes.append(TestOutcome(kind, equal, detail))
     return outcomes
 
 
@@ -99,6 +98,34 @@ class Verdict:
     evidence: str
 
 
+def scale_baseline(problem) -> float:
+    """Seconds the canonical needs at scale - what every ratio below is measured against.
+
+    A canonical nobody can time invalidates every complexity label for its problem,
+    the same way one that fails its own tests invalidates every label, so this
+    raises rather than handing back a number no ratio can be built from. Both
+    unusable cases used to be swallowed by one `if baseline and ...`: too slow to
+    finish came back as None, which formatted as a duration would raise TypeError
+    and otherwise fell through to "indistinguishable from the canonical" - a
+    discard claimed on a comparison that never happened, and the one thing this
+    module says it will not do. Too fast to measure came back as 0.0 and took the
+    same path, so a mutant taking nine seconds against an unmeasurable canonical
+    was reported as equivalent to it.
+    """
+    seconds = time_at_scale(problem.CANONICAL, problem.SCALE)
+    if seconds is None:
+        raise AssertionError(
+            f"{problem.SLUG}: canonical solution exceeded {SCALE_TIMEOUT}s at scale,"
+            f" so there is nothing to measure a mutant against"
+        )
+    if seconds <= 0:
+        raise AssertionError(
+            f"{problem.SLUG}: canonical solution is too fast at scale to measure"
+            f" ({seconds}s) - SCALE needs to be big enough to time"
+        )
+    return seconds
+
+
 def classify(problem, code: str) -> Verdict:
     normalize = getattr(problem, "NORMALIZE", None)
     outcomes = run_tests(code, problem.TESTS, normalize)
@@ -108,11 +135,11 @@ def classify(problem, code: str) -> Verdict:
         category = "bug" if any(o.kind == "general" for o in failures) else "edge-case"
         return Verdict(category, failures[0].detail)
 
-    baseline = time_at_scale(problem.CANONICAL, problem.SCALE)
+    baseline = scale_baseline(problem)
     mutant = time_at_scale(code, problem.SCALE)
     if mutant is None:
         return Verdict("complexity", f"exceeded {SCALE_TIMEOUT}s at scale (canonical: {baseline:.3f}s)")
-    if baseline and mutant / baseline >= COMPLEXITY_RATIO:
+    if mutant / baseline >= COMPLEXITY_RATIO:
         return Verdict("complexity", f"{mutant / baseline:.0f}x slower at scale"
                                      f" ({mutant:.3f}s vs {baseline:.3f}s)")
     return Verdict(None, "indistinguishable from the canonical solution")

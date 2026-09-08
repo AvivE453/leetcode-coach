@@ -102,6 +102,44 @@ class Solution:
     assert "ValueError" in verdict.evidence
 
 
+def test_an_untimeable_canonical_is_refused_rather_than_guessed_at(monkeypatch):
+    """No baseline means no ratio, and a missing ratio is not evidence of equivalence.
+
+    Both unusable baselines used to be swallowed by one `if baseline and ...`: a
+    canonical too slow to finish came back None and this mutant - which is far
+    slower than the ratio requires - would have been reported as indistinguishable
+    from it, or crashed formatting None as a duration.
+    """
+    # A tiny timeout rather than a genuinely slow canonical, so the test costs
+    # milliseconds; what is under test is the missing measurement, not the clock.
+    monkeypatch.setattr(oracle, "SCALE_TIMEOUT", 0.001)
+    slow_canonical = '''\
+class Solution:
+    def run(self, nums):
+        for _ in range(3_000_000):
+            pass
+        return max(nums)
+'''
+    problem = make_problem(CANONICAL=slow_canonical)
+
+    with pytest.raises(AssertionError, match="exceeded .*s at scale"):
+        oracle.scale_baseline(problem)
+    with pytest.raises(AssertionError, match="exceeded .*s at scale"):
+        oracle.classify(problem, CANONICAL)
+
+
+def test_a_canonical_too_fast_to_measure_is_refused_too(monkeypatch):
+    """The other unusable baseline: 0.0s divides into nothing.
+
+    It took the same silent path, so a mutant taking the full timeout against an
+    unmeasurable canonical was reported as equivalent to it.
+    """
+    monkeypatch.setattr(oracle, "time_at_scale", lambda code, scale: 0.0)
+
+    with pytest.raises(AssertionError, match="too fast at scale to measure"):
+        oracle.scale_baseline(make_problem())
+
+
 def test_infinite_loop_times_out_rather_than_hanging():
     mutant = '''\
 class Solution:
