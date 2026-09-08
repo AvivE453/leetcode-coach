@@ -284,18 +284,19 @@ uv run coach-web                              # the same data in a browser
 Development:
 
 ```bash
-uv run pytest                  # 169 tests; every LLM call mocked, API key stripped
+uv run pytest                  # every LLM call mocked, API key stripped
 uv run ruff check .
 uv run python -m evals.validate_bank        # re-label the fixture bank, no API calls
 uv run python -m evals.run_evals --all --dry-run   # count the calls and cost first
 uv run python -m evals.run_evals --all             # real API calls
 ```
 
-`--dry-run` always reports the exact number of uncached calls and an estimated cost
-before anything is spent. Evals run on `config.EVAL_MODEL`, which is the model the coach
-itself uses; pass `--model` to score a different one. Responses cache by prompt version,
-model, and code digest, so a repeat run costs nothing and correcting a *label* re-scores
-for free.
+`--dry-run` reports the calls a real run would make and an estimated cost before anything
+is spent — it counts them with the same code the run buys them with, so the two cannot
+disagree. Evals run on `config.EVAL_MODEL`, which is the model the coach itself uses; pass
+`--model` to score a different one. Responses cache by prompt version, model, and a digest
+of the code they scored, so a repeat run costs nothing, correcting a *label* re-scores for
+free, and editing a *fixture* re-buys just that fixture.
 
 The database starts empty and grows from your first `coach log`. `data/coach.db` is
 committed on purpose: the state travels with the repo, and the commit history doubles
@@ -323,6 +324,6 @@ coach/          CLI, service layer, SQLite schema, scheduler, LLM wrapper, enric
 coach/weekly/   collect → analyze (plan.py builds the daily list)
 coach/web/      FastAPI app + the static Home, Solutions, Daily Plan and Weekly Review pages
 evals/          execution oracle, fixture bank, corpus, scorers, RESULTS.md
-tests/          169 tests, no network
+tests/          the whole suite, no network
 docs/PLAN.md    full design record and milestone history
 ```

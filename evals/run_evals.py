@@ -4,14 +4,17 @@
     uv run python -m evals.run_evals --feedback
     uv run python -m evals.run_evals --enrichment --retrieval
 
-Enrichment results are cached per (slug, prompt_version) so the retrieval eval
-and repeat runs don't re-pay for them; --refresh-cache forces a re-run.
+Answers are cached per prompt version, model and a digest of the code they were
+computed for (see CallCache), so a repeat run costs nothing, an edited fixture is
+re-bought, and --dry-run counts the same calls the run will make.
+--refresh-cache forces everything to be re-bought.
 """
 
 import argparse
 import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -41,6 +44,79 @@ def parallel(fn, items, label):
     print(f"  {label}: {len(items)} call(s) ...", flush=True)
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         return list(pool.map(fn, items))
+
+
+def digest(code: str) -> str:
+    return hashlib.sha256(code.encode()).hexdigest()[:8]
+
+
+def review_key(fixture) -> str:
+    return f"{fixture['slug']}/{fixture['id']}@{digest(fixture['code'])}"
+
+
+def enrich_key(entry) -> str:
+    return f"{entry.slug}@{digest(entry.code)}"
+
+
+@dataclass(frozen=True)
+class CallCache:
+    """Answers already bought, for one prompt version on one model.
+
+    Every eval that spends money fills through `fill`, and `--dry-run` counts with
+    `pending` - the same function, on the same keys. They used to be two readings
+    of one question: the run compared digest-bearing keys while --dry-run
+    subtracted lengths, so editing a fixture (exactly what the digest is for) left
+    --dry-run reporting 0 calls for a run that paid for several.
+
+    Keys carry a digest of the input, so an edited fixture misses its stale entry
+    instead of being scored against an answer computed for different code.
+    """
+
+    name: str
+    prompt_version: str
+    model: str
+
+    @property
+    def path(self) -> Path:
+        return CACHE_DIR / f"{self.name}-{self.prompt_version}-{self.model}.json"
+
+    def load(self, refresh: bool = False) -> dict:
+        if refresh or not self.path.exists():
+            return {}
+        return json.loads(self.path.read_text())
+
+    def pending(self, keyed, refresh: bool = False) -> list:
+        """The items a run would have to pay for, from (key, item) pairs."""
+        cached = self.load(refresh)
+        return [item for key, item in keyed if key not in cached]
+
+    def fill(self, keyed, run_one, label: str, refresh: bool = False) -> dict:
+        """Every item's answer, calling `run_one` only for what is not cached.
+
+        `run_one` returns (key, answer); an answer of None means the call failed
+        and is not stored, so the next run retries it rather than scoring a hole.
+        """
+        cached = self.load(refresh)
+        todo = self.pending(keyed, refresh)
+        if not todo:
+            print(f"  {self.name}: all {len(keyed)} cached for {self.prompt_version}"
+                  f" on {self.model}, no calls made")
+            return cached
+
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        for key, answer in parallel(run_one, todo, label):
+            if answer is not None:
+                cached[key] = answer
+        self.path.write_text(json.dumps(cached, indent=2, sort_keys=True))
+        return cached
+
+
+def review_cache(model: str) -> CallCache:
+    return CallCache("reviews", review.PROMPT_VERSION, model)
+
+
+def enrichment_cache(model: str) -> CallCache:
+    return CallCache("enrichment", enrich.PROMPT_VERSION, model)
 
 
 # ---------------------------------------------------------------- feedback
@@ -73,10 +149,6 @@ def build_bank():
     return fixtures
 
 
-def review_cache_path(model: str) -> Path:
-    return CACHE_DIR / f"reviews-{review.PROMPT_VERSION}-{model}.json"
-
-
 def run_feedback(refresh: bool, model: str) -> dict:
     print("\n[feedback] labelling fixtures by execution ...")
     fixtures = build_bank()
@@ -86,10 +158,6 @@ def run_feedback(refresh: bool, model: str) -> dict:
 
     # Cached per prompt version and fixture, so correcting a LABEL (which changes
     # scoring, not the model's answer) costs nothing to re-score.
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    path = review_cache_path(model)
-    cached = json.loads(path.read_text()) if path.exists() and not refresh else {}
-
     def review_one(fixture):
         problem = fixture["problem"]
         row = {
@@ -97,32 +165,21 @@ def run_feedback(refresh: bool, model: str) -> dict:
             "title": problem.TITLE,
             "difficulty": problem.DIFFICULTY,
         }
+        key = review_key(fixture)
         try:
             result = review.review_solution(row, fixture["code"], model=model)
         except llm.LLMUnavailable as exc:
             print(f"    !! {fixture['slug']}/{fixture['id']}: {exc}")
-            return fixture["key"], None
-        return fixture["key"], {
+            return key, None
+        return key, {
             "issues": [{"category": i.category, "description": i.description}
                        for i in result.issues],
             "verdict": result.verdict,
         }
 
-    # Keyed by code digest too: editing a fixture must invalidate its cached review.
-    for fixture in fixtures:
-        digest = hashlib.sha256(fixture["code"].encode()).hexdigest()[:8]
-        fixture["key"] = f"{fixture['slug']}/{fixture['id']}@{digest}"
-    todo = [f for f in fixtures if f["key"] not in cached]
-    if todo:
-        for key, result in parallel(review_one, todo, "reviewing"):
-            if result is not None:
-                cached[key] = result
-        path.write_text(json.dumps(cached, indent=2, sort_keys=True))
-    else:
-        print(f"  reviews: all {len(fixtures)} cached for {review.PROMPT_VERSION}"
-              f" on {model}, no calls made")
-
-    results = [cached.get(f["key"]) for f in fixtures]
+    keyed = [(review_key(f), f) for f in fixtures]
+    cached = review_cache(model).fill(keyed, review_one, "reviewing", refresh)
+    results = [cached.get(key) for key, _ in keyed]
 
     per_category: dict[str, list[bool]] = {}
     misses = []
@@ -168,41 +225,25 @@ def run_feedback(refresh: bool, model: str) -> dict:
 # -------------------------------------------------------------- enrichment
 
 
-def cache_path(model: str) -> Path:
-    return CACHE_DIR / f"enrichment-{enrich.PROMPT_VERSION}-{model}.json"
-
-
 def enrich_corpus(refresh: bool, model: str) -> dict:
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    path = cache_path(model)
-    cached = json.loads(path.read_text()) if path.exists() and not refresh else {}
+    def enrich_one(entry):
+        row = {
+            "number": entry.number,
+            "title": entry.title,
+            "difficulty": entry.difficulty,
+            "official_tags": entry.official_tags,
+        }
+        try:
+            return enrich_key(entry), json_safe_enrich(row, entry.code, model)
+        except llm.LLMUnavailable as exc:
+            print(f"    !! {entry.slug}: {exc}")
+            return enrich_key(entry), None
 
-    entries = corpus.load()
-    todo = [e for e in entries if e.slug not in cached]
-    if todo:
-        def enrich_one(entry):
-            row = {
-                "number": entry.number,
-                "title": entry.title,
-                "difficulty": entry.difficulty,
-                "official_tags": entry.official_tags,
-            }
-            try:
-                return entry.slug, review_safe_enrich(row, entry.code, model)
-            except llm.LLMUnavailable as exc:
-                print(f"    !! {entry.slug}: {exc}")
-                return entry.slug, None
-
-        for slug, result in parallel(enrich_one, todo, "enriching corpus"):
-            if result is not None:
-                cached[slug] = result
-        path.write_text(json.dumps(cached, indent=2, sort_keys=True))
-    else:
-        print(f"  enrichment: {len(entries)} cached, no calls made")
-    return cached
+    keyed = [(enrich_key(e), e) for e in corpus.load()]
+    return enrichment_cache(model).fill(keyed, enrich_one, "enriching corpus", refresh)
 
 
-def review_safe_enrich(row, code, model) -> dict:
+def json_safe_enrich(row, code, model) -> dict:
     e = enrich.enrich_solution(row, code, model=model)
     return {
         "pattern": e.pattern,
@@ -222,7 +263,7 @@ def run_enrichment(cached: dict) -> dict:
     hits = agree = scored = 0
     wrong = []
     for entry in entries:
-        result = cached.get(entry.slug)
+        result = cached.get(enrich_key(entry))
         if result is None:
             continue
         scored += 1
@@ -269,12 +310,17 @@ def recall_at_k(vectors: dict[str, np.ndarray], k: int) -> tuple[float, list[str
 
 
 def run_retrieval(cached: dict) -> dict:
-    entries = [e for e in corpus.load() if e.slug in cached]
+    # Keyed by code digest, so a card is only ever built from an enrichment
+    # computed for the code beside it - card-vs-raw is the whole measurement here,
+    # and a slug-keyed lookup would pair new code with an old card after an edit.
+    entries = [e for e in corpus.load() if enrich_key(e) in cached]
     print(f"  embedding {len(entries)} solutions two ways (local, no API calls)")
 
     raw = embed.encode([e.code for e in entries])
     cards = embed.encode([
-        embed.card_text(e.title, cached[e.slug]["pattern"], cached[e.slug]["key_trick"], e.code)
+        embed.card_text(
+            e.title, cached[enrich_key(e)]["pattern"], cached[enrich_key(e)]["key_trick"], e.code
+        )
         for e in entries
     ])
 
@@ -373,18 +419,21 @@ def main() -> int:
     want_feedback = args.feedback or args.all
     want_enrichment = args.enrichment or args.all
     want_retrieval = args.retrieval or args.all
-    if not (want_feedback or want_enrichment or want_retrieval or args.dry_run):
+    if not (want_feedback or want_enrichment or want_retrieval):
         parser.error("pick at least one of --feedback / --enrichment / --retrieval / --all")
 
     if args.dry_run:
-        reviews = len(build_bank()) if want_feedback or args.all else 0
-        enrichments = len(corpus.load()) if want_enrichment or want_retrieval or args.all else 0
-        cached_reviews = review_cache_path(args.model)
-        cached_enrich = cache_path(args.model)
-        if cached_reviews.exists() and not args.refresh_cache:
-            reviews = max(0, reviews - len(json.loads(cached_reviews.read_text())))
-        if cached_enrich.exists() and not args.refresh_cache:
-            enrichments = max(0, enrichments - len(json.loads(cached_enrich.read_text())))
+        # Counted with the same pending() the real run fills from, on the same keys.
+        # Anything cheaper - a length subtraction, say - is a second answer to the
+        # question, and the two drift the moment a fixture is edited.
+        reviews = enrichments = 0
+        if want_feedback:
+            print("labelling fixtures by execution to count them ...", flush=True)
+            keyed = [(review_key(f), f) for f in build_bank()]
+            reviews = len(review_cache(args.model).pending(keyed, args.refresh_cache))
+        if want_enrichment or want_retrieval:
+            keyed = [(enrich_key(e), e) for e in corpus.load()]
+            enrichments = len(enrichment_cache(args.model).pending(keyed, args.refresh_cache))
         total = reviews + enrichments
         print(f"model: {args.model}")
         print(f"feedback: {reviews} review call(s) not already cached")
