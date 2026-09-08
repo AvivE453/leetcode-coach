@@ -299,8 +299,9 @@ of the code they scored, so a repeat run costs nothing, correcting a *label* re-
 free, and editing a *fixture* re-buys just that fixture.
 
 The database starts empty and grows from your first `coach log`. `data/coach.db` is
-committed on purpose: the state travels with the repo, and the commit history doubles
-as the solve timeline.
+gitignored on purpose: it holds your practice history, not the tool, so cloning this repo
+gives you a clean database of your own rather than someone else's solves. It is the only
+copy of that history — nothing in git backs it up for you.
 
 ---
 
