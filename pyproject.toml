@@ -28,6 +28,7 @@ coach-web = "coach.web.app:main"
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pytest-playwright>=0.9.0",
     "ruff>=0.6",
 ]
 

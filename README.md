@@ -68,6 +68,18 @@ uv run pytest          # every LLM call mocked, API key stripped
 uv run ruff check .
 ```
 
+`tests/browser/` loads all four pages in a real Chromium and fails if any script
+throws or leaves its page on the loading text — the one failure the other suites
+cannot see, since they never execute the JavaScript. It starts `coach-web` itself
+on a temporary database, so it needs no setup beyond the browser binary, which is
+a separate download from `uv sync`:
+
+```bash
+uv run playwright install chromium
+```
+
+Without it that test skips and the rest of the suite still passes.
+
 ## How it works
 
 Everything the LLM does here is **measured**, not assumed: review feedback catches 97% of
