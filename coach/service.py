@@ -8,7 +8,7 @@ to JSON; `coach/cli.py` wraps the handful it still needs in `typer.echo` calls.
 import json
 import sqlite3
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 
 from coach import config, curriculum, embed, enrich, llm, mastery, scheduler
@@ -265,13 +265,15 @@ def neighbor_details(conn: sqlite3.Connection, neighbors: list[tuple[int, float]
     return out
 
 
-def enrich_solution_now(
+def tag_solution_now(
     conn: sqlite3.Connection, solution_id: int, problem: sqlite3.Row, code: str
 ) -> EnrichResult:
-    """Tag the solution, embed its card, and find similar solves.
+    """Tag one stored solution and judge it against its problem's canonical set.
 
-    Degrades in two steps: no API key -> `skipped`; no sentence-transformers ->
-    `embed_skipped`. Both leave the stored solve untouched.
+    The one enrichment workflow: logging a solve runs it through enrich_solution_now(),
+    and `coach enrich` runs it per solution before embedding everything in one batch.
+    It never embeds, so `neighbors` and `embed_skipped` on its result mean "not
+    attempted". No API key -> `skipped`, and the stored solve is untouched.
     """
     try:
         e = enrich.enrich_solution(problem, code)
@@ -284,31 +286,46 @@ def enrich_solution_now(
     )
     conn.commit()
     # The pattern only exists now, so this is the first moment the solve can be
-    # scored - and pattern_standing() below reads what this writes.
+    # scored - and pattern_standing() reads what this writes.
     mastery.recompute_all(conn)
 
     # Two signals off one free set comparison: off_pattern is the sharp one (no
     # canonical approach used at all), also_solvable_with is informational.
-    tagged = {
-        "pattern": e.pattern,
-        "secondary_patterns": list(e.secondary_patterns),
-        "key_trick": e.key_trick,
-        "intended_pattern": canonical.intended,
-        "intended_secondary_patterns": canonical.secondary,
-        "off_pattern": enrich.off_pattern(e.pattern, e.secondary_patterns, *canonical),
-        "also_solvable_with": enrich.unused_canonical(e.pattern, e.secondary_patterns, *canonical),
-    }
+    return EnrichResult(
+        pattern=e.pattern,
+        secondary_patterns=list(e.secondary_patterns),
+        key_trick=e.key_trick,
+        intended_pattern=canonical.intended,
+        intended_secondary_patterns=canonical.secondary,
+        off_pattern=enrich.off_pattern(e.pattern, e.secondary_patterns, *canonical),
+        also_solvable_with=enrich.unused_canonical(e.pattern, e.secondary_patterns, *canonical),
+    )
 
+
+def enrich_solution_now(
+    conn: sqlite3.Connection, solution_id: int, problem: sqlite3.Row, code: str
+) -> EnrichResult:
+    """Tag the solution, embed its card, and find similar solves.
+
+    Degrades in two steps: no API key -> `skipped`; no sentence-transformers ->
+    `embed_skipped`. Both leave the stored solve untouched.
+    """
+    tagged = tag_solution_now(conn, solution_id, problem, code)
+    if tagged.skipped:
+        return tagged
+
+    card = embed.card_text(problem["title"], tagged.pattern, tagged.key_trick, code)
     try:
-        vector = embed.encode([embed.card_text(problem["title"], e.pattern, e.key_trick, code)])[0]
+        vector = embed.encode([card])[0]
     except embed.EmbeddingsUnavailable as exc:
-        return EnrichResult(**tagged, embed_skipped=str(exc))
+        return replace(tagged, embed_skipped=str(exc))
 
     embed.store(conn, solution_id, vector)
     conn.commit()
-    hits = embed.search(conn, vector, top_k=3, exclude_problem=problem["number"], pattern=e.pattern)
-
-    return EnrichResult(**tagged, neighbors=neighbor_details(conn, hits))
+    hits = embed.search(
+        conn, vector, top_k=3, exclude_problem=problem["number"], pattern=tagged.pattern
+    )
+    return replace(tagged, neighbors=neighbor_details(conn, hits))
 
 
 def review_solution_now(

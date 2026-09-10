@@ -111,35 +111,23 @@ def similar(
 
 
 @app.command("enrich")
-def enrich_cmd(
-    missing: bool = typer.Option(True, "--missing", help="Only process solutions without tags (the only mode for now)"),
-):
+def enrich_cmd():
     """Backfill pattern tags and embeddings for solutions logged without them."""
     conn = db.connect()
     todo = enrich.missing(conn)
     done = 0
     for row in todo:
-        try:
-            e = enrich.enrich_solution(row, row["code"])
-        except llm.LLMUnavailable as exc:
-            typer.echo(f"Stopped at #{row['number']}: {exc}")
+        tagged = service.tag_solution_now(conn, row["solution_id"], row, row["code"])
+        if tagged.skipped:
+            typer.echo(f"Stopped at #{row['number']}: {tagged.skipped}")
             break
-        enrich.save(conn, row["solution_id"], e)
-        enrich.save_intended(
-            conn, row["number"], e.intended_pattern, list(e.intended_secondary_patterns)
-        )
-        conn.commit()
-        mismatch = ""
-        if enrich.off_pattern(
-            e.pattern, e.secondary_patterns, e.intended_pattern, e.intended_secondary_patterns
-        ):
-            mismatch = f"  (canonical: {e.intended_pattern})"
-        typer.echo(f"#{row['number']} {row['title']}: {e.pattern} · {e.key_trick}{mismatch}")
+        mismatch = f"  (canonical: {tagged.intended_pattern})" if tagged.off_pattern else ""
+        typer.echo(f"#{row['number']} {row['title']}: {tagged.pattern} · {tagged.key_trick}{mismatch}")
         done += 1
-    if done:
-        mastery.recompute_all(conn)
     typer.echo(f"Enriched {done}/{len(todo)} solution(s).")
 
+    # Read from the database rather than from this run's results, so a solution
+    # tagged by an earlier run that stopped before embedding is picked up too.
     pending = conn.execute(
         """
         SELECT s.id AS solution_id, s.code, p.title, en.pattern, en.key_trick
