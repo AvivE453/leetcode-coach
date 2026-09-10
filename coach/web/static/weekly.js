@@ -41,7 +41,7 @@ function weekTable(rows) {
       rows.map((r) =>
         el("tr", {}, [
           el("td", { text: r.date }),
-          el("td", { text: `#${r.number} ${r.title}` }),
+          el("td", { text: `(${r.number}) ${r.title}` }),
           el("td", {}, [el("span", { class: `diff ${r.difficulty}`, text: r.difficulty })]),
           el("td", { text: r.outcome }),
           el("td", { text: r.minutes == null ? "" : String(r.minutes) }),

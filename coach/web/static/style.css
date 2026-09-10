@@ -54,6 +54,8 @@ a { color: var(--accent); }
 .brand { display: flex; align-items: baseline; gap: 10px; }
 .brand h1 { font-size: 2rem; margin: 0; letter-spacing: -0.01em; }
 .brand .sub { color: var(--muted); font-size: 0.85rem; }
+/* The Solutions search: its own full-width row under the title (masthead wraps). */
+.masthead .search { flex-basis: 100%; }
 
 .pills {
   display: flex;
@@ -192,7 +194,7 @@ th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: u
 .field { margin-bottom: 16px; }
 .field label, .fieldset-label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 6px; }
 
-input[type="number"], textarea {
+input[type="number"], input[type="search"], textarea {
   width: 100%;
   font: inherit;
   color: var(--text);

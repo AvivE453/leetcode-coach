@@ -29,7 +29,7 @@ function renderTopics(data) {
       "Solved off-pattern",
       "Every solved problem has been done with its canonical approach.",
       t.off_pattern,
-      (p) => el("li", { text: `#${p.number} ${p.title} → ${p.intended_pattern}` })
+      (p) => el("li", { text: `(${p.number}) ${p.title} → ${p.intended_pattern}` })
     )
   );
 
@@ -54,7 +54,7 @@ function renderPlan(data) {
     list.append(
       el("li", {}, [
         el("span", { class: "title" }, [
-          el("span", { class: "num", text: `#${item.number} ` }),
+          el("span", { class: "num", text: `(${item.number}) ` }),
           el("a", {
             href: `https://leetcode.com/problems/${item.slug}/`,
             target: "_blank",

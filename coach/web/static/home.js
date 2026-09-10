@@ -103,7 +103,7 @@ function renderLogResult(data) {
   box.replaceChildren();
   box.hidden = false;
 
-  box.append(el("h3", { text: `Logged #${data.number} ${data.title} (${data.outcome})` }));
+  box.append(el("h3", { text: `Logged (${data.number}) ${data.title} (${data.outcome})` }));
   box.append(el("p", { text: `Next review: ${data.next_due}` }));
 
   const e = data.enrichment;
@@ -145,7 +145,7 @@ function renderLogResult(data) {
     box.append(el("p", { class: "hint", text: "Similar solved problems:" }));
     box.append(
       el("ul", {}, e.neighbors.map((n) =>
-        el("li", { text: `#${n.number} ${n.title} [${n.difficulty}] — ${n.pattern || "untagged"}` })
+        el("li", { text: `(${n.number}) ${n.title} [${n.difficulty}] — ${n.pattern || "untagged"}` })
       ))
     );
   } else {

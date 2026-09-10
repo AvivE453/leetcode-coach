@@ -137,9 +137,9 @@ def api_log(body: LogRequest) -> dict:
 
 
 @app.get("/api/solutions")
-def api_solutions() -> dict:
+def api_solutions(q: str = "") -> dict:
     with open_db() as conn:
-        return {"problems": service.solved_problems(conn)}
+        return service.solutions_listing(conn, q)
 
 
 @app.get("/api/solutions/{number}")
@@ -176,7 +176,7 @@ def api_review(number: int, body: ReviewRequest) -> dict:
             (body.solution_id, number),
         ).fetchone()
         if solution is None:
-            raise HTTPException(404, f"No stored solution {body.solution_id} for #{number}.")
+            raise HTTPException(404, f"No stored solution {body.solution_id} for ({number}).")
 
         result = service.review_solution_now(
             conn, solution["id"], problem, solution["code"], refresh=body.refresh

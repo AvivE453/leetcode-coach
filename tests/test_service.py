@@ -3,7 +3,7 @@ from datetime import date, timedelta
 
 import numpy as np
 import pytest
-from conftest import CODE, seed_db
+from conftest import CODE, TWO_SUM, seed_db
 
 from coach import config, embed, enrich, mastery, review, service
 from coach.weekly import analyze as weekly_analyze
@@ -372,6 +372,64 @@ def test_solved_problems_aggregates_one_row_per_problem(tmp_path, monkeypatch):
     assert rows[0]["solves"] == 2
     assert rows[0]["last_outcome"] == "clean"
     assert rows[0]["pattern"] == "hashmap"
+
+
+THREE_SUM = {
+    "number": 15,
+    "slug": "3sum",
+    "title": "3Sum",
+    "difficulty": "Medium",
+    "official_tags": '["array", "two-pointers"]',
+    "paid_only": 0,
+}
+
+
+def listed(rows):
+    return [r["number"] for r in rows]
+
+
+def test_solved_problems_puts_the_last_logged_first_on_the_same_day(tmp_path, monkeypatch):
+    """created_at is a date, so same-day solves tie on it - and the problem number
+    used to break the tie, listing #1 above a #15 logged after it."""
+    conn = seed_db(tmp_path, monkeypatch, TWO_SUM + [THREE_SUM])
+    day = date(2026, 9, 7)
+    service.log_solve(conn, 1, "clean", CODE, today=day)
+    service.log_solve(conn, 15, "clean", CODE, today=day)
+    assert listed(service.solved_problems(conn)) == [15, 1]
+
+    service.log_solve(conn, 1, "clean", CODE, today=day)
+    assert listed(service.solved_problems(conn)) == [1, 15]
+
+
+def test_solutions_listing_defaults_to_the_most_recent(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch, TWO_SUM + [THREE_SUM])
+    service.log_solve(conn, 1, "failed", CODE)
+    service.log_solve(conn, 1, "clean", CODE)
+    service.log_solve(conn, 15, "clean", CODE)
+
+    listing = service.solutions_listing(conn, recent=1)
+
+    assert listed(listing["problems"]) == [15]
+    assert listing["query"] == ""
+    # The totals count everything, not just the rows the cap let through.
+    assert (listing["total_problems"], listing["total_solves"]) == (2, 3)
+
+
+def test_solutions_listing_matches_number_prefix_and_title(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch, TWO_SUM + [THREE_SUM])
+    service.log_solve(conn, 1, "clean", CODE)
+    service.log_solve(conn, 15, "clean", CODE)
+
+    def search(query):
+        return listed(service.solutions_listing(conn, query, recent=1)["problems"])
+
+    assert search("1") == [15, 1]  # number prefix - and not capped by recent=1
+    assert search("15") == [15]
+    assert search("5") == []  # a prefix, not "contains": 15 does not start with 5
+    assert search("SUM") == [15, 1]  # title, case-insensitive
+    assert search(" two ") == [1]
+    assert search("zzz") == []
+    assert search("  ") == [15]  # blank is no search - the default view
 
 
 WEEK_TODAY = date(2026, 9, 7)

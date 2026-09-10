@@ -36,6 +36,8 @@ EVAL_MODEL = "claude-sonnet-5"
 
 EMBED_MODEL = "all-MiniLM-L6-v2"
 DAILY_TARGET = 15
+# How many problems /solutions lists before you search; a search shows every match.
+RECENT_SOLUTIONS = 10
 CURRICULUM = "blind75"
 
 WEB_HOST = os.environ.get("COACH_WEB_HOST", "127.0.0.1")

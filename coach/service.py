@@ -11,7 +11,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from coach import curriculum, embed, enrich, llm, mastery, scheduler
+from coach import config, curriculum, embed, enrich, llm, mastery, scheduler
 from coach import review as review_llm
 from coach.weekly import analyze as weekly_analyze
 from coach.weekly import collect as weekly_collect
@@ -467,7 +467,12 @@ def stats_summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
 
 
 def solved_problems(conn: sqlite3.Connection) -> list[dict]:
-    """One row per problem with stored code, most recently solved first."""
+    """One row per problem with stored code, the last one logged first.
+
+    `created_at` is a date, so solves from the same day tie on it. `MAX(s.id)`
+    breaks the tie in logging order - the problem number used to, which listed
+    #1 above a #15 logged after it.
+    """
     rows = conn.execute(
         """
         SELECT p.number, p.title, p.difficulty, p.slug,
@@ -485,10 +490,36 @@ def solved_problems(conn: sqlite3.Connection) -> list[dict]:
                ) AS pattern
         FROM problems p JOIN solutions s ON s.problem_number = p.number
         GROUP BY p.number
-        ORDER BY last_solved DESC, p.number
+        ORDER BY last_solved DESC, MAX(s.id) DESC
         """
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def matches_problem(problem: dict, query: str) -> bool:
+    """The search rule: a number that starts with the query, or a title containing it."""
+    return str(problem["number"]).startswith(query) or query.casefold() in problem["title"].casefold()
+
+
+def solutions_listing(
+    conn: sqlite3.Connection, query: str = "", recent: int = config.RECENT_SOLUTIONS
+) -> dict:
+    """What /solutions shows: the `recent` last-logged problems, or every match for `query`.
+
+    Matches are not capped - a search asks for all of them. The totals always count
+    everything, so the page can say "10 of 42"; summing the shown rows would quietly
+    shrink with the cap. Filtered in Python rather than with LIKE: one readable rule,
+    no `%`/`_` escaping, over a few hundred rows already fetched.
+    """
+    rows = solved_problems(conn)
+    query = query.strip()
+    shown = [r for r in rows if matches_problem(r, query)] if query else rows[:recent]
+    return {
+        "problems": shown,
+        "query": query,
+        "total_problems": len(rows),
+        "total_solves": sum(r["solves"] for r in rows),
+    }
 
 
 def review_payload(r: review_llm.Review) -> dict:

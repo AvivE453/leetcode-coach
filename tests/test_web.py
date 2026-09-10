@@ -311,6 +311,20 @@ def test_solutions_endpoints_list_and_serve_stored_code(client, monkeypatch):
     assert history["solves"][0]["pattern"] == "hashmap"
 
 
+def test_solutions_endpoint_searches_and_counts_everything(client, monkeypatch):
+    enriched(monkeypatch)
+    client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
+    client.post("/api/log", json={"number": 15, "outcome": "clean", "code": CODE})
+
+    default = client.get("/api/solutions").json()
+    assert [p["number"] for p in default["problems"]] == [15, 1]
+
+    found = client.get("/api/solutions", params={"q": "two"}).json()
+    assert [p["number"] for p in found["problems"]] == [1]
+    assert found["query"] == "two"
+    assert (found["total_problems"], found["total_solves"]) == (2, 2)
+
+
 def test_review_endpoint_stores_and_then_serves_for_free(client, monkeypatch):
     enriched(monkeypatch)
     logged = client.post("/api/log", json={"number": 1, "outcome": "failed", "code": CODE}).json()

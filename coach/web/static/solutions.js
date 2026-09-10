@@ -140,7 +140,7 @@ function renderProblem(p) {
     "aria-controls": `solves-${p.number}`,
   }, [
     el("span", { class: "title" }, [
-      el("span", { class: "num", text: `#${p.number} ` }),
+      el("span", { class: "num", text: `(${p.number}) ` }),
       el("span", { text: p.title }),
     ]),
     el("span", { class: `diff ${p.difficulty}`, text: p.difficulty }),
@@ -162,24 +162,56 @@ function renderProblem(p) {
   ]);
 }
 
-async function load() {
-  const list = document.getElementById("solutions-list");
+/* The server owns both rules - the last-N default and what a query matches
+   (service.solutions_listing) - so this only draws what it is sent. */
+function renderListing(data) {
   const empty = document.getElementById("solutions-empty");
+  const meta = document.getElementById("solutions-meta");
+  const { problems, query, total_problems: total, total_solves: solves } = data;
+
+  document.getElementById("solutions-list").replaceChildren(...problems.map(renderProblem));
+  empty.className = "loading";
+  empty.hidden = problems.length > 0;
+
+  if (!total) {
+    empty.textContent = "Nothing logged yet — solve something and log it from the home page.";
+    meta.textContent = "";
+    return;
+  }
+  if (!problems.length) empty.textContent = `No solved problem matches "${query}".`;
+
+  if (query) {
+    meta.textContent = `${problems.length} match${problems.length === 1 ? "" : "es"} for "${query}"`;
+  } else {
+    // Totals count everything, so a capped list can say how much it left out.
+    const of = problems.length < total ? `${problems.length} most recent of ` : "";
+    meta.textContent = `${of}${total} problem${total === 1 ? "" : "s"} · ${solves} solve${solves === 1 ? "" : "s"}`;
+  }
+}
+
+/* Each keystroke can start a request, and replies need not arrive in order: a
+   slow one for "1" must not overwrite a fast one for "12". Only the newest draws. */
+let latest = 0;
+
+async function load(query = "") {
+  const seq = ++latest;
   try {
-    const { problems } = await getJSON("/api/solutions");
-    if (!problems.length) {
-      empty.textContent = "Nothing logged yet — solve something and log it from the home page.";
-      return;
-    }
-    empty.hidden = true;
-    list.replaceChildren(...problems.map(renderProblem));
-    const solves = problems.reduce((n, p) => n + p.solves, 0);
-    document.getElementById("solutions-meta").textContent =
-      `${problems.length} problem${problems.length === 1 ? "" : "s"} · ${solves} solve${solves === 1 ? "" : "s"}`;
+    const data = await getJSON(`/api/solutions?q=${encodeURIComponent(query)}`);
+    if (seq === latest) renderListing(data);
   } catch (err) {
+    if (seq !== latest) return;
+    const empty = document.getElementById("solutions-empty");
+    document.getElementById("solutions-list").replaceChildren();
+    empty.hidden = false;
     empty.className = "error";
     empty.textContent = `Could not load your solutions: ${err.message}`;
   }
 }
+
+let typing;
+document.getElementById("solutions-search").addEventListener("input", (e) => {
+  clearTimeout(typing);
+  typing = setTimeout(() => load(e.target.value), 150);
+});
 
 load();
