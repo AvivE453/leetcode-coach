@@ -151,7 +151,7 @@ def json_list(raw: str | None) -> list[str]:
     return json.loads(raw) if raw else []
 
 
-def problem_canonical(problem) -> tuple[str | None, list[str]]:
+def problem_canonical(problem) -> enrich.Canonical:
     """A problem row's canonical approaches: (intended, intended_secondary).
 
     Tolerates a row from before the column existed, so a caller holding an old
@@ -161,7 +161,7 @@ def problem_canonical(problem) -> tuple[str | None, list[str]]:
         secondary = json_list(problem["intended_secondary_patterns"])
     except (IndexError, KeyError):
         secondary = []
-    return problem["intended_pattern"], secondary
+    return enrich.Canonical(problem["intended_pattern"], secondary)
 
 
 def update_review_state(
@@ -279,7 +279,7 @@ def enrich_solution_now(
         return EnrichResult(skipped=str(exc))
 
     enrich.save(conn, solution_id, e)
-    enrich.save_intended(
+    canonical = enrich.save_intended(
         conn, problem["number"], e.intended_pattern, list(e.intended_secondary_patterns)
     )
     conn.commit()
@@ -287,24 +287,16 @@ def enrich_solution_now(
     # scored - and pattern_standing() below reads what this writes.
     mastery.recompute_all(conn)
 
-    # canonical[0] is intended_pattern; the rest are the alternates, deduplicated
-    # exactly as save_intended stored them, so response and database agree.
-    canonical = enrich.canonical_patterns(e.intended_pattern, list(e.intended_secondary_patterns))
-    intended_secondary = canonical[1:]
     # Two signals off one free set comparison: off_pattern is the sharp one (no
     # canonical approach used at all), also_solvable_with is informational.
     tagged = {
         "pattern": e.pattern,
         "secondary_patterns": list(e.secondary_patterns),
         "key_trick": e.key_trick,
-        "intended_pattern": e.intended_pattern,
-        "intended_secondary_patterns": intended_secondary,
-        "off_pattern": enrich.off_pattern(
-            e.pattern, e.secondary_patterns, e.intended_pattern, intended_secondary
-        ),
-        "also_solvable_with": enrich.unused_canonical(
-            e.pattern, e.secondary_patterns, e.intended_pattern, intended_secondary
-        ),
+        "intended_pattern": canonical.intended,
+        "intended_secondary_patterns": canonical.secondary,
+        "off_pattern": enrich.off_pattern(e.pattern, e.secondary_patterns, *canonical),
+        "also_solvable_with": enrich.unused_canonical(e.pattern, e.secondary_patterns, *canonical),
     }
 
     try:

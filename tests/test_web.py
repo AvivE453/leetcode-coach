@@ -122,6 +122,22 @@ def test_log_endpoint_accepts_a_canonical_alternate_approach(client, monkeypatch
     assert body["enrichment"]["also_solvable_with"] == ["hashmap"]
 
 
+def test_log_endpoint_agrees_with_the_stored_canonical_set_and_the_plan(client, monkeypatch):
+    """A later answer that forgets an accepted approach must not re-flag a solve that
+    used it: the log response, the solutions page and the plan read one canonical set."""
+    enriched(monkeypatch)  # stores hashmap + two-pointers
+    client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
+
+    enriched(monkeypatch, pattern="two-pointers", intended_secondary_patterns=[])
+    body = client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE}).json()
+
+    enrichment = body["enrichment"]
+    stored = client.get("/api/solutions/1").json()["intended_secondary_patterns"]
+    assert enrichment["off_pattern"] is False
+    assert enrichment["intended_secondary_patterns"] == stored == ["two-pointers"]
+    assert client.get("/api/plan").json()["topics"]["off_pattern"] == []
+
+
 def test_solution_history_endpoint_carries_the_canonical_note(client, monkeypatch):
     enriched(monkeypatch)
     client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})

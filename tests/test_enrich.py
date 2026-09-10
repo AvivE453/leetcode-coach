@@ -54,22 +54,25 @@ def test_save_and_missing(tmp_path):
     assert row["prompt_version"] == enrich.PROMPT_VERSION
 
 
+def stored_canonical(conn):
+    row = conn.execute("SELECT * FROM problems WHERE number = 1").fetchone()
+    return row["intended_pattern"], json.loads(row["intended_secondary_patterns"])
+
+
 def test_save_intended_updates_problem(tmp_path):
     conn = make_db(tmp_path)
-    enrich.save_intended(conn, 1, "dp-1d")
-    row = conn.execute("SELECT * FROM problems WHERE number = 1").fetchone()
-    assert row["intended_pattern"] == "dp-1d"
-    assert json.loads(row["intended_secondary_patterns"]) == []
+    returned = enrich.save_intended(conn, 1, "dp-1d")
+    assert stored_canonical(conn) == ("dp-1d", [])
+    assert returned == stored_canonical(conn)
 
 
 def test_save_intended_stores_alternates_without_repeating_the_central_one(tmp_path):
     conn = make_db(tmp_path)
-    enrich.save_intended(conn, 1, "dp-1d", ["greedy", "dp-1d", "greedy"])
-    row = conn.execute("SELECT * FROM problems WHERE number = 1").fetchone()
-    assert row["intended_pattern"] == "dp-1d"
+    returned = enrich.save_intended(conn, 1, "dp-1d", ["greedy", "dp-1d", "greedy"])
     # the central pattern and the duplicate are both dropped: the two columns are
     # read back as one set, so a repeat would surface as a repeated note
-    assert json.loads(row["intended_secondary_patterns"]) == ["greedy"]
+    assert stored_canonical(conn) == ("dp-1d", ["greedy"])
+    assert returned == stored_canonical(conn)
 
 
 def test_save_intended_accumulates_alternates_across_enrichments(tmp_path):
@@ -81,13 +84,13 @@ def test_save_intended_accumulates_alternates_across_enrichments(tmp_path):
     """
     conn = make_db(tmp_path)
     enrich.save_intended(conn, 1, "greedy", ["dp-1d"])
-    enrich.save_intended(conn, 1, "dp-1d", [])
+    returned = enrich.save_intended(conn, 1, "dp-1d", [])
 
-    row = conn.execute("SELECT * FROM problems WHERE number = 1").fetchone()
     # the newest answer owns the central slot; the previous central one is demoted,
     # not discarded, so both approaches stay canonical
-    assert row["intended_pattern"] == "dp-1d"
-    assert json.loads(row["intended_secondary_patterns"]) == ["greedy"]
+    assert stored_canonical(conn) == ("dp-1d", ["greedy"])
+    # and the caller gets the merged set back, not the answer it passed in
+    assert returned == stored_canonical(conn)
 
 
 def test_re_enriching_does_not_re_flag_a_cleared_solve(tmp_path):

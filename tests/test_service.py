@@ -155,6 +155,68 @@ def test_enrich_solution_now_carries_both_signals_when_embedding_fails(tmp_path,
     assert e.intended_secondary_patterns == ["two-pointers"]
 
 
+def enrich_against_stored_canonical(conn, monkeypatch, **answer):
+    """Enrich a new Two Sum solve whose stored canonical set is hashmap + two-pointers,
+    with a model answer overridden by `answer`."""
+    enrich.save_intended(conn, 1, "hashmap", ["two-pointers"])
+    conn.commit()
+    e = ENRICHMENT.model_copy(update=answer)
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: e)
+    monkeypatch.setattr("coach.embed.encode", fake_encode)
+    result = service.log_solve(conn, 1, "clean", CODE)
+    return service.enrich_solution_now(conn, result.solution_id, service.get_problem(conn, 1), CODE)
+
+
+def test_enrich_solution_now_judges_against_the_stored_set_not_the_latest_answer(
+    tmp_path, monkeypatch
+):
+    """save_intended accumulates alternates, but the response used to be judged against
+    the model's latest answer alone - so the moment the model forgot an approach it had
+    accepted before, a solve the planner had cleared was reported off-pattern."""
+    conn = seed_db(tmp_path, monkeypatch)
+
+    e = enrich_against_stored_canonical(
+        conn, monkeypatch, pattern="two-pointers", intended_secondary_patterns=[]
+    )
+
+    assert e.off_pattern is False
+    assert e.intended_secondary_patterns == ["two-pointers"]
+    assert e.also_solvable_with == ["hashmap"]
+    # the response, the stored problem and the planner all read one set
+    assert (e.intended_pattern, e.intended_secondary_patterns) == service.problem_canonical(
+        service.get_problem(conn, 1)
+    )
+    assert weekly_analyze.analyze(conn, date.today())["off_pattern"] == []
+
+
+def test_enrich_solution_now_keeps_a_demoted_central_pattern_canonical(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+
+    e = enrich_against_stored_canonical(
+        conn,
+        monkeypatch,
+        pattern="hashmap",
+        intended_pattern="two-pointers",
+        intended_secondary_patterns=[],
+    )
+
+    assert e.off_pattern is False
+    assert e.intended_pattern == "two-pointers"
+    assert e.intended_secondary_patterns == ["hashmap"]
+    assert e.also_solvable_with == ["two-pointers"]
+
+
+def test_enrich_solution_now_lists_a_repeated_alternate_once(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+
+    e = enrich_against_stored_canonical(
+        conn, monkeypatch, intended_secondary_patterns=["two-pointers", "hashmap", "two-pointers"]
+    )
+
+    assert e.intended_secondary_patterns == ["two-pointers"]
+    assert e.also_solvable_with == ["two-pointers"]
+
+
 def test_pattern_counts_credits_every_pattern_a_problem_was_practiced_with(tmp_path, monkeypatch):
     conn = seed_db(tmp_path, monkeypatch)
     monkeypatch.setattr("coach.embed.encode", fake_encode)

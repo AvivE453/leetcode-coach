@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from typing import Literal, get_args
+from typing import Literal, NamedTuple, get_args
 
 from pydantic import BaseModel
 
@@ -119,13 +119,23 @@ def save(
     )
 
 
+class Canonical(NamedTuple):
+    """A problem's canonical approaches as stored: the central one, then the alternates."""
+
+    intended: str | None
+    secondary: list[str]
+
+
 def save_intended(
     conn: sqlite3.Connection,
     problem_number: int,
     pattern: str,
     secondary: list[str] | None = None,
-) -> None:
-    """Store the problem's canonical approaches: the central one plus any alternates.
+) -> Canonical:
+    """Store the problem's canonical approaches and return the set now stored.
+
+    Judge a solve against that return value, never against the model's answer: after
+    the merge below the two differ whenever the answer forgot an approach.
 
     The alternates ACCUMULATE across enrichments rather than replacing what is
     stored. Every re-solve re-enriches and calls this, and the model does not
@@ -156,6 +166,7 @@ def save_intended(
         "UPDATE problems SET intended_pattern = ?, intended_secondary_patterns = ? WHERE number = ?",
         (pattern, json.dumps(extra), problem_number),
     )
+    return Canonical(pattern, extra)
 
 
 def canonical_patterns(intended: str | None, intended_secondary: list[str] | None) -> list[str]:
