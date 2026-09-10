@@ -1,8 +1,10 @@
 import json
+from datetime import date
 
 import pytest
 
-from coach import db, mastery
+from coach import db, mastery, service
+from coach.weekly import analyze as weekly_analyze
 
 
 def issues(*categories):
@@ -73,7 +75,8 @@ def make_db(tmp_path):
     return conn
 
 
-def add_solve(conn, day, outcome, pattern, review=None):
+def add_solve(conn, day, outcome, pattern, review=None, secondary=()):
+    """One attempt and its solution; tagged when `pattern` is given, reviewed when `review` is."""
     attempt_id = conn.execute(
         "INSERT INTO attempts (problem_number, date, outcome) VALUES (1, ?, ?)",
         (day, outcome),
@@ -82,24 +85,114 @@ def add_solve(conn, day, outcome, pattern, review=None):
         "INSERT INTO solutions (problem_number, attempt_id, code, created_at) VALUES (1, ?, 'c', ?)",
         (attempt_id, day),
     ).lastrowid
-    conn.execute(
-        """
-        INSERT INTO enrichments (solution_id, pattern, secondary_patterns, data_structures)
-        VALUES (?, ?, '[]', '[]')
-        """,
-        (solution_id, pattern),
-    )
-    if review:
-        verdict, found = review
+    if pattern:
         conn.execute(
             """
-            INSERT INTO reviews (solution_id, verdict, strengths, issues, time_complexity,
-                                 space_complexity, optimal_time_complexity, created_at)
-            VALUES (?, ?, '[]', ?, 'O(n)', 'O(1)', 'O(n)', ?)
+            INSERT INTO enrichments (solution_id, pattern, secondary_patterns, data_structures)
+            VALUES (?, ?, ?, '[]')
             """,
-            (solution_id, verdict, json.dumps(issues(*found)), day),
+            (solution_id, pattern, json.dumps(list(secondary))),
         )
+    if review:
+        add_review(conn, solution_id, *review, day=day)
     return solution_id
+
+
+def add_review(conn, solution_id, verdict, found=(), day="2026-08-01"):
+    conn.execute(
+        """
+        INSERT INTO reviews (solution_id, verdict, strengths, issues, time_complexity,
+                             space_complexity, optimal_time_complexity, created_at)
+        VALUES (?, ?, '[]', ?, 'O(n)', 'O(1)', 'O(n)', ?)
+        """,
+        (solution_id, verdict, json.dumps(issues(*found)), day),
+    )
+
+
+def rebuild_scores(conn):
+    mastery.recompute_all(conn)
+
+
+PIN_TODAY = date(2026, 9, 7)  # so the weekly window is 2026-09-01 .. 2026-09-07
+
+
+def add_pinned_history(conn):
+    """One history exercising every rule the mastery number follows."""
+    # hashmap - on-track. Inserted out of date order; two solves tie on 09-05, so the
+    # id breaks the tie; and the 08-25 solve is only reviewed after the window opened.
+    late = add_solve(conn, "2026-08-25", "clean", "hashmap")
+    add_solve(
+        conn, "2026-08-10", "struggled", "hashmap", review=("acceptable", ("complexity", "edge-case"))
+    )
+    add_solve(conn, "2026-09-05", "clean", "hashmap")
+    add_solve(conn, "2026-09-05", "failed", "hashmap")
+    add_solve(conn, "2026-08-30", "hints", "hashmap", secondary=["two-pointers"])
+    add_review(conn, late, "needs-work", ("bug",), day="2026-09-06")
+    # dp-1d - weak: exactly five attempts, mastery under 2.5, every review rule in play
+    add_solve(conn, "2026-08-20", "failed", "dp-1d")
+    add_solve(conn, "2026-08-21", "struggled", "dp-1d", review=("needs-work", ("edge-case",)))
+    add_solve(
+        conn, "2026-08-22", "hints", "dp-1d",
+        review=("acceptable", ("complexity", "edge-case", "edge-case")),
+    )
+    add_solve(conn, "2026-09-02", "failed", "dp-1d", review=("needs-work", ("bug",)))
+    add_solve(conn, "2026-09-03", "clean", "dp-1d", review=("optimal", ("edge-case",) * 5))
+    # graph - four attempts: too early to judge, however low it scores
+    add_solve(conn, "2026-09-01", "failed", "graph", review=("acceptable", ()))
+    for day in ("2026-09-02", "2026-09-03", "2026-09-04"):
+        add_solve(conn, day, "failed", "graph")
+    # never tagged: a solve in the week, with nothing to score it under
+    add_solve(conn, "2026-09-06", "clean", None)
+    conn.commit()
+
+
+def test_scoring_behavior_is_pinned(tmp_path):
+    """Every reader of mastery, over one history, against numbers worked by hand.
+
+    Per solve: 0.7 x outcome + 0.3 x review, the review capped by its issue count.
+    dp-1d: 1, 2.7, 2.0, 1.0, 3.8. hashmap in date order: 3.0, 3.8 (its late bug
+    review), 2, 5, 1. graph: 1.9, 1, 1, 1. Each folded oldest-first at alpha 0.2.
+    """
+    conn = make_db(tmp_path)
+    add_pinned_history(conn)
+    rebuild_scores(conn)
+
+    analysis = weekly_analyze.analyze(conn, PIN_TODAY)
+    assert analysis["patterns"] == [
+        {"pattern": "dp-1d", "attempts": 5, "rough": 4, "struggle_rate": 0.8,
+         "score": pytest.approx(1.86208), "last_date": date(2026, 9, 3)},
+        {"pattern": "graph", "attempts": 4, "rough": 4, "struggle_rate": 1.0,
+         "score": pytest.approx(1.4608), "last_date": date(2026, 9, 4)},
+        {"pattern": "hashmap", "attempts": 5, "rough": 3, "struggle_rate": 0.6,
+         "score": pytest.approx(2.87392), "last_date": date(2026, 9, 5)},
+    ]
+    assert analysis["weak_patterns"] == ["dp-1d"]
+
+    assert service.pattern_table(conn) == [
+        {"pattern": "dp-1d", "solved": 1, "score": pytest.approx(1.86208), "attempts": 5, "rough": 4},
+        {"pattern": "graph", "solved": 1, "score": pytest.approx(1.4608), "attempts": 4, "rough": 4},
+        {"pattern": "hashmap", "solved": 1, "score": pytest.approx(2.87392), "attempts": 5, "rough": 3},
+        # only ever a secondary: it has coverage, but no practice to score
+        {"pattern": "two-pointers", "solved": 1, "score": None, "attempts": None, "rough": None},
+    ]
+
+    review = service.weekly_review(conn, PIN_TODAY)
+    assert len(review.attempts) == 9  # the untagged solve included
+    assert [
+        (p.pattern, p.attempts_week, p.attempts_total, p.score, p.score_before, p.standing)
+        for p in review.patterns
+    ] == [
+        ("dp-1d", 2, 5, pytest.approx(1.86208), pytest.approx(1.472), "weak"),
+        # the late review re-scores its pre-window solve on both sides of the cut
+        ("hashmap", 2, 5, pytest.approx(2.87392), pytest.approx(2.928), "on-track"),
+        ("graph", 4, 4, pytest.approx(1.4608), None, "too-early"),
+    ]
+
+
+def test_is_weak_needs_both_a_low_score_and_enough_attempts():
+    assert mastery.is_weak(2.49, mastery.WEAK_MIN_ATTEMPTS) is True
+    assert mastery.is_weak(mastery.WEAK_SCORE, mastery.WEAK_MIN_ATTEMPTS) is False
+    assert mastery.is_weak(1.0, mastery.WEAK_MIN_ATTEMPTS - 1) is False
 
 
 def test_recompute_scores_each_pattern_in_date_order(tmp_path):
