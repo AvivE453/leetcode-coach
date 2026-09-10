@@ -1,9 +1,9 @@
 """llm.py's one promise: a failed call raises LLMUnavailable, never anything else.
 
 Every caller degrades on LLMUnavailable and only on that - service.enrich_solution_now
-and review_solution_now both catch it by name. Anything else escaping means `coach log`
-ends in a traceback and POST /api/log answers 500, for a solve log_solve has already
-committed. So the translation is the contract, and these tests are it.
+and review_solution_now both catch it by name. Anything else escaping means POST /api/log
+answers 500 for a solve log_solve has already committed. So the translation is the
+contract, and these tests are it.
 
 The autouse conftest fixture strips the API key, so each test sets a fake one to get
 past the have_api_key() guard and reach the call itself.
@@ -59,7 +59,7 @@ def test_missing_api_key_is_unavailable_not_a_crash():
 def test_a_malformed_model_answer_degrades(api_key, monkeypatch):
     """The regression: structured output the schema rejects.
 
-    This used to escape as ValidationError straight through `coach log`, which
+    This used to escape as ValidationError straight out of the log path, which
     had already stored the solve - so the tool reported a traceback for work it
     had saved.
     """

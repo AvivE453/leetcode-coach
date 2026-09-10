@@ -14,7 +14,6 @@ Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync --extra embed          # omit --extra embed to skip torch (no local embeddings)
-uv sync --extra web            # optional: FastAPI + uvicorn for the browser UI
 cp .env.example .env           # then add your Anthropic API key; .env is gitignored
 uv run coach init              # download the problem catalog, create the database
 ```
@@ -22,44 +21,38 @@ uv run coach init              # download the problem catalog, create the databa
 ## Use
 
 ```bash
-uv run coach today                            # start here: what to solve today
-uv run coach log 1 --outcome clean --time 8   # paste your solution, then Ctrl+D
-```
-
-| Command | What it gives you |
-|---|---|
-| `coach today` | **The daily entry point.** Today's problems, in priority order |
-| `coach log <n>` | Paste a solution → stores it, tags the pattern, embeds it, schedules the review, shows similar past solves, and flags the solve if you used the wrong approach |
-| `coach due` | What to re-solve today, by spaced repetition |
-| `coach similar <n>` / `--paste` | Your five most similar past solutions, by *algorithmic pattern* rather than text |
-| `coach review <n>` | Structured feedback on a stored solution: what it got right, complexity, bugs, edge cases, better approach. Stored after the first run, so looking again is free |
-| `coach stats` | Pattern coverage, mastery scores, struggle rates, off-pattern solves, curriculum progress |
-| `coach weekly` | The last seven days: every solve, and whether each pattern you used is going well, needs work, or has too little history to call |
-| `coach enrich` | Backfills tags and embeddings for anything logged while offline |
-
-A logged solve is never lost: with no API key it still saves, and `coach enrich` fills in
-the tags later.
-
-## Web UI
-
-```bash
 uv run coach-web        # http://127.0.0.1:8000
 ```
 
-Four pages over the same data — **Home** (progress, patterns practised, and a form to log
-a solve), **Solutions** (every solve with its code and review), **Daily Plan** (the
-browser version of `coach today`), and **Weekly Review** (this week, recomputed live).
-Opening a page never spends money.
+Day-to-day use happens in the browser, on four pages over the same data:
 
-It binds to localhost and has no authentication, so keep it there.
-`COACH_WEB_HOST` / `COACH_WEB_PORT` move it.
+| Page | What it gives you |
+|---|---|
+| **Daily Plan** | **Start here.** Today's problems, in priority order: reviews due by spaced repetition, then off-pattern re-solves, weak-pattern picks, and curriculum progression |
+| **Home** | Progress, every pattern you have practised with its mastery score, and **I solved a question** — paste a solution and it is stored, tagged by pattern, embedded, scheduled for review, compared with similar past solves, and flagged if you used the wrong approach |
+| **Solutions** | Every solve with its code, searchable by number or name, and structured feedback on any of them: what it got right, complexity, bugs, edge cases, a better approach. Stored after the first run, so looking again is free |
+| **Weekly Review** | The last seven days: every solve, and whether each pattern you used is going well, needs work, or has too little history to call |
+
+Opening a page never spends money. The server binds to localhost and has no
+authentication, so keep it there; `COACH_WEB_HOST` / `COACH_WEB_PORT` move it.
+
+Three jobs have no page and stay on the command line:
+
+| Command | What it gives you |
+|---|---|
+| `coach init` | Creates the database and loads the problem catalog; also rebuilds the mastery scores |
+| `coach enrich` | Backfills tags and embeddings for anything logged while offline |
+| `coach similar <n>` / `--paste` | Your five most similar past solutions, by *algorithmic pattern* rather than text |
+
+A logged solve is never lost: with no API key it still saves, and `coach enrich` fills in
+the tags later.
 
 ## Notes
 
 `COACH_DB=/tmp/scratch.db` points any command, `coach-web` included, at a throwaway
 database.
 
-Your database starts empty and grows from your first `coach log`. `data/coach.db` is
+Your database starts empty and grows from your first logged solve. `data/coach.db` is
 gitignored on purpose — it holds your practice history, not the tool — so it is the only
 copy of that history, and nothing in git backs it up for you.
 

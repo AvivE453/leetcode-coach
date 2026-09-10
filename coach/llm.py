@@ -36,7 +36,7 @@ def _complete(request):
 
     The three specific handlers exist for their wording; the last two are the
     ones that make the contract true. A model that answers with output the
-    schema rejects used to raise ValidationError straight through `coach log`,
+    schema rejects used to raise ValidationError straight out of the log path,
     which had already committed the solve - so the tool reported a traceback
     for work it had saved. Programming errors (TypeError, AttributeError) are
     deliberately NOT caught: those are bugs here, not the API degrading.

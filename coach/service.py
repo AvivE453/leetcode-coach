@@ -1,8 +1,8 @@
-"""Logic shared by the CLI and the web UI.
+"""Logic behind the web UI, and behind the few CLI commands that remain.
 
 Everything here is pure-ish: it takes a connection, touches the database, and
-returns data. No printing, no typer, no HTTP. `coach/cli.py` wraps these in
-`typer.echo` calls; `coach/web/app.py` serialises them to JSON.
+returns data. No printing, no typer, no HTTP. `coach/web/app.py` serialises these
+to JSON; `coach/cli.py` wraps the handful it still needs in `typer.echo` calls.
 """
 
 import json
@@ -349,29 +349,11 @@ def review_solution_now(
     return ReviewResult(review=r)
 
 
-def also_solvable_with(conn: sqlite3.Connection, solution_id: int, problem) -> list[str]:
-    """Canonical approaches one stored solve did not use.
-
-    Computed on read, never stored, so the note stays correct if the problem's
-    canonical set widens later. Empty when the solve was never enriched.
-    """
-    row = conn.execute(
-        "SELECT pattern, secondary_patterns FROM enrichments WHERE solution_id = ?",
-        (solution_id,),
-    ).fetchone()
-    if row is None:
-        return []
-    intended, intended_secondary = problem_canonical(problem)
-    return enrich.unused_canonical(
-        row["pattern"], json_list(row["secondary_patterns"]), intended, intended_secondary
-    )
-
-
 def standing_of(analysis: dict, pattern: str, attempts: int, score: float | None) -> str:
     """One pattern's verdict as a word: too-early, weak, or on-track.
 
-    The single owner of that reading, shared by the note `coach log` prints and by
-    the weekly review. `weak` is only ever membership in analysis["weak_patterns"] -
+    The single owner of that reading, shared by the standing note shown after logging
+    a solve and by the weekly review. `weak` is only ever membership in analysis["weak_patterns"] -
     the threshold itself lives in mastery.is_weak() and is applied once, by analyze().
 
     Both ways of having nothing to say collapse into "too-early", because the only
@@ -413,7 +395,10 @@ def pattern_standing(
 
 
 def stats_summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
-    """Everything `coach stats` prints and the web home page shows."""
+    """The home page's progress numbers: counts, reviews due, outcomes, curriculum.
+
+    Per-pattern practice is not here - the pattern table reads it from pattern_table().
+    """
     today = today or date.today()
     total = conn.execute("SELECT COUNT(*) FROM problems").fetchone()[0]
     solved = conn.execute("SELECT COUNT(DISTINCT problem_number) FROM attempts").fetchone()[0]
@@ -435,23 +420,6 @@ def stats_summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
             "SELECT outcome, COUNT(*) AS n FROM attempts GROUP BY outcome ORDER BY n DESC"
         )
     ]
-    # Shared rows, sorted the way this view wants them: most-practiced first.
-    patterns = [
-        {"pattern": p["pattern"], "attempts": p["attempts"], "rough": p["rough"],
-         "score": p["score"]}
-        for p in sorted(
-            mastery.pattern_stats(conn), key=lambda p: (-p["attempts"], p["pattern"])
-        )
-    ]
-    off_pattern = [
-        {
-            "number": r["number"],
-            "title": r["title"],
-            "difficulty": r["difficulty"],
-            "intended_pattern": r["intended_pattern"],
-        }
-        for r in enrich.off_pattern_problems(conn)
-    ]
 
     return {
         "catalog": total,
@@ -460,8 +428,6 @@ def stats_summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
         "last_7_days": week,
         "due_today": due_count,
         "outcomes": outcomes,
-        "patterns": patterns,
-        "off_pattern": off_pattern,
         "curriculum": curriculum.progress(conn),
     }
 

@@ -99,10 +99,10 @@ def pattern_stats(conn: sqlite3.Connection) -> list[dict]:
 
     The single answer to "how is each pattern going": how many attempts, how many
     were not clean (raw as `rough`, and as `struggle_rate`), the folded mastery
-    score, and when it was last practiced. `coach stats` and the weekly analysis
-    both read this - they ran near-identical copies of this SQL and differed only
-    in the sort order and in which of rough/struggle_rate they kept, so each
-    caller now sorts the shared rows itself.
+    score, and when it was last practiced. The home page's pattern table and the
+    weekly analysis both read this - two callers once ran near-identical copies of
+    this SQL that differed only in sort order and in which of rough/struggle_rate
+    they kept, so each caller now takes what it needs from the shared rows.
     """
     rows = conn.execute(
         """

@@ -95,7 +95,7 @@ def test_re_enriching_does_not_re_flag_a_cleared_solve(tmp_path):
 
     #121 is solved with greedy while greedy is canonical. A later enrichment names
     only dp-1d. Before, that re-flagged the greedy solve and earned it a forced
-    re-solve slot in `coach today`.
+    re-solve slot in the Daily Plan.
     """
     conn = make_db(tmp_path)
     enrich.save_intended(conn, 1, "greedy", ["dp-1d"])

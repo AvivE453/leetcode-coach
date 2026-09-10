@@ -1,34 +1,19 @@
+"""The commands that have no page in the web UI.
+
+Daily use is the web UI (`coach-web`): logging a solve, reviews, the daily plan, the
+weekly review and stats all live there, over the same coach/service.py. What stays
+here is setup (`init`), the offline backfill (`enrich`), and similarity search (`similar`).
+"""
+
 import json
-import sqlite3
 import sys
-from datetime import date
-from enum import Enum
-from pathlib import Path
 
 import numpy as np
 import typer
 
-from coach import (
-    catalog,
-    config,
-    curriculum,
-    db,
-    embed,
-    enrich,
-    llm,
-    mastery,
-    scheduler,
-    service,
-)
+from coach import catalog, config, curriculum, db, embed, enrich, llm, mastery, service
 
 app = typer.Typer(no_args_is_help=True)
-
-
-class Outcome(str, Enum):
-    clean = "clean"
-    struggled = "struggled"
-    hints = "hints"
-    failed = "failed"
 
 
 @app.command()
@@ -71,121 +56,11 @@ def init(
         typer.echo(f"  {name}: {count}/{expected} flagged{marker}")
 
 
-def read_solution_code(file: Path | None) -> str:
-    if file:
-        return file.read_text()
-    if sys.stdin.isatty():
-        typer.echo("Paste your solution, then press Ctrl+D:")
-    return sys.stdin.read()
-
-
-@app.command()
-def log(
-    number: int = typer.Argument(help="LeetCode problem number"),
-    outcome: Outcome = typer.Option(Outcome.clean, "--outcome", "-o", help="How the solve went"),
-    time: int = typer.Option(None, "--time", "-t", help="Minutes spent"),
-    note: str = typer.Option(None, "--note"),
-    file: Path = typer.Option(None, "--file", "-f", help="Read the solution from a file instead of pasting"),
-):
-    """Log a solve: stores the attempt + solution and updates the review schedule."""
-    conn = db.connect()
-    problem = service.get_problem(conn, number)
-    if problem is None:
-        typer.echo(f"Problem {number} not found in the catalog - run `coach init` first?")
-        raise typer.Exit(1)
-
-    code = read_solution_code(file).strip()
-    if not code:
-        typer.echo("No solution code received - nothing logged.")
-        raise typer.Exit(1)
-
-    result = service.log_solve(conn, number, outcome.value, code, minutes=time, note=note)
-
-    detail = outcome.value + (f", {time}m" if time else "")
-    typer.echo(f"Logged #{number} {problem['title']} ({detail})")
-    typer.echo(f"Next review: {result.next_due.isoformat()}")
-    echo_enrichment(conn, service.enrich_solution_now(conn, result.solution_id, problem, code))
-
-
-def echo_enrichment(conn: sqlite3.Connection, e: service.EnrichResult) -> None:
-    """Print what post-log enrichment found, including how it degraded."""
-    if e.skipped:
-        typer.echo(f"Enrichment skipped ({e.skipped}) - run `coach enrich` to backfill later.")
-        return
-    secondary = f" (+ {', '.join(e.secondary_patterns)})" if e.secondary_patterns else ""
-    typer.echo(f"Pattern: {e.pattern}{secondary} · {e.key_trick}")
-    echo_standing(service.pattern_standing(conn, e.pattern))
-    if e.off_pattern:
-        typer.echo(f"Note: the canonical approach is {e.intended_pattern} - worth re-solving that way.")
-    echo_also_solvable(e.also_solvable_with)
-    if e.embed_skipped:
-        typer.echo(f"Embedding skipped ({e.embed_skipped})")
-        return
-    if e.neighbors:
-        typer.echo("Similar solved problems:")
-        echo_neighbors(e.neighbors)
-    else:
-        typer.echo(f"No other solved problems tagged as {e.pattern} yet.")
-
-
-def echo_also_solvable(patterns: list[str]) -> None:
-    """The canonical approaches this solve did not use - shown whether or not the
-    off-pattern warning fired, and costing nothing extra to compute."""
-    if patterns:
-        typer.echo(f"This problem can also be solved with: {', '.join(patterns)}")
-
-
-def format_mastery(score: float | None) -> str:
-    return f"mastery {score:.1f}/5" if score is not None else "unscored"
-
-
-def format_attempts(n: int) -> str:
-    return f"{n} attempt" if n == 1 else f"{n} attempts"
-
-
-def format_too_early(score: float | None, attempts: int) -> str:
-    return f"{format_mastery(score)} over only {format_attempts(attempts)}"
-
-
-def echo_standing(standing: service.PatternStanding | None) -> None:
-    """How this pattern is going overall - the weekly analysis, one solve early."""
-    if standing is None:
-        return
-    mastery_note = format_mastery(standing.score)
-    if not standing.enough_data:
-        typer.echo(
-            f"Standing: {standing.pattern} - {format_too_early(standing.score, standing.attempts)},"
-            " too early to call."
-        )
-        return
-    verdict = "WEAK" if standing.weak else "on track"
-    typer.echo(
-        f"Standing: {standing.pattern} is {verdict} - {mastery_note}, "
-        f"{standing.struggle_rate:.0%} struggle rate over {standing.attempts} attempts."
-    )
-
-
 def echo_neighbors(neighbors: list[service.Neighbor]) -> None:
     for i, n in enumerate(neighbors, 1):
         typer.echo(f"  {i}. #{n.number} {n.title} [{n.difficulty}]  {n.score:.2f}")
         if n.pattern:
             typer.echo(f"     {n.pattern}: {n.key_trick}")
-
-
-@app.command()
-def due():
-    """Problems whose review is due today (or overdue)."""
-    conn = db.connect()
-    today = date.today()
-    rows = scheduler.due_reviews(conn, today)
-    if not rows:
-        typer.echo("Nothing due for review today.")
-        return
-    typer.echo(f"{len(rows)} problem(s) due for review:")
-    for r in rows:
-        overdue = (today - date.fromisoformat(r["next_due"])).days
-        suffix = f"  (overdue {overdue}d)" if overdue > 0 else ""
-        typer.echo(f"  #{r['number']} {r['title']} [{r['difficulty']}]{suffix}")
 
 
 @app.command()
@@ -233,56 +108,6 @@ def similar(
         typer.echo("No embedded solutions to compare against yet.")
         return
     echo_neighbors(service.neighbor_details(conn, neighbors))
-
-
-@app.command("review")
-def review_cmd(
-    number: int = typer.Argument(help="LeetCode problem number"),
-    refresh: bool = typer.Option(False, "--refresh", help="Re-run the review instead of showing the stored one"),
-):
-    """Feedback on your latest stored solution: strengths, bugs, better approach.
-
-    Stored after the first run, so looking at it again costs nothing.
-    """
-    conn = db.connect()
-    problem = conn.execute("SELECT * FROM problems WHERE number = ?", (number,)).fetchone()
-    if problem is None:
-        typer.echo(f"Problem {number} not found in the catalog.")
-        raise typer.Exit(1)
-    solution = conn.execute(
-        "SELECT * FROM solutions WHERE problem_number = ? ORDER BY id DESC LIMIT 1", (number,)
-    ).fetchone()
-    if solution is None:
-        typer.echo(f"No stored solution for #{number} - log one with `coach log {number}`.")
-        raise typer.Exit(1)
-
-    typer.echo(f"Reviewing #{number} {problem['title']} ...")
-    result = service.review_solution_now(
-        conn, solution["id"], problem, solution["code"], refresh=refresh
-    )
-    if result.skipped:
-        typer.echo(f"Review unavailable: {result.skipped}")
-        raise typer.Exit(1)
-
-    r = result.review
-    if result.cached:
-        typer.echo("(stored review - use --refresh to re-run it)")
-    typer.echo(f"Verdict: {r.verdict}")
-    typer.echo(f"Complexity: {r.time_complexity} time / {r.space_complexity} space"
-               f" (optimal: {r.optimal_time_complexity})")
-    if r.strengths:
-        typer.echo("What went well:")
-        for strength in r.strengths:
-            typer.echo(f"  + {strength}")
-    if r.issues:
-        typer.echo("Issues:")
-        for issue in r.issues:
-            typer.echo(f"  [{issue.category}] {issue.description}")
-    else:
-        typer.echo("Issues: none found")
-    if r.better_approach:
-        typer.echo(f"Better approach: {r.better_approach}")
-    echo_also_solvable(service.also_solvable_with(conn, solution["id"], problem))
 
 
 @app.command("enrich")
@@ -338,121 +163,6 @@ def enrich_cmd(
             embed.store(conn, row["solution_id"], vector)
         conn.commit()
         typer.echo(f"Embedded {len(pending)} solution(s).")
-
-
-@app.command()
-def stats():
-    """Progress overview: solved counts, curriculum coverage, recent activity."""
-    conn = db.connect()
-    s = service.stats_summary(conn, date.today())
-    if s["catalog"] == 0:
-        typer.echo("No problems in the database yet - run `coach init` first.")
-        raise typer.Exit(1)
-
-    typer.echo(f"Catalog: {s['catalog']} problems")
-    typer.echo(
-        f"Solved: {s['solved']} distinct problems"
-        f" ({s['attempts']} attempts, {s['last_7_days']} in the last 7 days)"
-    )
-    typer.echo(f"Due for review: {s['due_today']}")
-
-    if s["outcomes"]:
-        typer.echo("Outcomes: " + ", ".join(f"{r['outcome']} {r['count']}" for r in s["outcomes"]))
-
-    if s["patterns"]:
-        typer.echo("Patterns practiced (by your solutions):")
-        for r in s["patterns"]:
-            score = format_mastery(r["score"])
-            typer.echo(
-                f"  {r['pattern']}: {score}, {r['attempts']} attempt(s), {r['rough']} not clean"
-            )
-
-    if s["off_pattern"]:
-        typer.echo("Solved off-pattern (canonical approach never used):")
-        for r in s["off_pattern"]:
-            typer.echo(f"  #{r['number']} {r['title']} -> {r['intended_pattern']}")
-
-    for name, progress in s["curriculum"].items():
-        typer.echo(f"{name}: {progress['done']}/{progress['total']}")
-
-
-def require_catalog(conn: sqlite3.Connection) -> None:
-    if conn.execute("SELECT COUNT(*) FROM problems").fetchone()[0] == 0:
-        typer.echo("No problem catalog in the database - run `coach init` first.")
-        raise typer.Exit(1)
-
-
-def echo_trend(p: service.WeekPattern) -> str:
-    """How much this week moved a pattern's mastery, as one trailing clause."""
-    if p.delta is None:
-        return " (first week of this pattern)"
-    if round(p.delta, 1) == 0:
-        return " (unchanged since last week)"
-    return f" ({p.delta:+.1f} since last week)"
-
-
-def echo_week_pattern(p: service.WeekPattern) -> None:
-    if p.standing == "too-early":
-        typer.echo(f"  {p.pattern}: too early to call - {format_too_early(p.score, p.attempts_total)}.")
-        return
-    score = format_mastery(p.score)
-    verdict = "WEAK" if p.standing == "weak" else "on track"
-    typer.echo(
-        f"  {p.pattern}: {verdict} - {score}{echo_trend(p)},"
-        f" {p.attempts_week} this week, {p.attempts_total} all-time."
-    )
-
-
-@app.command()
-def today(
-    target: int = typer.Option(config.DAILY_TARGET, "--target", help="Problems to plan for today"),
-):
-    """Today's problems, in priority order.
-
-    Free and stateless - pure SQL, recomputed every run, so solved problems drop
-    off and the next one takes the slot.
-    """
-    conn = db.connect()
-    require_catalog(conn)
-
-    items = service.daily_plan(conn, date.today(), target).items
-    if items:
-        typer.echo(f"{len(items)} problem(s) for today:")
-        for item in items:
-            typer.echo(f"  #{item.number} {item.title} [{item.difficulty}]  {item.reason}")
-    else:
-        typer.echo("Nothing to do today - no reviews due and the curriculum is finished.")
-
-
-@app.command()
-def weekly():
-    """The last seven days: what you solved, and how each pattern you used is going.
-
-    The same live view the web UI's Weekly Review page shows. Costs nothing and
-    stores nothing, so it is current every time you run it.
-    """
-    conn = db.connect()
-    require_catalog(conn)
-    review = service.weekly_review(conn, date.today())
-
-    typer.echo(
-        f"This week ({review.start.isoformat()} to {review.end.isoformat()}):"
-        f" {len(review.attempts)} attempt(s) on {review.distinct_problems} problem(s)"
-    )
-    for r in review.attempts:
-        minutes = f" {r['minutes']}m" if r["minutes"] else ""
-        typer.echo(
-            f"  {r['date']} #{r['problem_number']} {r['title']} [{r['difficulty']}]"
-            f" {r['outcome']}{minutes} {r['pattern'] or 'untagged'}"
-        )
-
-    if not review.patterns:
-        typer.echo("No tagged patterns this week yet.")
-        return
-
-    typer.echo("Patterns you used this week:")
-    for p in review.patterns:
-        echo_week_pattern(p)
 
 
 if __name__ == "__main__":

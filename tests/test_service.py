@@ -321,8 +321,6 @@ def test_stats_summary_counts_distinct_problems_and_curriculum(tmp_path, monkeyp
         "last_7_days": 3,
         "due_today": 0,
         "outcomes": [{"outcome": "clean", "count": 2}, {"outcome": "struggled", "count": 1}],
-        "patterns": [],
-        "off_pattern": [],
         "curriculum": {"blind75": {"done": 2, "total": 2}, "neetcode150": {"done": 0, "total": 0}},
     }
 
@@ -377,14 +375,6 @@ def test_solution_history_notes_the_canonical_approaches_not_used(tmp_path, monk
     history = service.solution_history(conn, 1)
     assert history["solves"][0]["also_solvable_with"] == ["two-pointers", "binary-search"]
     assert history["intended_secondary_patterns"] == ["two-pointers", "binary-search"]
-
-
-def test_also_solvable_with_is_empty_for_an_unenriched_solve(tmp_path, monkeypatch):
-    conn = seed_db(tmp_path, monkeypatch)
-    result = service.log_solve(conn, 1, "failed", CODE)
-
-    problem = service.get_problem(conn, 1)
-    assert service.also_solvable_with(conn, result.solution_id, problem) == []
 
 
 def test_solution_history_rejects_an_unknown_problem(tmp_path, monkeypatch):

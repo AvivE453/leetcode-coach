@@ -9,16 +9,16 @@ dependencies = [
     "anthropic>=1.0",
     "pydantic>=2.0",
     "numpy>=1.26",
+    # The web UI is the daily interface, so it is not optional: as an extra, a plain
+    # `uv sync` would uninstall it.
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
 ]
 
 [project.optional-dependencies]
 embed = [
     "sentence-transformers>=3.0",
     "torch>=2.2",
-]
-web = [
-    "fastapi>=0.115",
-    "uvicorn>=0.30",
 ]
 
 [project.scripts]

@@ -9,9 +9,9 @@ For installing and running it, see the [README](../README.md).
 
 ```mermaid
 flowchart TB
-    subgraph daily ["Daily loop — coach log"]
+    subgraph daily ["Daily loop — I solved a question (Home)"]
         direction LR
-        paste["paste solution<br/>(Ctrl+D)"] --> sm2["scheduler.py<br/>SM-2 spaced repetition"]
+        paste["paste solution<br/>(log form)"] --> sm2["scheduler.py<br/>SM-2 spaced repetition"]
         paste --> enr["enrich.py<br/>pattern tagging"]
         enr --> emb["embed.py<br/>MiniLM card → float32"]
     end
@@ -21,12 +21,12 @@ flowchart TB
         db[("data/coach.db<br/>SQLite")]
     end
 
-    subgraph todayp ["coach today — free, every day"]
+    subgraph todayp ["Daily Plan — free, every day"]
         direction LR
         ta["analyze<br/>due today only"] --> tp["plan<br/>fill the day's slots"]
     end
 
-    subgraph weeklyp ["coach weekly — free, recomputed on every read"]
+    subgraph weeklyp ["Weekly Review — free, recomputed on every read"]
         direction LR
         c["collect<br/>last 7 days"] --> a["analyze<br/>mastery now vs<br/>a week ago"]
     end
@@ -42,15 +42,16 @@ flowchart TB
     enr -.-> api
 
     db --> sim["coach similar<br/>numpy cosine, top-5"]
-    db --> rev["coach review"]
+    db --> rev["review a solve<br/>(Solutions)"]
     rev -.-> api
 ```
 
 Solid arrows are local; dotted arrows are the only places an LLM is involved. Every one
 of them degrades to a working non-LLM path when the API is unavailable.
 
-The CLI and the web UI share one implementation ([`coach/service.py`](../coach/service.py));
-the web layer only translates it to JSON, so both cannot drift into disagreeing.
+The web UI is the daily interface; the CLI keeps only the jobs with no page (`init`,
+`enrich`, `similar`). Both are thin layers over one implementation
+([`coach/service.py`](../coach/service.py)), so they cannot drift into disagreeing.
 
 ---
 
@@ -108,13 +109,15 @@ project does not have.
 `coach.db` is the only place a solve lives. Two mirrors have been removed for the same
 reason: a per-problem `solutions/NNNN-slug.py` file, and a frozen weekly report. Both were
 written on every update and read by nothing inside the application, and a second copy that
-nobody reads is a second copy that can be wrong.
+nobody reads is a second copy that can be wrong. The same rule retired the daily CLI
+commands: every daily feature existed as a service function, a CLI printer and a web page,
+and once the page could do everything the printer did, nobody read the printer.
 
 **Nothing about the week is written down.**
-`coach weekly` and the Weekly Review page run the same SQL on demand, so the week is
-correct by construction rather than as of whenever it was last generated. The frozen
-snapshot it replaced was stale the moment the next problem was solved, and the LLM
-narrative beside it restated numbers the tables already showed.
+The Weekly Review page runs its SQL on demand, so the week is correct by construction
+rather than as of whenever it was last generated. The frozen snapshot it replaced was
+stale the moment the next problem was solved, and the LLM narrative beside it restated
+numbers the tables already showed.
 
 **Comparison instead of narration.**
 The question that narrative was there to answer — *is this pattern getting better?* — is a
@@ -124,9 +127,9 @@ a week ago, and the difference is the answer. It is exact, it costs nothing, and
 prose it cannot be vague.
 
 **Everything degrades.**
-No API key, rate limit, refusal, or network failure ever loses a logged solve. `coach
-log` stores the solution and queues enrichment, then `coach enrich` backfills the tags
-and embeddings later. Only enrichment and `coach review` ever call the API at all.
+No API key, rate limit, refusal, or network failure ever loses a logged solve. Logging
+stores the solution and queues enrichment, then `coach enrich` backfills the tags and
+embeddings later. Only enrichment and reviews ever call the API at all.
 
 ---
 

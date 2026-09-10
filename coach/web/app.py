@@ -1,7 +1,8 @@
-"""FastAPI wrapper around coach/service.py — the browser UI's backend.
+"""FastAPI wrapper around coach/service.py — the backend of the daily interface.
 
-Every endpoint is a thin JSON translation of a service function; the CLI and the
-web UI run the same code paths. The only write endpoint is POST /api/log.
+Every endpoint is a thin JSON translation of a service function. The CLI keeps only
+the jobs with no page (init, enrich, similar), over the same service functions. The
+two write endpoints are POST /api/log and POST /api/solutions/{number}/review.
 """
 
 from contextlib import contextmanager
@@ -9,6 +10,7 @@ from datetime import date
 from pathlib import Path
 from typing import Literal
 
+import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -321,8 +323,6 @@ app.mount("/static", RevalidatedStaticFiles(directory=STATIC_DIR), name="static"
 
 def main() -> None:
     """`coach-web` entry point."""
-    import uvicorn
-
     print(f"leetcode-coach web UI on http://{config.WEB_HOST}:{config.WEB_PORT}")
     print(f"database: {config.DB_PATH}")
     uvicorn.run(app, host=config.WEB_HOST, port=config.WEB_PORT, log_level="info")

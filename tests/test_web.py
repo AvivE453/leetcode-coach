@@ -266,7 +266,7 @@ def test_plan_endpoint_labels_a_weak_pattern_pick(client, monkeypatch):
 
 def test_plan_endpoint_only_counts_reviews_due_today(client, monkeypatch):
     """The page is /plan's "Today", not the old weekly view: a review owed in
-    three days must not appear, even though `coach weekly` would show it."""
+    three days must not appear, even though the planner's default lookahead would show it."""
     enriched(monkeypatch)
     client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
 

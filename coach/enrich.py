@@ -131,7 +131,7 @@ def save_intended(
     stored. Every re-solve re-enriches and calls this, and the model does not
     always name the same alternates twice - so replacing let a later enrichment
     narrow the canonical set and re-flag a solve that had legitimately used one
-    of the dropped approaches, handing it a forced re-solve slot in `coach today`.
+    of the dropped approaches, handing it a forced re-solve slot in the Daily Plan.
     Accumulating makes the set a record of every approach ever judged canonical,
     which is what off_pattern_problems() reads it as.
 
@@ -173,7 +173,7 @@ def off_pattern(
 ) -> bool:
     """True when a solve used none of the problem's canonical approaches.
 
-    The sharp signal: it drives the `coach log` warning and the weekly plan's forced
+    The sharp signal: it drives the off-pattern warning on a logged solve and the plan's forced
     re-solve slot, so it must not fire for a solve that simply took a different but
     equally canonical route. Unknown canonical set (never enriched) is never off.
     """

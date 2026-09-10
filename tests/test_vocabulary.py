@@ -1,9 +1,9 @@
 """Guards on vocabularies that must agree but cannot import one another.
 
-Typer needs an Enum, pydantic needs a Literal, SQLite needs a CHECK clause, and
-the scheduler needs a dict it can score - so the same four outcome names are
-declared four times, by necessity rather than by neglect. Same story for the
-planner's pattern->tag map against the enrichment vocabulary.
+Pydantic needs a Literal, SQLite needs a CHECK clause, the scheduler needs a dict it
+can score, and the log form needs a radio button per outcome - so the same four
+outcome names are declared four times, by necessity rather than by neglect. Same
+story for the planner's pattern->tag map against the enrichment vocabulary.
 
 These tests are the seam: nothing here shares code, so something has to fail
 loudly when one copy drifts from the others.
@@ -12,16 +12,15 @@ loudly when one copy drifts from the others.
 import re
 from typing import get_args
 
-from coach import cli, db, enrich, scheduler
+from coach import db, enrich, scheduler
 from coach.web.app import STATIC_DIR, LogRequest
 from coach.weekly import plan
 
 OUTCOMES = set(scheduler.QUALITY)
 
 
-def test_cli_and_api_accept_exactly_the_outcomes_the_scheduler_scores():
-    """An outcome either side accepted but QUALITY lacked would KeyError on log."""
-    assert {o.value for o in cli.Outcome} == OUTCOMES
+def test_the_api_accepts_exactly_the_outcomes_the_scheduler_scores():
+    """An outcome the API accepted but QUALITY lacked would KeyError on log."""
     assert set(get_args(LogRequest.model_fields["outcome"].annotation)) == OUTCOMES
 
 

@@ -56,9 +56,9 @@ def due_reviews(
     """Problems whose review is owed by today+lookahead_days, soonest first.
 
     The read half of this module: review() decides when a problem comes back,
-    this reads back which ones have. `coach due` and the weekly analysis asked
-    the same question with two copies of the query, which differed only in the
-    horizon - so the horizon is the parameter and the query is shared.
+    this reads back which ones have. The old `coach due` and the weekly analysis
+    asked the same question with two copies of the query, which differed only in
+    the horizon - so the horizon is the parameter and the query is shared.
 
     lookahead_days=0 means "owed today or overdue"; the weekly analysis passes
     its own default to cover the days ahead. See PLAN_LOOKAHEAD_DAYS for why a

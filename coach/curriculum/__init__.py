@@ -14,8 +14,8 @@ def load(name: str) -> list[str]:
 def progress(conn: sqlite3.Connection) -> dict[str, dict[str, int]]:
     """{"done": n, "total": n} per curriculum list.
 
-    One definition of "how far along am I", shared by `coach stats` and the weekly
-    analysis - they used to compute it with separate copies of this SQL. The named
+    One definition of "how far along am I", shared by the home page's stats and the
+    weekly analysis - they used to compute it with separate copies of this SQL. The named
     keys are the shape both consumers want: /api/stats and /api/plan both read
     .done/.total straight through, without reshaping it on the way out.
     """
