@@ -17,7 +17,8 @@ function renderStats(s) {
 
   const clean = (s.outcomes.find((o) => o.outcome === "clean") || { count: 0 }).count;
   const rate = s.attempts ? Math.round((clean / s.attempts) * 100) : 0;
-  cards.append(statCard("Clean solves", `${rate}%`, `${clean} of ${s.attempts} attempts`));
+  const breakdown = s.outcomes.map((o) => `${o.outcome} ${o.count}`).join(" · ");
+  cards.append(statCard("Clean solves", `${rate}%`, breakdown || "no attempts yet"));
 
   for (const [name, p] of Object.entries(s.curriculum)) {
     const card = statCard(name, String(p.done), `of ${p.total}`);
@@ -39,6 +40,20 @@ function statCard(label, value, note) {
 
 /* ---------- pattern table ---------- */
 
+/* Practice columns are null for a pattern only ever credited as a secondary
+   approach - no solve led with it, so there is nothing to measure. */
+function orDash(value, format = String) {
+  return value === null ? "—" : format(value);
+}
+
+const PATTERN_COLUMNS = [
+  ["Pattern", (p) => p.pattern],
+  ["Problems solved", (p) => String(p.solved)],
+  ["Mastery (1–5)", (p) => orDash(p.score, (v) => v.toFixed(1))],
+  ["Attempts", (p) => orDash(p.attempts)],
+  ["Not clean", (p) => orDash(p.rough)],
+];
+
 function renderPatternTable(patterns) {
   const host = document.getElementById("pattern-table");
   host.replaceChildren();
@@ -51,13 +66,12 @@ function renderPatternTable(patterns) {
     return;
   }
 
-  const rows = patterns.map((p) =>
-    el("tr", {}, [el("td", { text: p.pattern }), el("td", { text: String(p.solved) })])
-  );
   host.append(
     el("table", {}, [
-      el("thead", {}, [el("tr", {}, [el("th", { text: "Pattern" }), el("th", { text: "Problems solved" })])]),
-      el("tbody", {}, rows),
+      el("thead", {}, [el("tr", {}, PATTERN_COLUMNS.map(([name]) => el("th", { text: name })))]),
+      el("tbody", {}, patterns.map((p) =>
+        el("tr", {}, PATTERN_COLUMNS.map(([, cell]) => el("td", { text: cell(p) })))
+      )),
     ])
   );
 }
@@ -66,6 +80,18 @@ function renderPatternTable(patterns) {
 
 function outcomeValue() {
   return document.querySelector('input[name="outcome"]:checked').value;
+}
+
+/* Minutes and note are optional: blank means "not recorded" and is sent as null.
+   badInput catches text a number field shows but reports as an empty value. */
+function optionalFields() {
+  const minutesInput = document.getElementById("minutes");
+  const raw = minutesInput.value.trim();
+  const minutes = raw === "" ? null : Number(raw);
+  const valid = !minutesInput.validity.badInput &&
+    (minutes === null || (Number.isInteger(minutes) && minutes >= 0));
+  const note = document.getElementById("note").value.trim() || null;
+  return { valid, minutes, note };
 }
 
 function showError(message) {
@@ -161,9 +187,15 @@ async function submitLog(event) {
 
   const number = Number(document.getElementById("number").value);
   const code = document.getElementById("code").value;
+  const { valid, minutes, note } = optionalFields();
   if (!Number.isInteger(number) || number < 1) {
     showError("Enter the LeetCode problem number.");
     document.getElementById("number").focus();
+    return;
+  }
+  if (!valid) {
+    showError("Minutes must be a whole number — or leave it blank.");
+    document.getElementById("minutes").focus();
     return;
   }
   if (!code.trim()) {
@@ -178,7 +210,7 @@ async function submitLog(event) {
     const res = await fetch("/api/log", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ number, outcome: outcomeValue(), code }),
+      body: JSON.stringify({ number, outcome: outcomeValue(), code, minutes, note }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -187,6 +219,8 @@ async function submitLog(event) {
     }
     renderLogResult(data);
     document.getElementById("code").value = "";
+    document.getElementById("minutes").value = "";
+    document.getElementById("note").value = "";
     document.getElementById("log-result").focus();
     await refresh();
   } catch (err) {

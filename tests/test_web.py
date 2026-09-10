@@ -205,8 +205,23 @@ def test_patterns_endpoint_feeds_the_pattern_table(client, monkeypatch):
     client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
     client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
 
-    # two attempts on one problem is still one solved unit
-    assert client.get("/api/patterns").json() == {"patterns": [{"pattern": "hashmap", "solved": 1}]}
+    # two attempts on one problem is still one solved unit - but two attempts of practice
+    assert client.get("/api/patterns").json() == {
+        "patterns": [{"pattern": "hashmap", "solved": 1, "score": 5.0, "attempts": 2, "rough": 0}]
+    }
+
+
+def test_log_endpoint_stores_note_and_minutes(client):
+    """The two optional form fields reach the page that shows each: the note on
+    Solutions, the minutes on Weekly Review."""
+    client.post(
+        "/api/log",
+        json={"number": 1, "outcome": "clean", "code": CODE, "minutes": 12, "note": "forgot the empty case"},
+    )
+
+    solve = client.get("/api/solutions/1").json()["solves"][0]
+    assert (solve["minutes"], solve["note"]) == (12, "forgot the empty case")
+    assert client.get("/api/weekly").json()["attempts"][0]["minutes"] == 12
 
 
 def test_plan_endpoint_ranks_problems_and_stays_read_only(client, monkeypatch, tmp_path):
@@ -354,6 +369,33 @@ def test_review_endpoint_stores_and_then_serves_for_free(client, monkeypatch):
     history = client.get("/api/solutions/1").json()
     assert history["solves"][0]["review"]["verdict"] == "needs-work"
     assert len(calls) == 1
+
+
+def test_review_endpoint_refresh_replaces_the_stored_review(client, monkeypatch):
+    """The Re-run button: a stored review is replaced only when asked, at the cost of a call."""
+    enriched(monkeypatch)
+    client.post("/api/log", json={"number": 1, "outcome": "failed", "code": CODE})
+    solution_id = client.get("/api/solutions/1").json()["solves"][0]["id"]
+
+    answers = [FEEDBACK, FEEDBACK.model_copy(update={"verdict": "optimal", "issues": []})]
+    calls = []
+
+    def counted(prompt, output_format, **kw):
+        calls.append(prompt)
+        return answers[len(calls) - 1]
+
+    monkeypatch.setattr("coach.llm.parse", counted)
+    client.post("/api/solutions/1/review", json={"solution_id": solution_id})
+
+    again = client.post(
+        "/api/solutions/1/review", json={"solution_id": solution_id, "refresh": True}
+    ).json()
+
+    assert len(calls) == 2
+    assert again["cached"] is False
+    assert again["review"]["verdict"] == "optimal"
+    # replaced in the store, not just in this response
+    assert client.get("/api/solutions/1").json()["solves"][0]["review"]["verdict"] == "optimal"
 
 
 def test_review_endpoint_degrades_without_an_api_key(client):

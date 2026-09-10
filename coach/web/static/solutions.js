@@ -47,28 +47,55 @@ function renderReview(host, review) {
   }
 }
 
-async function requestReview(number, solutionId, host, button) {
+/* The one place a review box is drawn, with or without a review in it. A stored
+   review renders for free; asking for one - the first or a replacement - costs
+   an API call, so it is always an explicit click, never something opening the
+   page pays for. */
+function fillReviewBox(box, number, solutionId, review) {
+  box.replaceChildren();
+  if (review) {
+    renderReview(box, review);
+    box.append(
+      el("p", { class: "hint", text: "Re-running asks the model again — one API call, and the new review replaces this one." }),
+      reviewButton(box, number, solutionId, "Re-run review", true)
+    );
+  } else {
+    box.append(
+      el("p", { class: "hint", text: "No review yet — one API call, then it is saved for good." }),
+      reviewButton(box, number, solutionId, "Review this solve", false)
+    );
+  }
+}
+
+function reviewButton(box, number, solutionId, label, refresh) {
+  const button = el("button", { class: "btn ghost", type: "button", text: label });
+  button.addEventListener("click", () => requestReview(box, number, solutionId, button, refresh));
+  return button;
+}
+
+async function requestReview(box, number, solutionId, button, refresh) {
+  const label = button.textContent;
   button.disabled = true;
   button.textContent = "Reviewing…";
   try {
     const res = await fetch(`/api/solutions/${number}/review`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ solution_id: solutionId }),
+      body: JSON.stringify({ solution_id: solutionId, refresh }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : `returned ${res.status}`);
     if (data.status === "skipped") {
-      button.disabled = false;
-      button.textContent = "Review this solve";
-      host.append(el("p", { class: "hint", text: `Review skipped: ${data.reason}` }));
+      box.append(el("p", { class: "hint", text: `Review skipped: ${data.reason}` }));
       return;
     }
-    renderReview(host, data.review);
+    fillReviewBox(box, number, solutionId, data.review);
   } catch (err) {
+    box.append(el("p", { class: "error", text: `Could not review: ${err.message}` }));
+  } finally {
+    // After a success the box was redrawn and this button is already detached.
     button.disabled = false;
-    button.textContent = "Review this solve";
-    host.append(el("p", { class: "error", text: `Could not review: ${err.message}` }));
+    button.textContent = label;
   }
 }
 
@@ -99,19 +126,8 @@ function renderSolve(s, number) {
   // textContent, never innerHTML - the code is whatever was pasted in.
   block.append(el("pre", {}, [el("code", { text: s.code })]));
 
-  /* A stored review renders for free; asking for a new one costs an API call, so
-     it is always an explicit click - never something opening the page pays for. */
   const reviewBox = el("div", { class: "review" });
-  if (s.review) {
-    renderReview(reviewBox, s.review);
-  } else {
-    const button = el("button", { class: "btn ghost", type: "button", text: "Review this solve" });
-    reviewBox.append(
-      el("p", { class: "hint", text: "No review yet — one API call, then it is saved for good." }),
-      button
-    );
-    button.addEventListener("click", () => requestReview(number, s.id, reviewBox, button));
-  }
+  fillReviewBox(reviewBox, number, s.id, s.review);
   block.append(reviewBox);
   return block;
 }

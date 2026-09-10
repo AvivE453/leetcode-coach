@@ -69,7 +69,7 @@ def api_stats() -> dict:
 @app.get("/api/patterns")
 def api_patterns() -> dict:
     with open_db() as conn:
-        return {"patterns": service.pattern_counts(conn)}
+        return {"patterns": service.pattern_table(conn)}
 
 
 @app.post("/api/log")

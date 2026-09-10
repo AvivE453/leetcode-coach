@@ -647,7 +647,7 @@ def weekly_review(conn: sqlite3.Connection, today: date | None = None) -> Weekly
 
 
 def pattern_counts(conn: sqlite3.Connection) -> list[dict]:
-    """Distinct solved problems per pattern — the home page's pattern table.
+    """Distinct solved problems per pattern — the coverage half of `pattern_table`.
 
     A problem counts once under every pattern it was ever practiced with, primary
     or secondary, across all of its solves: solving one problem two ways credits
@@ -671,3 +671,22 @@ def pattern_counts(conn: sqlite3.Connection) -> list[dict]:
         """
     ).fetchall()
     return [{"pattern": r["pattern"], "solved": r["solved"]} for r in rows]
+
+
+def pattern_table(conn: sqlite3.Connection) -> list[dict]:
+    """The home page's pattern table: coverage and practice, one row per pattern.
+
+    Composed from the two definitions that already exist rather than a third query:
+    which patterns each problem credits (`pattern_counts`) and how each pattern is
+    going (`mastery.pattern_stats`). Practice is measured on the pattern a solve led
+    with, so a pattern only ever credited as a secondary has no practice row - its
+    score/attempts/rough are None, not a zero that would read as practiced-and-failed.
+    """
+    practice = {p["pattern"]: p for p in mastery.pattern_stats(conn)}
+    table = []
+    for row in pattern_counts(conn):
+        p = practice.get(row["pattern"], {})
+        table.append(
+            {**row, "score": p.get("score"), "attempts": p.get("attempts"), "rough": p.get("rough")}
+        )
+    return table

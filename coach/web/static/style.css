@@ -194,7 +194,7 @@ th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: u
 .field { margin-bottom: 16px; }
 .field label, .fieldset-label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 6px; }
 
-input[type="number"], input[type="search"], textarea {
+input[type="number"], input[type="search"], input[type="text"], textarea {
   width: 100%;
   font: inherit;
   color: var(--text);

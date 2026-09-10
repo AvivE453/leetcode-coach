@@ -181,6 +181,27 @@ def log_and_enrich(conn, monkeypatch, outcome, pattern="hashmap"):
     return service.enrich_solution_now(conn, r.solution_id, service.get_problem(conn, 1), CODE)
 
 
+def test_pattern_table_joins_mastery_to_every_credited_pattern(tmp_path, monkeypatch):
+    """Practice is measured on the pattern a solve led with. A pattern credited only
+    as a secondary has coverage but no practice - None, not a zero that would read
+    as practiced-and-failed."""
+    conn = seed_db(tmp_path, monkeypatch)
+    e = ENRICHMENT.model_copy(update={"secondary_patterns": ["two-pointers"]})
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: e)
+    monkeypatch.setattr("coach.embed.encode", fake_encode)
+    result = service.log_solve(conn, 1, "struggled", CODE)
+    service.enrich_solution_now(conn, result.solution_id, service.get_problem(conn, 1), CODE)
+
+    table = {row["pattern"]: row for row in service.pattern_table(conn)}
+
+    assert table["hashmap"] == {
+        "pattern": "hashmap", "solved": 1, "score": 3.0, "attempts": 1, "rough": 1,
+    }
+    assert table["two-pointers"] == {
+        "pattern": "two-pointers", "solved": 1, "score": None, "attempts": None, "rough": None,
+    }
+
+
 def test_pattern_standing_is_none_without_a_pattern(tmp_path, monkeypatch):
     """No pattern means enrichment was skipped - there is nothing to stand on."""
     conn = seed_db(tmp_path, monkeypatch)
