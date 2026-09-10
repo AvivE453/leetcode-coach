@@ -73,15 +73,6 @@ CREATE TABLE IF NOT EXISTS review_state (
     reps INTEGER NOT NULL DEFAULT 0,
     lapses INTEGER NOT NULL DEFAULT 0
 );
-
--- Derived cache, not a source of truth: rebuilt from attempts + reviews by
--- mastery.recompute_all(), which `coach init` runs - so dropping it is safe.
-CREATE TABLE IF NOT EXISTS pattern_scores (
-    pattern TEXT PRIMARY KEY,
-    score REAL NOT NULL,
-    attempts INTEGER NOT NULL,
-    updated_at TEXT NOT NULL
-);
 """
 
 
@@ -107,6 +98,9 @@ def init_schema(conn: sqlite3.Connection) -> None:
     # The weekly review is recomputed on every read now, so the rows that froze one
     # week's numbers (and the LLM note beside them) have no reader left.
     conn.execute("DROP TABLE IF EXISTS weekly_runs")
+    # Mastery is computed from the saved history on every read, so the table that
+    # cached it has no reader left.
+    conn.execute("DROP TABLE IF EXISTS pattern_scores")
     conn.commit()
 
 

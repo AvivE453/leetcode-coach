@@ -1,4 +1,6 @@
-from coach import db, review
+import pytest
+
+from coach import db, mastery, review
 
 
 def make_problem(**overrides) -> dict:
@@ -119,6 +121,70 @@ def test_init_schema_drops_the_stored_weekly_runs_table(tmp_path):
     assert "weekly_runs" not in tables
     # The solve history itself is untouched by the migration.
     assert "attempts" in tables and "solutions" in tables
+
+
+def test_init_schema_drops_pattern_scores_and_keeps_the_history_it_came_from(tmp_path):
+    """Mastery is computed from the saved history on every read now, so the table that
+    cached it has no reader left - and dropping it must not touch anything else."""
+    conn = db.connect(tmp_path / "test.db")
+    db.init_schema(conn)
+    conn.execute(
+        """
+        CREATE TABLE pattern_scores (
+            pattern TEXT PRIMARY KEY,
+            score REAL NOT NULL,
+            attempts INTEGER NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("INSERT INTO pattern_scores VALUES ('hashmap', 3.8, 1, '2026-09-01')")
+    db.upsert_problems(conn, [make_problem()])
+    conn.execute(
+        "INSERT INTO attempts (id, problem_number, date, outcome) VALUES (1, 1, '2026-09-01', 'clean')"
+    )
+    conn.execute(
+        """
+        INSERT INTO solutions (id, problem_number, attempt_id, code, created_at)
+        VALUES (1, 1, 1, 'code', '2026-09-01')
+        """
+    )
+    conn.execute("INSERT INTO enrichments (solution_id, pattern) VALUES (1, 'hashmap')")
+    review.save(
+        conn,
+        1,
+        review.Review(
+            strengths=[],
+            issues=[review.Issue(category="bug", description="Off by one.")],
+            time_complexity="O(n)",
+            space_complexity="O(1)",
+            optimal_time_complexity="O(n)",
+            better_approach=None,
+            verdict="needs-work",
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO review_state (problem_number, ease, interval_days, next_due)
+        VALUES (1, 2.5, 7.0, '2026-09-08')
+        """
+    )
+    conn.commit()
+    history = ("problems", "attempts", "solutions", "enrichments", "reviews", "review_state")
+
+    def snapshot():
+        return {t: [tuple(r) for r in conn.execute(f"SELECT * FROM {t}")] for t in history}
+
+    before = snapshot()
+
+    db.init_schema(conn)
+    db.init_schema(conn)  # and again, on a database that no longer has the table
+
+    tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "pattern_scores" not in tables
+    assert snapshot() == before
+    # the score the cache held is still what the history says: 0.7*5 + 0.3*1
+    assert mastery.pattern_stats(mastery.load_history(conn))[0]["score"] == pytest.approx(3.8)
 
 
 def test_reviews_round_trip_through_the_store(tmp_path):
