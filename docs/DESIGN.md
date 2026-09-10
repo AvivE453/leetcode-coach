@@ -92,9 +92,12 @@ same 1–5 scale SM-2 already uses for scheduling: the outcome is self-report (h
 the review is the external judgement on the code (a bug scores 1, a missed boundary 2, and
 extra findings can only pull it down). They disagree often enough to be worth both — a solve
 can feel clean and still carry a bug. Scores fold through an exponential moving average
-(α = 0.2), so recent solves move the number without erasing history, and the table is
-rebuilt by replaying attempts rather than updated in place — a review usually arrives days
-after the solve it judges, and replay is what lets it count.
+(α = 0.2), so recent solves move the number without erasing history. Nothing about the
+score is stored: every read replays the saved attempts and reviews, so a review — which
+usually arrives days after the solve it judges — counts the moment it is saved, and no
+writer has to remember to refresh a cache. That costs something, measured on synthetic
+histories: the Weekly Review's read takes 0.2 ms at today's size, 7 ms at a year of 25
+solves a week, and 83 ms at ten years, against 0.2, 6 and 60 ms for the cache it replaced.
 
 **A controlled vocabulary of 26 patterns, enforced as a type.**
 The model picks from an enum, so tags can never fragment into `dp`/`DP`/`dynamic
@@ -129,7 +132,7 @@ numbers the tables already showed.
 **Comparison instead of narration.**
 The question that narrative was there to answer — *is this pattern getting better?* — is a
 subtraction, not a paragraph. Mastery is already a replay of every scored attempt, so
-replaying it a second time up to the start of the window gives what the pattern scored
+the same replay over only the attempts before the window gives what the pattern scored
 a week ago, and the difference is the answer. It is exact, it costs nothing, and unlike
 prose it cannot be vague.
 
