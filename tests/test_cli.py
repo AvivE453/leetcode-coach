@@ -143,8 +143,8 @@ def test_enrich_resumes_a_backfill_that_stopped_partway(tmp_path, monkeypatch):
     first = runner.invoke(app, ["enrich"])
     assert "Stopped at #1: rate limited" in first.output
     assert "Enriched 1/2" in first.output
-    # what the stopped run did tag is stored, scored and embedded
-    assert (count("enrichments"), count("pattern_scores"), count("embeddings")) == (1, 1, 1)
+    # what the stopped run did tag is stored and embedded
+    assert (count("enrichments"), count("embeddings")) == (1, 1)
 
     answer(monkeypatch)
     second = runner.invoke(app, ["enrich"])

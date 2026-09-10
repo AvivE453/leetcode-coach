@@ -345,6 +345,45 @@ def test_a_stored_review_pulls_the_pattern_score_down(tmp_path, monkeypatch):
     assert service.pattern_standing(conn, "hashmap").score == pytest.approx(4.76)
 
 
+def test_saved_evidence_is_read_without_any_rebuild(tmp_path, monkeypatch):
+    """Mastery follows what is saved, whoever saved it. Tagged and reviewed through the
+    persistence functions alone - no service orchestration after the commit - every
+    reader still sees the review, so no writer has to remember a refresh."""
+    conn = seed_db(tmp_path, monkeypatch)
+    today = date.today()
+    for _ in range(5):
+        result = service.log_solve(conn, 1, "clean", CODE, today=today)
+        enrich.save(conn, result.solution_id, ENRICHMENT)
+    review.save(conn, result.solution_id, FEEDBACK)
+    conn.commit()
+
+    reviewed = pytest.approx(4.76)  # four clean solves, then 0.7*5 + 0.3*1 folded in
+    assert service.pattern_table(conn)[0]["score"] == reviewed
+    assert service.pattern_standing(conn, "hashmap", today).score == reviewed
+    plan = service.daily_plan(conn, today, config.DAILY_TARGET)
+    assert plan.analysis["patterns"][0]["score"] == reviewed
+    assert service.weekly_review(conn, today).patterns[0].score == reviewed
+
+
+def test_mastery_readers_write_nothing_and_call_no_model(tmp_path, monkeypatch):
+    """Every page load reads mastery, so reading it must stay free."""
+    conn = seed_db(tmp_path, monkeypatch)
+    for _ in range(5):
+        log_and_enrich(conn, monkeypatch, "failed")
+    monkeypatch.setattr(
+        "coach.llm.parse", lambda *args, **kw: pytest.fail("a mastery reader called the model")
+    )
+    today = date.today()
+    before = conn.total_changes
+
+    service.pattern_table(conn)
+    service.pattern_standing(conn, "hashmap", today)
+    service.daily_plan(conn, today, config.DAILY_TARGET)
+    service.weekly_review(conn, today)
+
+    assert conn.total_changes == before
+
+
 def test_stats_summary_counts_distinct_problems_and_curriculum(tmp_path, monkeypatch):
     conn = seed_db(
         tmp_path,
@@ -541,7 +580,6 @@ def scored_attempt(conn, day, outcome, pattern="hashmap", number=1):
             (solution_id, pattern),
         )
     conn.commit()
-    mastery.recompute_all(conn)
     return solution_id
 
 
@@ -583,30 +621,6 @@ def test_weekly_review_says_too_early_below_the_attempt_floor(tmp_path, monkeypa
     assert p.standing == "too-early"
 
 
-def test_weekly_review_claims_nothing_for_a_pattern_with_no_score(tmp_path, monkeypatch):
-    """pattern_scores is a derived cache, so it can be empty (dropped, or not yet
-    rebuilt). A missing score makes is_weak false, exactly like a good score does,
-    so without a guard five failed solves would report as on-track - a verdict
-    nothing measured. Unknown reads as too-early until a recompute says otherwise.
-    """
-    conn = seed_db(tmp_path, monkeypatch)
-    for day in range(5):
-        scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "failed")
-    conn.execute("DELETE FROM pattern_scores")
-    conn.commit()
-
-    p = service.weekly_review(conn, WEEK_TODAY).patterns[0]
-
-    assert p.attempts_total == 5 >= mastery.WEAK_MIN_ATTEMPTS
-    assert p.score is None
-    assert p.standing == "too-early"
-
-    mastery.recompute_all(conn)
-    after = service.weekly_review(conn, WEEK_TODAY).patterns[0]
-    assert after.score == 1.0
-    assert after.standing == "weak"
-
-
 def test_weekly_review_standing_tracks_the_analysis_verdict(tmp_path, monkeypatch):
     """weak is only ever membership in analysis["weak_patterns"] - never a
     threshold re-derived here, which is how the two definitions drift apart."""
@@ -622,7 +636,6 @@ def test_weekly_review_standing_tracks_the_analysis_verdict(tmp_path, monkeypatc
 
     # Five struggled-but-solved attempts are the same struggle rate and not weak.
     conn.execute("UPDATE attempts SET outcome = 'struggled'")
-    mastery.recompute_all(conn)
     assert service.weekly_review(conn, WEEK_TODAY).patterns[0].standing == "on-track"
 
 
@@ -667,16 +680,19 @@ def test_weekly_review_orders_the_worst_patterns_first(tmp_path, monkeypatch):
     ]
 
 
-def test_weekly_review_writes_nothing(tmp_path, monkeypatch):
-    """Opening this view must stay free, so it can be recomputed on every page load."""
+def test_weekly_review_loads_history_once(tmp_path, monkeypatch):
+    """Current mastery and the week's baseline come from one read, not two replays."""
     conn = seed_db(tmp_path, monkeypatch)
+    scored_attempt(conn, WEEK_TODAY - timedelta(days=10), "failed")
     scored_attempt(conn, WEEK_TODAY, "clean")
-    before = conn.total_changes
+    loads = []
+    real = mastery.load_history
+    monkeypatch.setattr(mastery, "load_history", lambda conn: loads.append(conn) or real(conn))
 
-    service.weekly_review(conn, WEEK_TODAY)
+    p = service.weekly_review(conn, WEEK_TODAY).patterns[0]
 
-    assert conn.total_changes == before
-    assert not (tmp_path / "reports").exists()
+    assert len(loads) == 1
+    assert (p.score_before, p.score) == (pytest.approx(1.0), pytest.approx(1.8))
 
 
 def test_daily_plan_only_counts_reviews_due_today(tmp_path, monkeypatch):

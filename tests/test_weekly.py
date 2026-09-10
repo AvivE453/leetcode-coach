@@ -3,7 +3,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from coach import db, mastery
+from coach import db
 from coach.weekly import analyze as weekly_analyze
 from coach.weekly import collect as weekly_collect
 from coach.weekly import plan as weekly_plan
@@ -45,9 +45,6 @@ def add_attempt(conn, number, day, outcome="clean", pattern=None, minutes=None):
             """,
             (solution_id, pattern),
         )
-        # Mirrors production: tagging a solve is what makes it scorable, and the
-        # enrich path recomputes right there.
-        mastery.recompute_all(conn)
     return solution_id
 
 

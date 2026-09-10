@@ -11,15 +11,16 @@ The fold is an exponential moving average, so recent solves move the score and
 old ones fade without being thrown away - the same shape as SM-2's ease, one
 level up: ease tracks one problem, this tracks one pattern.
 
-`pattern_scores` is a derived cache, never a source of truth. It is rebuilt by
-replaying history (`recompute_all`), because a review usually arrives *after* the
-solve was logged - sometimes days later from the Solutions page - and an
-incremental update at log time would never see it.
+Nothing here is stored. Every read replays the saved history (`load_history`),
+because a review usually arrives *after* the solve was logged - sometimes days
+later from the Solutions page - and computing on read is what lets it count the
+moment it is saved, without any writer having to remember to refresh a score.
 """
 
 import json
 import sqlite3
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from datetime import date
 
 from coach.scheduler import QUALITY
@@ -33,7 +34,7 @@ WEAK_MIN_ATTEMPTS = 5
 VERDICT_MASTERY = {"optimal": 5, "acceptable": 4}
 
 
-def is_weak(score: float | None, attempts: int) -> bool:
+def is_weak(score: float, attempts: int) -> bool:
     """Whether one pattern's aggregates read as weak.
 
     Both halves of the rule live here because both are about what a mastery score
@@ -45,7 +46,7 @@ def is_weak(score: float | None, attempts: int) -> bool:
     the only thing that produces `weak_patterns`, and callers still read weak as
     `pattern in analysis["weak_patterns"]` rather than calling this themselves.
     """
-    return score is not None and attempts >= WEAK_MIN_ATTEMPTS and score < WEAK_SCORE
+    return attempts >= WEAK_MIN_ATTEMPTS and score < WEAK_SCORE
 
 
 def issue_ceiling(count: int) -> int:
@@ -94,89 +95,77 @@ def fold(scores: Iterable[float]) -> float | None:
     return score
 
 
-def pattern_stats(conn: sqlite3.Connection) -> list[dict]:
-    """Per-pattern practice aggregates, one row per pattern, ordered by name.
+@dataclass(frozen=True)
+class ScoredAttempt:
+    """One tagged solve, as mastery sees it."""
 
-    The single answer to "how is each pattern going": how many attempts, how many
-    were not clean (raw as `rough`, and as `struggle_rate`), the folded mastery
-    score, and when it was last practiced. The home page's pattern table and the
-    weekly analysis both read this - two callers once ran near-identical copies of
-    this SQL that differed only in sort order and in which of rough/struggle_rate
-    they kept, so each caller now takes what it needs from the shared rows.
+    pattern: str  # the pattern the solve led with - never one of its secondaries
+    day: date
+    outcome: str
+    score: float  # attempt_score(), with the review blended in when there is one
+
+
+def load_history(conn: sqlite3.Connection) -> list[ScoredAttempt]:
+    """Every tagged solve, scored, oldest first - the one read mastery is computed from.
+
+    Ordered by date and then id, so two solves from the same day fold in logging
+    order. Each review is joined onto the attempt it judges, so a review saved days
+    later re-scores that attempt wherever it sits. Untagged solves are left out:
+    with no pattern there is nothing to attribute them to.
     """
     rows = conn.execute(
         """
-        SELECT en.pattern,
-               COUNT(*) AS attempts,
-               SUM(a.outcome != 'clean') AS rough,
-               MAX(a.date) AS last_date,
-               ps.score
-        FROM attempts a
-        JOIN solutions s ON s.attempt_id = a.id
-        JOIN enrichments en ON en.solution_id = s.id
-        LEFT JOIN pattern_scores ps ON ps.pattern = en.pattern
-        GROUP BY en.pattern
-        ORDER BY en.pattern
-        """
-    ).fetchall()
-    return [
-        {
-            "pattern": r["pattern"],
-            "attempts": r["attempts"],
-            "rough": r["rough"],
-            "struggle_rate": r["rough"] / r["attempts"],
-            "score": r["score"],
-            "last_date": date.fromisoformat(r["last_date"]),
-        }
-        for r in rows
-    ]
-
-
-def attempt_scores(
-    conn: sqlite3.Connection, before: date | None = None
-) -> dict[str, list[float]]:
-    """Every scored attempt per pattern, oldest first - what `fold` reduces.
-
-    `before` cuts the replay off at a date, which is how the weekly review asks
-    where a pattern stood a week ago: the same history, one week short. A review
-    written this week re-scores the attempt it belongs to on both sides of that
-    cut, because the score is a function of the data, not of when it was read.
-    """
-    where = "WHERE a.date < ?" if before else ""
-    rows = conn.execute(
-        f"""
-        SELECT en.pattern, a.outcome, rv.verdict, rv.issues
+        SELECT en.pattern, a.date, a.outcome, rv.verdict, rv.issues
         FROM attempts a
         JOIN solutions s ON s.attempt_id = a.id
         JOIN enrichments en ON en.solution_id = s.id
         LEFT JOIN reviews rv ON rv.solution_id = s.id
-        {where}
         ORDER BY a.date, a.id
-        """,
-        (before.isoformat(),) if before else (),
+        """
     ).fetchall()
 
-    by_pattern: dict[str, list[float]] = {}
+    history = []
     for r in rows:
         issues = json.loads(r["issues"]) if r["issues"] else []
-        by_pattern.setdefault(r["pattern"], []).append(
-            attempt_score(r["outcome"], r["verdict"], issues)
+        history.append(
+            ScoredAttempt(
+                pattern=r["pattern"],
+                day=date.fromisoformat(r["date"]),
+                outcome=r["outcome"],
+                score=attempt_score(r["outcome"], r["verdict"], issues),
+            )
         )
-    return by_pattern
+    return history
 
 
-def recompute_all(conn: sqlite3.Connection) -> None:
-    """Rebuild every pattern's score by replaying its attempts in order.
+def pattern_stats(history: Sequence[ScoredAttempt]) -> list[dict]:
+    """Per-pattern practice aggregates, one row per pattern, ordered by name.
 
-    Cheap enough to be the only recompute there is (hundreds of rows), which
-    keeps the score a pure function of the data - no incremental bookkeeping to
-    drift, and a late review re-scores the attempt it belongs to.
+    The single answer to "how is each pattern going": how many attempts, how many
+    were not clean (raw as `rough`, and as `struggle_rate`), the folded mastery
+    score, and when it was last practiced - all taken from the same attempts, so
+    the count and the score can never describe different data. The home page's
+    pattern table and the weekly analysis both read this.
+
+    Pure over a loaded history, so where the patterns stood at an earlier date is
+    this same function over the attempts before it, not a second query to drift.
     """
-    by_pattern = attempt_scores(conn)
-    today = date.today().isoformat()
-    conn.execute("DELETE FROM pattern_scores")
-    conn.executemany(
-        "INSERT INTO pattern_scores (pattern, score, attempts, updated_at) VALUES (?, ?, ?, ?)",
-        [(p, fold(scores), len(scores), today) for p, scores in by_pattern.items()],
-    )
-    conn.commit()
+    by_pattern: dict[str, list[ScoredAttempt]] = {}
+    for attempt in history:
+        by_pattern.setdefault(attempt.pattern, []).append(attempt)
+
+    stats = []
+    for pattern in sorted(by_pattern):
+        attempts = by_pattern[pattern]
+        rough = sum(a.outcome != "clean" for a in attempts)
+        stats.append(
+            {
+                "pattern": pattern,
+                "attempts": len(attempts),
+                "rough": rough,
+                "struggle_rate": rough / len(attempts),
+                "score": fold(a.score for a in attempts),
+                "last_date": max(a.day for a in attempts),
+            }
+        )
+    return stats

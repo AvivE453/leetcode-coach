@@ -11,7 +11,7 @@ import sys
 import numpy as np
 import typer
 
-from coach import catalog, config, curriculum, db, embed, enrich, llm, mastery, service
+from coach import catalog, config, curriculum, db, embed, enrich, llm, service
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -45,9 +45,6 @@ def init(
         ],
     )
     flagged = curriculum.apply_flags(conn)
-    # Rebuilds pattern_scores from whatever history the database already holds,
-    # so this is also the repair path if that cache is ever wrong.
-    mastery.recompute_all(conn)
 
     typer.echo(f"Database ready: {len(problems)} problems")
     for name, count in flagged.items():

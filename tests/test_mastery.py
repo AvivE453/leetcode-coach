@@ -11,14 +11,6 @@ def issues(*categories):
     return [{"category": c, "description": "..."} for c in categories]
 
 
-def stored_scores(conn) -> dict[str, float]:
-    """What recompute_all() wrote to pattern_scores, keyed by pattern."""
-    return {
-        r["pattern"]: r["score"]
-        for r in conn.execute("SELECT pattern, score FROM pattern_scores")
-    }
-
-
 @pytest.mark.parametrize(
     "verdict,found,expected",
     [
@@ -109,10 +101,6 @@ def add_review(conn, solution_id, verdict, found=(), day="2026-08-01"):
     )
 
 
-def rebuild_scores(conn):
-    mastery.recompute_all(conn)
-
-
 PIN_TODAY = date(2026, 9, 7)  # so the weekly window is 2026-09-01 .. 2026-09-07
 
 
@@ -155,7 +143,6 @@ def test_scoring_behavior_is_pinned(tmp_path):
     """
     conn = make_db(tmp_path)
     add_pinned_history(conn)
-    rebuild_scores(conn)
 
     analysis = weekly_analyze.analyze(conn, PIN_TODAY)
     assert analysis["patterns"] == [
@@ -195,77 +182,53 @@ def test_is_weak_needs_both_a_low_score_and_enough_attempts():
     assert mastery.is_weak(1.0, mastery.WEAK_MIN_ATTEMPTS - 1) is False
 
 
-def test_recompute_scores_each_pattern_in_date_order(tmp_path):
+def test_load_history_scores_each_solve_oldest_first(tmp_path):
+    """Date first, then logging order - so a same-day pair folds as it was logged."""
+    conn = make_db(tmp_path)
+    add_solve(conn, "2026-08-02", "failed", "hashmap")
+    add_solve(
+        conn, "2026-08-01", "clean", "hashmap", review=("acceptable", ("complexity", "edge-case"))
+    )
+    add_solve(conn, "2026-08-01", "struggled", "dp-1d")
+
+    assert [(a.pattern, a.day, a.outcome, a.score) for a in mastery.load_history(conn)] == [
+        ("hashmap", date(2026, 8, 1), "clean", pytest.approx(4.4)),  # 0.7*5 + 0.3*3
+        ("dp-1d", date(2026, 8, 1), "struggled", 3.0),
+        ("hashmap", date(2026, 8, 2), "failed", 1.0),
+    ]
+
+
+def test_load_history_leaves_out_solves_that_were_never_tagged(tmp_path):
+    """No pattern means nothing to attribute the solve to."""
+    conn = make_db(tmp_path)
+    add_solve(conn, "2026-08-01", "failed", None)
+
+    assert mastery.load_history(conn) == []
+
+
+def test_pattern_stats_takes_every_field_from_the_same_attempts(tmp_path):
     conn = make_db(tmp_path)
     add_solve(conn, "2026-08-01", "clean", "hashmap")
     add_solve(conn, "2026-08-02", "failed", "hashmap")
     add_solve(conn, "2026-08-03", "struggled", "dp-1d")
 
-    mastery.recompute_all(conn)
-
-    assert stored_scores(conn) == pytest.approx({"hashmap": 4.2, "dp-1d": 3.0})
-    row = conn.execute("SELECT * FROM pattern_scores WHERE pattern = 'hashmap'").fetchone()
-    assert row["attempts"] == 2
-
-
-def test_recompute_is_a_pure_replay_of_history(tmp_path):
-    """Running it twice changes nothing - the table is a cache, not an accumulator."""
-    conn = make_db(tmp_path)
-    add_solve(conn, "2026-08-01", "clean", "hashmap")
-    add_solve(conn, "2026-08-02", "struggled", "hashmap")
-
-    mastery.recompute_all(conn)
-    once = stored_scores(conn)
-    mastery.recompute_all(conn)
-    mastery.recompute_all(conn)
-
-    assert stored_scores(conn) == once
+    assert mastery.pattern_stats(mastery.load_history(conn)) == [
+        {"pattern": "dp-1d", "attempts": 1, "rough": 1, "struggle_rate": 1.0,
+         "score": 3.0, "last_date": date(2026, 8, 3)},
+        {"pattern": "hashmap", "attempts": 2, "rough": 1, "struggle_rate": 0.5,
+         "score": pytest.approx(4.2), "last_date": date(2026, 8, 2)},
+    ]
+    assert mastery.pattern_stats([]) == []
 
 
-def test_a_late_review_rescores_the_solve_it_belongs_to(tmp_path):
-    """The reason scores are replayed: reviews are on-demand and arrive later."""
+def test_a_late_review_counts_the_moment_it_is_saved(tmp_path):
+    """Reviews are on-demand and arrive days later; nothing has to run after saving one."""
     conn = make_db(tmp_path)
     add_solve(conn, "2026-08-01", "clean", "hashmap")
     solution_id = add_solve(conn, "2026-08-02", "clean", "hashmap")
-    mastery.recompute_all(conn)
-    assert stored_scores(conn)["hashmap"] == 5.0
+    assert mastery.pattern_stats(mastery.load_history(conn))[0]["score"] == 5.0
 
-    conn.execute(
-        """
-        INSERT INTO reviews (solution_id, verdict, strengths, issues, time_complexity,
-                             space_complexity, optimal_time_complexity, created_at)
-        VALUES (?, 'needs-work', '[]', ?, 'O(n^2)', 'O(1)', 'O(n)', '2026-08-09')
-        """,
-        (solution_id, json.dumps(issues("bug"))),
-    )
-    mastery.recompute_all(conn)
+    add_review(conn, solution_id, "needs-work", ("bug",), day="2026-08-09")
 
     # the second solve is now 3.8, folded onto the 5.0 seed
-    assert stored_scores(conn)["hashmap"] == pytest.approx(4.76)
-
-
-def test_recompute_ignores_solves_that_were_never_tagged(tmp_path):
-    """No pattern means nothing to attribute the solve to."""
-    conn = make_db(tmp_path)
-    attempt_id = conn.execute(
-        "INSERT INTO attempts (problem_number, date, outcome) VALUES (1, '2026-08-01', 'failed')"
-    ).lastrowid
-    conn.execute(
-        "INSERT INTO solutions (problem_number, attempt_id, code, created_at) VALUES (1, ?, 'c', '2026-08-01')",
-        (attempt_id,),
-    )
-
-    mastery.recompute_all(conn)
-
-    assert stored_scores(conn) == {}
-
-
-def test_recompute_drops_scores_for_patterns_that_are_gone(tmp_path):
-    conn = make_db(tmp_path)
-    add_solve(conn, "2026-08-01", "clean", "hashmap")
-    mastery.recompute_all(conn)
-
-    conn.execute("DELETE FROM enrichments")
-    mastery.recompute_all(conn)
-
-    assert stored_scores(conn) == {}
+    assert mastery.pattern_stats(mastery.load_history(conn))[0]["score"] == pytest.approx(4.76)

@@ -104,7 +104,7 @@ function renderStanding(box, standing) {
   /* The weekly analysis for this one pattern, shown a week early. Chip classes
      are the Plan page's, so a weak pattern reads the same red in both places. */
   if (!standing) return;
-  const mastery = standing.score === null ? "unscored" : `mastery ${standing.score.toFixed(1)}/5`;
+  const mastery = `mastery ${standing.score.toFixed(1)}/5`;
   if (!standing.enough_data) {
     const plural = standing.attempts === 1 ? "" : "s";
     box.append(el("p", { class: "hint", text:

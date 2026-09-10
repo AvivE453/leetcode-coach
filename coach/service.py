@@ -90,14 +90,14 @@ class WeekPattern:
     pattern: str
     attempts_week: int
     attempts_total: int
-    score: float | None
+    score: float
     score_before: float | None
     standing: str
 
     @property
     def delta(self) -> float | None:
-        """How much mastery moved this week. None when there is nothing to compare."""
-        if self.score is None or self.score_before is None:
+        """How much mastery moved this week. None for a pattern first practiced in it."""
+        if self.score_before is None:
             return None
         return self.score - self.score_before
 
@@ -138,7 +138,7 @@ class PatternStanding:
     pattern: str
     attempts: int
     struggle_rate: float
-    score: float | None
+    score: float
     weak: bool
     enough_data: bool
 
@@ -285,9 +285,6 @@ def tag_solution_now(
         conn, problem["number"], e.intended_pattern, list(e.intended_secondary_patterns)
     )
     conn.commit()
-    # The pattern only exists now, so this is the first moment the solve can be
-    # scored - and pattern_standing() reads what this writes.
-    mastery.recompute_all(conn)
 
     # Two signals off one free set comparison: off_pattern is the sharp one (no
     # canonical approach used at all), also_solvable_with is informational.
@@ -352,27 +349,20 @@ def review_solution_now(
 
     review_llm.save(conn, solution_id, r)
     conn.commit()
-    # A review usually lands well after the solve, so this re-scores the attempt
-    # it belongs to - the whole reason scores are replayed rather than updated.
-    mastery.recompute_all(conn)
     return ReviewResult(review=r)
 
 
-def standing_of(analysis: dict, pattern: str, attempts: int, score: float | None) -> str:
+def standing_of(analysis: dict, pattern: str, attempts: int) -> str:
     """One pattern's verdict as a word: too-early, weak, or on-track.
 
     The single owner of that reading, shared by the standing note shown after logging
     a solve and by the weekly review. `weak` is only ever membership in analysis["weak_patterns"] -
     the threshold itself lives in mastery.is_weak() and is applied once, by analyze().
 
-    Both ways of having nothing to say collapse into "too-early", because the only
-    honest alternative would be to guess. Too small a sample to call weak is also
-    too small to call solid; and a missing score means `pattern_scores` has not been
-    rebuilt yet, not that the pattern is fine - `weak` is false either way, so
-    without this the two are indistinguishable and five failed solves report as
-    on-track.
+    Too small a sample to call weak is also too small to call solid, so below
+    WEAK_MIN_ATTEMPTS the honest answer is "too-early" rather than a guess.
     """
-    if score is None or attempts < mastery.WEAK_MIN_ATTEMPTS:
+    if attempts < mastery.WEAK_MIN_ATTEMPTS:
         return "too-early"
     return "weak" if pattern in analysis["weak_patterns"] else "on-track"
 
@@ -392,7 +382,7 @@ def pattern_standing(
     row = next((p for p in analysis["patterns"] if p["pattern"] == pattern), None)
     if row is None:
         return None
-    standing = standing_of(analysis, pattern, row["attempts"], row["score"])
+    standing = standing_of(analysis, pattern, row["attempts"])
     return PatternStanding(
         pattern=pattern,
         attempts=row["attempts"],
@@ -587,10 +577,12 @@ def weekly_review(conn: sqlite3.Connection, today: date | None = None) -> Weekly
     """
     today = today or date.today()
     week = weekly_collect.collect(conn, today)
-    analysis = weekly_analyze.analyze(conn, today)
-    # The same replay that produced today's scores, stopped at the start of the
+    history = mastery.load_history(conn)
+    analysis = weekly_analyze.analyze(conn, today, history=history)
+    # The same statistics over the same loaded history, cut at the start of the
     # window - so `delta` compares two numbers computed the one way.
-    before = mastery.attempt_scores(conn, before=week["start"])
+    earlier = [a for a in history if a.day < week["start"]]
+    score_before = {p["pattern"]: p["score"] for p in mastery.pattern_stats(earlier)}
 
     all_time = {p["pattern"]: p for p in analysis["patterns"]}
     # Untagged solves (enrichment was skipped) still count as attempts and still
@@ -603,10 +595,8 @@ def weekly_review(conn: sqlite3.Connection, today: date | None = None) -> Weekly
             attempts_week=count,
             attempts_total=all_time[name]["attempts"],
             score=all_time[name]["score"],
-            score_before=mastery.fold(before.get(name, [])),
-            standing=standing_of(
-                analysis, name, all_time[name]["attempts"], all_time[name]["score"]
-            ),
+            score_before=score_before.get(name),
+            standing=standing_of(analysis, name, all_time[name]["attempts"]),
         )
         for name, count in used.items()
     ]
@@ -657,7 +647,7 @@ def pattern_table(conn: sqlite3.Connection) -> list[dict]:
     with, so a pattern only ever credited as a secondary has no practice row - its
     score/attempts/rough are None, not a zero that would read as practiced-and-failed.
     """
-    practice = {p["pattern"]: p for p in mastery.pattern_stats(conn)}
+    practice = {p["pattern"]: p for p in mastery.pattern_stats(mastery.load_history(conn))}
     table = []
     for row in pattern_counts(conn):
         p = practice.get(row["pattern"], {})
