@@ -52,6 +52,9 @@ of them degrades to a working non-LLM path when the API is unavailable.
 The web UI is the daily interface; the CLI keeps only the jobs with no page (`init`,
 `enrich`, `similar`). Both are thin layers over one implementation
 ([`coach/service.py`](../coach/service.py)), so they cannot drift into disagreeing.
+Enrichment is the sharpest case: logging a solve and the `coach enrich` backfill both run
+`service.tag_solution_now()`, and differ only in how they embed — one card per solve, or
+one batch at the end.
 
 ---
 
@@ -73,7 +76,11 @@ alongside its central `intended_pattern`, feeding two signals. The sharp one,
 *off-pattern*, fires only when a solve used **none** of the accepted approaches. The soft
 one is a note ("this problem can also be solved with: dp-1d") shown on every solve, which
 lists the canonical approaches you have not practised here. Both are set arithmetic over
-columns the enrichment call already filled in, so they cost nothing. Because the note is
+columns the enrichment call already filled in, so they cost nothing. The accepted set
+accumulates across enrichments, since the model does not name the same alternates every
+time, so a solve is judged against the merged set the write returns, never against the
+answer just received — otherwise one forgetful answer re-flags a solve the planner has
+already cleared. Because the note is
 computed when you look rather than frozen when the solve was stored, widening a problem's
 canonical set later widens the note on old solves too.
 
