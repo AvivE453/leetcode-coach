@@ -475,6 +475,20 @@ def test_weekly_endpoint_recomputes_from_the_logged_solves(client, monkeypatch):
     ]
 
 
+def test_plan_and_weekly_endpoints_never_call_the_llm(client, monkeypatch):
+    """Opening a page must stay free. The daily list once also generated the week's
+    report on its first run of a week - the one read that ever cost money."""
+    client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
+
+    def explode(*args, **kwargs):
+        raise AssertionError("a read endpoint called the API")
+
+    monkeypatch.setattr("coach.llm.parse", explode)
+
+    assert client.get("/api/plan").status_code == 200
+    assert client.get("/api/weekly").status_code == 200
+
+
 def test_weekly_endpoint_serves_the_thresholds_the_page_quotes(client):
     week = client.get("/api/weekly").json()
 

@@ -59,6 +59,19 @@ def test_log_solve_rejects_unknown_problem_and_empty_code(tmp_path, monkeypatch)
     assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 0
 
 
+def test_second_log_advances_the_schedule(tmp_path, monkeypatch):
+    """log_solve reads the stored review state before rescheduling, so a second
+    clean solve steps up to the second interval rather than restarting at the first."""
+    conn = seed_db(tmp_path, monkeypatch)
+    service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+
+    result = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 8))
+
+    state = conn.execute("SELECT reps, interval_days FROM review_state").fetchone()
+    assert (state["reps"], state["interval_days"]) == (2, 14.0)
+    assert result.next_due == date(2026, 9, 22)
+
+
 def test_enrich_solution_now_reports_llm_degradation(tmp_path, monkeypatch):
     conn = seed_db(tmp_path, monkeypatch)
     result = service.log_solve(conn, 1, "clean", CODE)
@@ -101,7 +114,8 @@ def test_enrich_solution_now_flags_off_pattern(tmp_path, monkeypatch):
 
     assert e.off_pattern is True
     assert e.intended_pattern == "dp-1d"
-    assert conn.execute("SELECT intended_pattern FROM problems").fetchone()[0] == "dp-1d"
+    # both halves of the problem's canonical set are stored, not just the central one
+    assert service.problem_canonical(service.get_problem(conn, 1)) == ("dp-1d", ["two-pointers"])
 
 
 def test_enrich_solution_now_accepts_a_canonical_alternate_approach(tmp_path, monkeypatch):

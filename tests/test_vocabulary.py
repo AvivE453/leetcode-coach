@@ -13,7 +13,7 @@ import re
 from typing import get_args
 
 from coach import cli, db, enrich, scheduler
-from coach.web.app import LogRequest
+from coach.web.app import STATIC_DIR, LogRequest
 from coach.weekly import plan
 
 OUTCOMES = set(scheduler.QUALITY)
@@ -23,6 +23,14 @@ def test_cli_and_api_accept_exactly_the_outcomes_the_scheduler_scores():
     """An outcome either side accepted but QUALITY lacked would KeyError on log."""
     assert {o.value for o in cli.Outcome} == OUTCOMES
     assert set(get_args(LogRequest.model_fields["outcome"].annotation)) == OUTCOMES
+
+
+def test_the_log_form_offers_exactly_those_outcomes():
+    """The form's radios are the copy people actually click. A missing one can never
+    be logged; an extra one is a 422 after the solution is already typed in."""
+    offered = re.findall(r'name="outcome" value="([^"]+)"', (STATIC_DIR / "index.html").read_text())
+    assert offered, "no outcome radios found - the pattern no longer matches the form"
+    assert set(offered) == OUTCOMES
 
 
 def test_the_attempts_table_accepts_exactly_those_outcomes():
