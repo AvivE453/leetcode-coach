@@ -67,16 +67,38 @@ class EnrichResult:
 
 
 @dataclass(frozen=True)
+class ReviewEffect:
+    """What saving a review did to its problem's practice schedule.
+
+    The review judges one attempt, but the schedule is a replay of all of them, so
+    `latest_attempt_date` travels along: a finding on an old attempt reschedules
+    through every solve that came after it.
+    """
+
+    finding: assessment.Correctness | None
+    attempt_date: date
+    latest_attempt_date: date
+    next_due_before: date
+    next_due: date
+
+    @property
+    def rescheduled(self) -> bool:
+        return self.next_due != self.next_due_before
+
+
+@dataclass(frozen=True)
 class ReviewResult:
     """A stored or freshly fetched review, plus how far it got.
 
     `skipped` carries the degradation reason, like `EnrichResult`: no API key means
-    no review, never an error. `cached` says whether this cost anything.
+    no review, never an error. `cached` says whether this cost anything. `effect` is
+    set only when a new review was saved - serving a stored one changes nothing.
     """
 
     review: review_llm.Review | None = None
     cached: bool = False
     skipped: str | None = None
+    effect: ReviewEffect | None = None
 
 
 @dataclass(frozen=True)
@@ -360,7 +382,12 @@ def review_solution_now(
     """Feedback on one stored solution, bought once and reused thereafter.
 
     The stored review is checked before any API call, so looking at a solve you have
-    already reviewed is free. `refresh` forces a new call.
+    already reviewed is free and writes nothing. `refresh` forces a new call.
+
+    A new review re-grades the attempt it judges, so the problem is rescheduled in the
+    transaction that saves it: a review whose schedule failed to follow would be a
+    finding mastery counts and the planner ignores. The model call comes first, holding
+    no lock, and the history is replayed after it, so a solve logged meanwhile counts.
     """
     if not refresh:
         stored = review_llm.load(conn, solution_id)
@@ -372,9 +399,42 @@ def review_solution_now(
     except llm.LLMUnavailable as exc:
         return ReviewResult(skipped=str(exc))
 
-    review_llm.save(conn, solution_id, r)
-    conn.commit()
-    return ReviewResult(review=r)
+    number = problem["number"]
+    before = conn.execute(
+        "SELECT next_due FROM review_state WHERE problem_number = ?", (number,)
+    ).fetchone()["next_due"]
+    with conn:
+        review_llm.save(conn, solution_id, r)
+        after = update_review_state(conn, number)
+    return ReviewResult(
+        review=r, effect=review_effect(conn, solution_id, r, date.fromisoformat(before), after.next_due)
+    )
+
+
+def review_effect(
+    conn: sqlite3.Connection,
+    solution_id: int,
+    r: review_llm.Review,
+    next_due_before: date,
+    next_due: date,
+) -> ReviewEffect:
+    """The finding a just-saved review reports, the attempt it judges, and how the date moved."""
+    dates = conn.execute(
+        """
+        SELECT a.date,
+               (SELECT MAX(b.date) FROM attempts b WHERE b.problem_number = a.problem_number) AS latest
+        FROM solutions s JOIN attempts a ON a.id = s.attempt_id
+        WHERE s.id = ?
+        """,
+        (solution_id,),
+    ).fetchone()
+    return ReviewEffect(
+        finding=assessment.correctness_finding(r.verdict, [i.model_dump() for i in r.issues]),
+        attempt_date=date.fromisoformat(dates["date"]),
+        latest_attempt_date=date.fromisoformat(dates["latest"]),
+        next_due_before=next_due_before,
+        next_due=next_due,
+    )
 
 
 def standing_of(analysis: dict, pattern: str, attempts: int) -> str:

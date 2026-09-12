@@ -164,7 +164,7 @@ def api_review(number: int, body: ReviewRequest) -> dict:
     """Review one stored solve. POST because it can spend money and it writes.
 
     A solve that already has a stored review costs nothing - the store is checked
-    before any API call.
+    before any API call. A new review also reschedules its problem; `effect` says how.
     """
     with open_db() as conn:
         problem = service.get_problem(conn, number)
@@ -183,12 +183,23 @@ def api_review(number: int, body: ReviewRequest) -> dict:
             conn, solution["id"], problem, solution["code"], refresh=body.refresh
         )
 
+    effect = result.effect
     return {
         "solution_id": body.solution_id,
         "status": "skipped" if result.skipped else "ok",
         "reason": result.skipped,
         "cached": result.cached,
         "review": service.review_payload(result.review) if result.review else None,
+        "effect": None
+        if effect is None
+        else {
+            "finding": effect.finding,
+            "attempt_date": effect.attempt_date.isoformat(),
+            "latest_attempt_date": effect.latest_attempt_date.isoformat(),
+            "next_due_before": effect.next_due_before.isoformat(),
+            "next_due": effect.next_due.isoformat(),
+            "rescheduled": effect.rescheduled,
+        },
     }
 
 

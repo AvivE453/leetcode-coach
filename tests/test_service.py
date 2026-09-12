@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from conftest import CODE, TWO_SUM, seed_db, tag_solution
 
-from coach import config, embed, enrich, mastery, review, service
+from coach import config, db, embed, enrich, llm, mastery, review, service
 from coach.weekly import analyze as weekly_analyze
 from coach.weekly import collect as weekly_collect
 
@@ -136,6 +136,173 @@ def test_a_clean_retry_the_same_day_does_not_clear_a_reported_bug(tmp_path, monk
     result = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
 
     assert result.next_due == date(2026, 9, 4)
+
+
+OPTIMAL_REVIEW = FEEDBACK.model_copy(update={"verdict": "optimal", "issues": []})
+EDGE_REVIEW = FEEDBACK.model_copy(
+    update={"issues": [review.Issue(category="edge-case", description="Empty input.")]}
+)
+
+
+def review_with(conn, monkeypatch, solution_id, answer, refresh=False):
+    """Review a stored solve of problem 1 through the service, the model answering `answer`."""
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: answer)
+    return service.review_solution_now(
+        conn, solution_id, service.get_problem(conn, 1), CODE, refresh=refresh
+    )
+
+
+def test_a_review_reporting_a_bug_reschedules_its_problem(tmp_path, monkeypatch):
+    """Saved on the real today, days after 09-01, yet the lapse lands three days after the
+    attempt: a late review corrects the history instead of failing the problem today."""
+    conn = seed_db(tmp_path, monkeypatch)
+    logged = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+
+    result = review_with(conn, monkeypatch, logged.solution_id, FEEDBACK)
+
+    assert stored_schedule(conn) == (date(2026, 9, 4), 0, 1)
+    assert result.effect == service.ReviewEffect(
+        finding="bug",
+        attempt_date=date(2026, 9, 1),
+        latest_attempt_date=date(2026, 9, 1),
+        next_due_before=date(2026, 9, 8),
+        next_due=date(2026, 9, 4),
+    )
+    assert result.effect.rescheduled
+
+
+def test_a_bug_in_an_older_attempt_replays_through_the_later_success(tmp_path, monkeypatch):
+    """No failure is appended on the review date: 09-01 becomes a lapse, and the clean
+    09-08 solve is a first interval after it - 09-15, where it was 09-22."""
+    conn = seed_db(tmp_path, monkeypatch)
+    older = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+    service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 8))
+
+    result = review_with(conn, monkeypatch, older.solution_id, FEEDBACK)
+
+    assert stored_schedule(conn) == (date(2026, 9, 15), 1, 1)
+    assert (result.effect.attempt_date, result.effect.latest_attempt_date) == (
+        date(2026, 9, 1),
+        date(2026, 9, 8),
+    )
+    assert (result.effect.next_due_before, result.effect.next_due) == (
+        date(2026, 9, 22),
+        date(2026, 9, 15),
+    )
+
+
+def test_an_optimal_review_does_not_upgrade_a_failed_attempt(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+    logged = service.log_solve(conn, 1, "failed", CODE, today=date(2026, 9, 1))
+
+    result = review_with(conn, monkeypatch, logged.solution_id, OPTIMAL_REVIEW)
+
+    assert stored_schedule(conn) == (date(2026, 9, 4), 0, 1)
+    assert result.effect.finding is None
+    assert not result.effect.rescheduled
+
+
+def test_refreshing_a_review_that_drops_the_bug_restores_the_schedule(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+    logged = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+    review_with(conn, monkeypatch, logged.solution_id, FEEDBACK)
+
+    review_with(conn, monkeypatch, logged.solution_id, OPTIMAL_REVIEW, refresh=True)
+
+    assert stored_schedule(conn) == (date(2026, 9, 8), 1, 0)
+
+
+def test_the_order_reviews_arrive_in_does_not_change_the_schedule(tmp_path, monkeypatch):
+    """The same evidence gives the same schedule, and the one `coach init` would rebuild."""
+    schedules = []
+    for name, order in (("a", (0, 1)), ("b", (1, 0))):
+        conn = seed_db(tmp_path / name, monkeypatch)
+        solves = [
+            service.log_solve(conn, 1, "clean", CODE, today=day).solution_id
+            for day in (date(2026, 9, 1), date(2026, 9, 8))
+        ]
+        answers = (FEEDBACK, EDGE_REVIEW)
+        for i in order:
+            review_with(conn, monkeypatch, solves[i], answers[i])
+        reviewed = conn.execute("SELECT * FROM review_state").fetchall()
+        service.rebuild_review_states(conn)
+        assert conn.execute("SELECT * FROM review_state").fetchall() == reviewed
+        schedules.append([tuple(row) for row in reviewed])
+
+    assert schedules[0] == schedules[1]
+    # two lapses: 09-01 held at 1 by the bug, 09-08 at 2 by the edge case
+    assert schedules[0][0][3:] == ("2026-09-11", 0, 2)
+
+
+def test_asking_again_for_a_stored_review_writes_nothing(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+    logged = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+    review_with(conn, monkeypatch, logged.solution_id, FEEDBACK)
+    monkeypatch.setattr("coach.llm.parse", lambda *a, **kw: pytest.fail("a stored review was re-bought"))
+    changes = conn.total_changes
+
+    result = service.review_solution_now(conn, logged.solution_id, service.get_problem(conn, 1), CODE)
+
+    assert result.cached and result.effect is None
+    assert conn.total_changes == changes
+    assert stored_schedule(conn) == (date(2026, 9, 4), 0, 1)
+
+
+@pytest.mark.parametrize("reviewed_before", [False, True])
+def test_a_reschedule_that_fails_rolls_back_the_review(tmp_path, monkeypatch, reviewed_before):
+    """Saved together or not at all: a review the schedule never saw is the split this
+    change removes. A refresh that fails keeps the review it would have replaced."""
+    conn = seed_db(tmp_path, monkeypatch)
+    logged = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+    if reviewed_before:
+        review_with(conn, monkeypatch, logged.solution_id, FEEDBACK)
+    before = (review.load(conn, logged.solution_id), stored_schedule(conn))
+
+    def fail(graded):
+        raise RuntimeError("replay failed")
+
+    monkeypatch.setattr("coach.scheduler.replay", fail)
+    with pytest.raises(RuntimeError):
+        review_with(conn, monkeypatch, logged.solution_id, OPTIMAL_REVIEW, refresh=True)
+
+    assert (review.load(conn, logged.solution_id), stored_schedule(conn)) == before
+
+
+def test_an_unavailable_model_leaves_the_review_and_schedule_alone(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+    logged = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+    review_with(conn, monkeypatch, logged.solution_id, FEEDBACK)
+
+    def unavailable(*args, **kw):
+        raise llm.LLMUnavailable("ANTHROPIC_API_KEY is not set")
+
+    monkeypatch.setattr("coach.llm.parse", unavailable)
+    result = service.review_solution_now(
+        conn, logged.solution_id, service.get_problem(conn, 1), CODE, refresh=True
+    )
+
+    assert result.skipped and result.effect is None
+    assert review.load(conn, logged.solution_id) == FEEDBACK
+    assert stored_schedule(conn) == (date(2026, 9, 4), 0, 1)
+
+
+def test_a_solve_logged_while_the_review_runs_is_in_the_schedule(tmp_path, monkeypatch):
+    """The model call takes ~25s. The replay runs after it, so a solve logged from another
+    request in the meantime is part of the schedule instead of being overwritten."""
+    conn = seed_db(tmp_path, monkeypatch)
+    logged = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+
+    def slow_review(prompt, output_format, **kw):
+        other = db.connect()
+        service.log_solve(other, 1, "clean", CODE, today=date(2026, 9, 8))
+        other.close()
+        return FEEDBACK
+
+    monkeypatch.setattr("coach.llm.parse", slow_review)
+    result = service.review_solution_now(conn, logged.solution_id, service.get_problem(conn, 1), CODE)
+
+    assert stored_schedule(conn) == (date(2026, 9, 15), 1, 1)
+    assert result.effect.latest_attempt_date == date(2026, 9, 8)
 
 
 def test_enrich_solution_now_reports_llm_degradation(tmp_path, monkeypatch):

@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date, timedelta
 
 import numpy as np
 import pytest
@@ -443,6 +444,30 @@ def test_review_endpoint_refresh_replaces_the_stored_review(client, monkeypatch)
     assert again["review"]["verdict"] == "optimal"
     # replaced in the store, not just in this response
     assert client.get("/api/solutions/1").json()["solves"][0]["review"]["verdict"] == "optimal"
+
+
+def test_review_endpoint_reports_what_the_review_did_to_the_schedule(client, monkeypatch):
+    """A clean solve whose review reports a bug is due three days after it was solved,
+    and serving that stored review again reports no second effect."""
+    enriched(monkeypatch)
+    today = date.today()
+    logged = client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE}).json()
+    solution_id = client.get("/api/solutions/1").json()["solves"][0]["id"]
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: FEEDBACK)
+
+    first = client.post("/api/solutions/1/review", json={"solution_id": solution_id}).json()
+    again = client.post("/api/solutions/1/review", json={"solution_id": solution_id}).json()
+
+    assert first["effect"] == {
+        "finding": "bug",
+        "attempt_date": today.isoformat(),
+        "latest_attempt_date": today.isoformat(),
+        "next_due_before": logged["next_due"],
+        "next_due": (today + timedelta(days=3)).isoformat(),
+        "rescheduled": True,
+    }
+    assert again["cached"] is True
+    assert again["effect"] is None
 
 
 def test_review_endpoint_degrades_without_an_api_key(client):
