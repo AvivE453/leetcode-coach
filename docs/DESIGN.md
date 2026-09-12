@@ -117,6 +117,18 @@ that share a technique retrieve each other even when they share no vocabulary; a
 solve is logged, similar past solves are those sharing any of its main patterns. Measured,
 not assumed: see the retrieval eval below — it wins, but only modestly.
 
+**One vector per solve, not one per problem.**
+Embeddings are keyed by `solution_id`. Re-solving a problem a different way — Best Time to
+Buy and Sell Stock as `greedy`, then again as `dp-1d` — embeds a new card for the new solve
+and leaves the old solve's vector untouched, so the problem now has two vectors and can be
+retrieved through either approach. Search filters solve by solve and keeps each problem's
+best score, so a `greedy` query reaches it through the greedy solve and a `dp-1d` query
+through the DP one. Keeping a single vector per problem — the latest solve's, or an average
+of all of them — would leave it findable through one approach at most, which throws away
+exactly the variety that re-solving a problem a new way is meant to build. A stored vector
+changes only when its own solve is re-embedded: `coach enrich --retag` is the one path that
+rebuilds them all, because the card names the solve's main patterns.
+
 **No vector database.**
 Brute-force numpy cosine over float32 blobs in SQLite. At a few hundred solutions this
 takes microseconds; a vector DB would be infrastructure bought to solve a problem this

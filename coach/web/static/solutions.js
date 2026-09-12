@@ -73,10 +73,24 @@ function reviewButton(box, number, solutionId, label, refresh) {
   return button;
 }
 
+const DOTS = [".", "..", "...", ""];
+
+/* A review is one model call with nothing to show until it ends (~25s), so the
+   button keeps counting to say the request is still alive. Returns the stop. */
+function animateDots(button, word) {
+  const dots = el("span", { class: "dots", "aria-hidden": "true" });
+  button.replaceChildren(`${word} `, dots);
+  let step = 0;
+  const tick = () => { dots.textContent = DOTS[step++ % DOTS.length]; };
+  tick();
+  const timer = setInterval(tick, 400);
+  return () => clearInterval(timer);
+}
+
 async function requestReview(box, number, solutionId, button, refresh) {
   const label = button.textContent;
   button.disabled = true;
-  button.textContent = "Reviewing…";
+  const stopDots = animateDots(button, "Reviewing");
   try {
     const res = await fetch(`/api/solutions/${number}/review`, {
       method: "POST",
@@ -93,6 +107,7 @@ async function requestReview(box, number, solutionId, button, refresh) {
   } catch (err) {
     box.append(el("p", { class: "error", text: `Could not review: ${err.message}` }));
   } finally {
+    stopDots();
     // After a success the box was redrawn and this button is already detached.
     button.disabled = false;
     button.textContent = label;

@@ -353,6 +353,7 @@ ul.solutions > li {
 
 .review { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
 .review .btn.ghost { margin-top: 6px; }
+.dots { display: inline-block; width: 3ch; text-align: left; }
 .review-head {
   margin: 10px 0 4px;
   font-size: 0.78rem;
