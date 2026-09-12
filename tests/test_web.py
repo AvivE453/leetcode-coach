@@ -6,7 +6,7 @@ import pytest
 from conftest import CODE, seed_db
 from fastapi.testclient import TestClient
 
-from coach import config, db, enrich, mastery, review
+from coach import config, db, enrich, mastery, review, service
 from coach.web.app import app
 from coach.weekly import analyze as weekly_analyze
 
@@ -468,6 +468,23 @@ def test_review_endpoint_reports_what_the_review_did_to_the_schedule(client, mon
     }
     assert again["cached"] is True
     assert again["effect"] is None
+
+
+def test_plan_endpoint_says_why_a_reviewed_problem_came_back(client, monkeypatch):
+    """Solved five days ago, reviewed today: the bug's lapse fell due two days ago."""
+    conn = db.connect()
+    service.log_solve(conn, 1, "clean", CODE, today=date.today() - timedelta(days=5))
+    conn.close()
+    solution_id = client.get("/api/solutions/1").json()["solves"][0]["id"]
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: FEEDBACK)
+    client.post("/api/solutions/1/review", json={"solution_id": solution_id})
+
+    plan = client.get("/api/plan").json()
+
+    assert [(i["number"], i["reason"], i["kind"]) for i in plan["items"] if i["number"] == 1] == [
+        (1, "re-solve: review reported a bug", "review")
+    ]
+    assert plan["due_count"] == 1
 
 
 def test_review_endpoint_degrades_without_an_api_key(client):

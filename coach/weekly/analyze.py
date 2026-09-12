@@ -2,7 +2,7 @@ import sqlite3
 from collections.abc import Sequence
 from datetime import date, timedelta
 
-from coach import curriculum, enrich, mastery, scheduler
+from coach import assessment, curriculum, enrich, mastery, scheduler
 
 STALE_DAYS = 30
 # How far ahead a plan counts a review as due. The weekly plan covers the next
@@ -40,5 +40,7 @@ def analyze(
         "stale_patterns": stale,
         "off_pattern": enrich.off_pattern_problems(conn),
         "due": scheduler.due_reviews(conn, today, lookahead_days),
+        # Why a due problem came back, when its last practice day holds a reported failure.
+        "findings": assessment.open_findings(conn),
         "curriculum": curriculum.progress(conn),
     }

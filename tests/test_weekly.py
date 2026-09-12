@@ -230,3 +230,49 @@ def test_plan_keeps_due_reviews_even_when_hard(tmp_path):
     items = weekly_plan.build_plan(conn, analysis, target=10)
     assert len(items) == 5
     assert all("review due" in i.reason for i in items)
+
+
+def add_review(conn, solution_id, verdict, *categories):
+    conn.execute(
+        "INSERT INTO reviews (solution_id, verdict, issues, created_at) VALUES (?, ?, ?, ?)",
+        (
+            solution_id,
+            verdict,
+            json.dumps([{"category": c, "description": "..."} for c in categories]),
+            TODAY.isoformat(),
+        ),
+    )
+
+
+def test_plan_words_a_due_review_by_the_failure_its_review_reported(tmp_path):
+    """The kind stays "review" - SM-2 brought both back - but only one says why."""
+    conn = make_db(tmp_path)
+    add_problem(conn, 1, "two-sum", "Two Sum")
+    add_problem(conn, 2, "valid-anagram", "Valid Anagram")
+    add_review(conn, add_attempt(conn, 1, TODAY - timedelta(days=3)), "needs-work", "edge-case")
+    add_attempt(conn, 2, TODAY - timedelta(days=3))
+    set_due(conn, 1, TODAY)
+    set_due(conn, 2, TODAY)
+
+    items = weekly_plan.build_plan(conn, weekly_analyze.analyze(conn, TODAY), target=10)
+
+    assert {i.number: (i.reason, i.kind) for i in items} == {
+        1: ("re-solve: review reported an edge-case failure", "review"),
+        2: (f"review due {TODAY.isoformat()}", "review"),
+    }
+
+
+def test_plan_lists_a_due_off_pattern_problem_with_a_finding_once(tmp_path):
+    conn = make_db(tmp_path)
+    add_problem(conn, 2, "maximum-subarray", "Maximum Subarray", intended="dp-1d")
+    solution_id = add_attempt(conn, 2, TODAY - timedelta(days=3), pattern="prefix-sum")
+    add_review(conn, solution_id, "needs-work", "bug")
+    set_due(conn, 2, TODAY)
+
+    analysis = weekly_analyze.analyze(conn, TODAY)
+    items = weekly_plan.build_plan(conn, analysis, target=10)
+
+    assert [r["number"] for r in analysis["off_pattern"]] == [2]  # it qualifies twice
+    assert [(i.number, i.reason, i.kind) for i in items] == [
+        (2, "re-solve: review reported a bug", "review")
+    ]

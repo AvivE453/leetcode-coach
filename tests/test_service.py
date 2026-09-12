@@ -305,6 +305,22 @@ def test_a_solve_logged_while_the_review_runs_is_in_the_schedule(tmp_path, monke
     assert result.effect.latest_attempt_date == date(2026, 9, 8)
 
 
+def test_a_late_bug_review_puts_the_problem_on_the_plan_with_its_reason(tmp_path, monkeypatch):
+    """Reviewed days after a clean solve due 09-08: the lapse fell due on 09-04, so on 09-06
+    the problem is already owed - and the plan says why instead of a bare date."""
+    conn = seed_db(tmp_path, monkeypatch)
+    logged = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+    plan_day = date(2026, 9, 6)
+    assert service.daily_plan(conn, plan_day, config.DAILY_TARGET).items == []
+
+    review_with(conn, monkeypatch, logged.solution_id, FEEDBACK)
+
+    items = service.daily_plan(conn, plan_day, config.DAILY_TARGET).items
+    assert [(i.number, i.reason, i.kind) for i in items] == [
+        (1, "re-solve: review reported a bug", "review")
+    ]
+
+
 def test_enrich_solution_now_reports_llm_degradation(tmp_path, monkeypatch):
     conn = seed_db(tmp_path, monkeypatch)
     result = service.log_solve(conn, 1, "clean", CODE)

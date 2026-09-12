@@ -3,7 +3,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Literal
 
-from coach import config, curriculum
+from coach import assessment, config, curriculum
 
 # Our fine-grained vocabulary -> official catalog tag, used to find NEW problems
 # practicing a weak pattern (design decision #1: official tags pick problems,
@@ -45,6 +45,14 @@ PATTERN_TO_TAG = {
 
 MAX_PER_WEAK_PATTERN = 3
 
+# What a due review says when its last practice day holds a reported failure. It stays
+# a "review": the finding only says why SM-2 brought the problem back, not another rule.
+FINDING_REASON: dict[assessment.Correctness, str] = {
+    "bug": "re-solve: review reported a bug",
+    "edge-case": "re-solve: review reported an edge-case failure",
+    "unspecified": "re-solve: review marked it needs-work",
+}
+
 
 # Which of build_plan's four rules put an item on the list. It doubles as the
 # chip class the web UI styles, so it is set where the rule fires and travels
@@ -69,9 +77,10 @@ def hard_cap(target: int) -> int:
 
 
 def build_plan(conn: sqlite3.Connection, analysis: dict, target: int) -> list[PlanItem]:
-    """Fill ~target slots: due reviews -> off-pattern re-solves -> weak-pattern
-    picks from the unsolved curriculum -> curriculum progression. Hard problems
-    are capped for new picks (mandatory reviews/re-solves are exempt)."""
+    """Fill ~target slots: due reviews (worded by a reported failure when there is
+    one) -> off-pattern re-solves -> weak-pattern picks from the unsolved curriculum
+    -> curriculum progression. Hard problems are capped for new picks (mandatory
+    reviews/re-solves are exempt)."""
     items: list[PlanItem] = []
     seen: set[int] = set()
     hards = 0
@@ -90,7 +99,9 @@ def build_plan(conn: sqlite3.Connection, analysis: dict, target: int) -> list[Pl
         )
 
     for row in analysis["due"]:
-        add(row, f"review due {row['next_due']}", "review", mandatory=True)
+        finding = analysis["findings"].get(row["number"])
+        reason = FINDING_REASON[finding] if finding else f"review due {row['next_due']}"
+        add(row, reason, "review", mandatory=True)
     for row in analysis["off_pattern"]:
         add(
             row,
