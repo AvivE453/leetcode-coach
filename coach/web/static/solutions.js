@@ -73,6 +73,27 @@ function reviewButton(box, number, solutionId, label, refresh) {
   return button;
 }
 
+const FINDING_NOTE = {
+  bug: "Review reported a bug.",
+  "edge-case": "Review reported an edge-case failure.",
+  unspecified: "Review marked this needs-work without naming a bug or an edge case.",
+};
+
+/* What saving the review did to practice. The review re-grades the attempt it judges and
+   the whole history is replayed, so the date can move - or stay put, which is said too. */
+function effectNote(effect) {
+  const parts = effect.finding ? [FINDING_NOTE[effect.finding]] : [];
+  parts.push(effect.rescheduled
+    ? `Practice is now due ${effect.next_due} (was ${effect.next_due_before}).`
+    : `Practice date unchanged: ${effect.next_due}.`);
+  // ISO dates, so string order is date order.
+  if (effect.latest_attempt_date > effect.attempt_date) {
+    parts.push(`This review applies to your ${effect.attempt_date} attempt; ` +
+      `your ${effect.latest_attempt_date} attempt is included in the schedule.`);
+  }
+  return el("p", { class: "hint", text: parts.join(" ") });
+}
+
 const DOTS = [".", "..", "...", ""];
 
 /* A review is one model call with nothing to show until it ends (~25s), so the
@@ -104,6 +125,7 @@ async function requestReview(box, number, solutionId, button, refresh) {
       return;
     }
     fillReviewBox(box, number, solutionId, data.review);
+    if (data.effect) box.prepend(effectNote(data.effect));
   } catch (err) {
     box.append(el("p", { class: "error", text: `Could not review: ${err.message}` }));
   } finally {
