@@ -97,7 +97,13 @@ shaky-but-solved sweeps exactly like five failures. It now means a mastery score
 same 1–5 scale SM-2 already uses for scheduling: the outcome is self-report (how it felt),
 the review is the external judgement on the code (a bug scores 1, a missed boundary 2, and
 extra findings can only pull it down). They disagree often enough to be worth both — a solve
-can feel clean and still carry a bug. Scores fold through an exponential moving average
+can feel clean and still carry a bug. The blend is then capped by what the attempt earned
+(`assessment.effective_quality`): never above its outcome, and never above 1 when its review
+reports a bug or 2 when it reports a missed boundary. Blending alone scored a clean solve
+with a reported bug 3.8, so no number of them could make a pattern weak, and let an optimal
+review lift a solve that needed hints to 2.9. A review is a model's judgement, not an
+executed test, so it only ever lowers a grade; the ceilings are a policy, not a calibrated
+prediction. Scores fold through an exponential moving average
 (α = 0.2), so recent solves move the number without erasing history. Nothing about the
 score is stored: every read replays the saved attempts and reviews, so a review — which
 usually arrives days after the solve it judges — counts the moment it is saved, and no
@@ -116,6 +122,19 @@ tries lapse the problem once rather than flooring its ease and shortening every 
 after it. The stored schedule is a replay of the attempts (`scheduler.replay()`), not a
 running total stepped once per solve, so the rule has one owner, and `coach init` re-derives
 every stored schedule when the rule changes.
+
+**A review re-grades the attempt it judges; it is never a review of its own.**
+The schedule used to ignore reviews, so a clean solve whose review reported a bug stayed a
+week away while its pattern's mastery counted the bug. Now each attempt is scheduled by the
+same capped grade mastery uses, and saving or refreshing a review replays the problem's
+history in the transaction that stores it. It is not a failure appended on the day the
+review arrives: re-running a review would count the same evidence twice, and the schedule
+would depend on when you happened to click. A bug found ten days after a solve lapses the
+problem three days after the solve — already overdue, so it is owed now — and a clean solve
+logged in between still counts after it. An optimal review never upgrades a failed attempt.
+On the Daily Plan that problem reads "re-solve: review reported a bug" rather than a bare
+date, judged by its last practice day, so a clean retry the same afternoon hides the reason
+no more than it undoes the lapse.
 
 **A controlled vocabulary of 26 patterns, enforced as a type.**
 The model picks from an enum, so tags can never fragment into `dp`/`DP`/`dynamic
