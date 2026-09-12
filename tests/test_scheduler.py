@@ -82,3 +82,49 @@ def test_ease_never_drops_below_floor():
         s = scheduler.review(s, "failed", day)
         day += timedelta(days=1)
     assert s.ease == pytest.approx(scheduler.MIN_EASE)
+
+
+def test_same_day_attempts_count_as_one_review():
+    """Logging a problem again in the same sitting proves nothing about remembering it a
+    week out, so three clean logs in a day schedule like one: 7 days, not 7, 14, then 39."""
+    s = scheduler.replay([(TODAY, "clean")] * 3)
+
+    assert s == scheduler.review(None, "clean", TODAY)
+    assert s.next_due == TODAY + timedelta(days=7)
+
+
+@pytest.mark.parametrize("first, second", [("failed", "clean"), ("clean", "failed")])
+def test_a_day_is_graded_by_its_worst_attempt(first, second):
+    """A clean retry after reading the solution does not undo the failure before it, and a
+    failed retry still undoes the clean solve before it: either way the day is a lapse."""
+    review_day = TODAY + timedelta(days=7)
+
+    s = scheduler.replay([(TODAY, "clean"), (review_day, first), (review_day, second)])
+
+    assert (s.reps, s.lapses) == (0, 1)
+    assert s.interval_days == scheduler.LAPSE_INTERVAL
+    assert s.next_due == review_day + timedelta(days=3)
+
+
+def test_failing_repeatedly_in_one_day_lapses_once():
+    """The mirror of the same-day stretch: three failed tries in one sitting would stack
+    three lapses and floor the ease, shortening every interval the problem has after."""
+    s = scheduler.replay([(TODAY, "failed")] * 3)
+
+    assert s == scheduler.review(None, "failed", TODAY)
+    assert s.lapses == 1
+    assert s.ease > scheduler.MIN_EASE
+
+
+def test_attempts_on_different_days_are_separate_reviews():
+    """Across days, replaying is exactly the step-by-step fold: the 7 -> 14 -> x ease
+    ladder is untouched by the same-day rule."""
+    days = [TODAY, TODAY + timedelta(days=7), TODAY + timedelta(days=21)]
+    by_hand = None
+    for day in days:
+        by_hand = scheduler.review(by_hand, "clean", day)
+
+    s = scheduler.replay([(day, "clean") for day in days])
+
+    assert s == by_hand
+    assert s.interval_days > scheduler.SECOND_INTERVAL

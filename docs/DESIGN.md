@@ -105,6 +105,18 @@ writer has to remember to refresh a cache. That costs something, measured on syn
 histories: the Weekly Review's read takes 0.2 ms at today's size, 7 ms at a year of 25
 solves a week, and 83 ms at ten years, against 0.2, 6 and 60 ms for the cache it replaced.
 
+**One review per day, graded by its worst attempt.**
+A review is only worth scheduling from if it tested memory, and counting every logged solve
+as one did not: solving a problem three times in one sitting stepped its schedule 7 → 14 →
+39 days, and a clean retry typed in right after reading the solution passed for a month of
+retention. So a problem's attempts on the same day are one SM-2 review, graded by the worst
+of them. Every attempt is still stored; only the schedule reads the day once. A failure
+grades its day whichever order it came in, because it is real evidence, but three failed
+tries lapse the problem once rather than flooring its ease and shortening every interval
+after it. The stored schedule is a replay of the attempts (`scheduler.replay()`), not a
+running total stepped once per solve, so the rule has one owner, and `coach init` re-derives
+every stored schedule when the rule changes.
+
 **A controlled vocabulary of 26 patterns, enforced as a type.**
 The model picks from an enum, so tags can never fragment into `dp`/`DP`/`dynamic
 programming` and make coverage analytics meaningless. LeetCode's own tags are kept too,

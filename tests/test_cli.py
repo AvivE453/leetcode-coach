@@ -215,3 +215,39 @@ def test_similar_by_number(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "#15 3Sum" in result.output
     assert "#1 Two Sum" not in result.output  # the query problem itself is excluded
+
+
+def test_init_reschedules_problems_from_their_attempts(tmp_path, monkeypatch):
+    """A schedule stored while every same-day solve still counted stays stretched until
+    that problem is logged again, so `coach init` re-derives each one from its attempts."""
+    conn = seed_db(tmp_path, monkeypatch)
+    for _ in range(3):
+        conn.execute(
+            "INSERT INTO attempts (problem_number, date, outcome) VALUES (1, '2026-09-01', 'clean')"
+        )
+    # what one review per logged solve stored after those three
+    conn.execute(
+        """
+        INSERT INTO review_state (problem_number, ease, interval_days, next_due, reps, lapses)
+        VALUES (1, 2.8, 39.2, '2026-10-10', 3, 0)
+        """
+    )
+    conn.commit()
+    conn.close()
+    two_sum = {
+        "number": 1,
+        "slug": "two-sum",
+        "title": "Two Sum",
+        "difficulty": "Easy",
+        "tags": ["array"],
+        "paid_only": False,
+    }
+    monkeypatch.setattr("coach.catalog.load", lambda: [two_sum])
+
+    result = runner.invoke(app, ["init"])
+
+    assert result.exit_code == 0, result.output
+    assert "Rescheduled 1 problem(s)" in result.output
+    conn = db.connect()
+    state = conn.execute("SELECT reps, interval_days, next_due FROM review_state").fetchone()
+    assert tuple(state) == (1, 7.0, "2026-09-08")

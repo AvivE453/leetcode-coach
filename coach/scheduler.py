@@ -50,6 +50,27 @@ def review(state: ReviewState | None, outcome: str, today: date) -> ReviewState:
     )
 
 
+def replay(attempts: list[tuple[date, str]]) -> ReviewState | None:
+    """The review state one problem's (day, outcome) attempts add up to.
+
+    A day is one review, graded by its worst attempt. Solving a problem again in the
+    same sitting - after reading the solution, or just once more - shows nothing about
+    remembering it weeks later, yet counting every solve took three clean logs in one
+    day to a 39-day interval. A failure is evidence whichever order it comes in, so it
+    still grades its day, and three failed tries lapse the problem once instead of
+    flooring its ease.
+    """
+    by_day: dict[date, list[str]] = {}
+    for day, outcome in attempts:
+        by_day.setdefault(day, []).append(outcome)
+
+    state = None
+    for day in sorted(by_day):
+        worst = min(by_day[day], key=QUALITY.__getitem__)
+        state = review(state, worst, day)
+    return state
+
+
 def due_reviews(
     conn: sqlite3.Connection, today: date, lookahead_days: int = 0
 ) -> list[sqlite3.Row]:

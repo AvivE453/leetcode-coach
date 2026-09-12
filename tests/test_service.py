@@ -60,8 +60,8 @@ def test_log_solve_rejects_unknown_problem_and_empty_code(tmp_path, monkeypatch)
 
 
 def test_second_log_advances_the_schedule(tmp_path, monkeypatch):
-    """log_solve reads the stored review state before rescheduling, so a second
-    clean solve steps up to the second interval rather than restarting at the first."""
+    """log_solve reschedules from every attempt logged before, so a clean solve a
+    week later steps up to the second interval rather than restarting at the first."""
     conn = seed_db(tmp_path, monkeypatch)
     service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
 
@@ -70,6 +70,29 @@ def test_second_log_advances_the_schedule(tmp_path, monkeypatch):
     state = conn.execute("SELECT reps, interval_days FROM review_state").fetchone()
     assert (state["reps"], state["interval_days"]) == (2, 14.0)
     assert result.next_due == date(2026, 9, 22)
+
+
+def test_relogging_a_problem_the_same_day_keeps_its_review_date(tmp_path, monkeypatch):
+    """Three solves of one problem in one sitting are one review. Each used to count,
+    stepping the schedule 7 -> 14 -> 39 days as if a month of remembering had been shown."""
+    conn = seed_db(tmp_path, monkeypatch)
+
+    results = [service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1)) for _ in range(3)]
+
+    assert [r.next_due for r in results] == [date(2026, 9, 8)] * 3
+    state = conn.execute("SELECT reps, interval_days FROM review_state").fetchone()
+    assert (state["reps"], state["interval_days"]) == (1, 7.0)
+    # every attempt is still kept - only the schedule counts the day once
+    assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 3
+
+
+def test_a_failed_retry_the_same_day_still_brings_the_review_forward(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+    service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+
+    result = service.log_solve(conn, 1, "failed", CODE, today=date(2026, 9, 1))
+
+    assert result.next_due == date(2026, 9, 4)
 
 
 def test_enrich_solution_now_reports_llm_degradation(tmp_path, monkeypatch):

@@ -20,7 +20,11 @@ app = typer.Typer(no_args_is_help=True)
 def init(
     refresh: bool = typer.Option(False, "--refresh", help="Re-download the problem catalog from leetcode.com"),
 ):
-    """Create the database, load the problem catalog, and flag curriculum problems."""
+    """Create the database, load the problem catalog, and flag curriculum problems.
+
+    Also re-derives every solved problem's review schedule from its attempts, so a
+    change to the scheduling rule reaches the schedules stored before it.
+    """
     if refresh or not config.CATALOG_PATH.exists():
         typer.echo("Downloading problem catalog from leetcode.com ...")
         problems = catalog.fetch()
@@ -45,12 +49,14 @@ def init(
         ],
     )
     flagged = curriculum.apply_flags(conn)
+    rescheduled = service.rebuild_review_states(conn)
 
     typer.echo(f"Database ready: {len(problems)} problems")
     for name, count in flagged.items():
         expected = len(curriculum.load(name))
         marker = "" if count == expected else f"  (WARNING: {expected - count} slugs not found in catalog)"
         typer.echo(f"  {name}: {count}/{expected} flagged{marker}")
+    typer.echo(f"Rescheduled {rescheduled} problem(s) from their attempts")
 
 
 def echo_neighbors(neighbors: list[service.Neighbor]) -> None:

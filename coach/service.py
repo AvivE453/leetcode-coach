@@ -164,24 +164,18 @@ def problem_canonical(problem) -> enrich.Canonical:
     return enrich.Canonical(problem["intended_pattern"], secondary)
 
 
-def update_review_state(
-    conn: sqlite3.Connection, number: int, outcome: str, today: date
-) -> scheduler.ReviewState:
-    row = conn.execute(
-        "SELECT * FROM review_state WHERE problem_number = ?", (number,)
-    ).fetchone()
-    state = (
-        scheduler.ReviewState(
-            ease=row["ease"],
-            interval_days=row["interval_days"],
-            next_due=date.fromisoformat(row["next_due"]),
-            reps=row["reps"],
-            lapses=row["lapses"],
-        )
-        if row
-        else None
-    )
-    new = scheduler.review(state, outcome, today)
+def update_review_state(conn: sqlite3.Connection, number: int) -> scheduler.ReviewState:
+    """Reschedule one problem from every attempt logged against it.
+
+    Replayed from the attempts instead of stepped forward from the stored row: what a
+    solve does to the schedule depends on the other solves that day, and
+    scheduler.replay() is the one owner of that rule.
+    """
+    attempts = [
+        (date.fromisoformat(r["date"]), r["outcome"])
+        for r in conn.execute("SELECT date, outcome FROM attempts WHERE problem_number = ?", (number,))
+    ]
+    new = scheduler.replay(attempts)
     conn.execute(
         """
         INSERT INTO review_state (problem_number, ease, interval_days, next_due, reps, lapses)
@@ -196,6 +190,19 @@ def update_review_state(
         (number, new.ease, new.interval_days, new.next_due.isoformat(), new.reps, new.lapses),
     )
     return new
+
+
+def rebuild_review_states(conn: sqlite3.Connection) -> int:
+    """Reschedule every problem that has an attempt, and say how many.
+
+    A schedule is otherwise recomputed only when its problem is next logged, so this is
+    what `coach init` runs to bring schedules stored under an older rule up to date.
+    """
+    rows = conn.execute("SELECT DISTINCT problem_number FROM attempts").fetchall()
+    for row in rows:
+        update_review_state(conn, row["problem_number"])
+    conn.commit()
+    return len(rows)
 
 
 def log_solve(
@@ -224,7 +231,7 @@ def log_solve(
         "INSERT INTO solutions (problem_number, attempt_id, code, created_at) VALUES (?, ?, ?, ?)",
         (number, cursor.lastrowid, code, today.isoformat()),
     ).lastrowid
-    state = update_review_state(conn, number, outcome, today)
+    state = update_review_state(conn, number)
     conn.commit()
 
     return LogResult(
