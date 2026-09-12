@@ -7,6 +7,11 @@ a solve can feel clean and still carry a bug, or feel awful and come out optimal
 Reviews are on-demand, so most attempts have only the first signal; the review
 weight then collapses into the outcome rather than assuming anything.
 
+The blend is capped by the grade the attempt earned (`assessment.effective_quality`):
+a solve that needed hints stays a hints solve however good its code, and a reported
+bug holds a solve at 1 however clean it felt. The SM-2 schedule reads that same grade,
+so the two can never disagree about one attempt.
+
 The fold is an exponential moving average, so recent solves move the score and
 old ones fade without being thrown away - the same shape as SM-2's ease, one
 level up: ease tracks one problem, this tracks one pattern.
@@ -23,6 +28,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
 
+from coach import assessment
 from coach.scheduler import QUALITY
 
 OUTCOME_WEIGHT = 0.7
@@ -63,23 +69,26 @@ def issue_ceiling(count: int) -> int:
 def review_mastery(verdict: str, issues: Sequence[dict] = ()) -> int:
     """What the code actually did, 1-5, from a stored review.
 
-    A bug is a misunderstanding of the pattern, so it scores lowest; an
-    edge-case miss means the pattern is understood but the boundary was not.
-    The ceiling applies on top, so more findings can only drag a verdict down:
-    an "acceptable" carrying two issues is not the same solve as a spotless one.
+    A reported failure scores its correctness ceiling - a bug 1, an edge-case miss 2 -
+    whatever the verdict says; otherwise the verdict does. The issue-count ceiling
+    applies on top, so more findings can only drag a review down: an "acceptable"
+    carrying two issues is not the same solve as a spotless one.
     """
-    if verdict == "needs-work":
-        base = 1 if any(i["category"] == "bug" for i in issues) else 2
-    else:
-        base = VERDICT_MASTERY[verdict]
+    finding = assessment.correctness_finding(verdict, issues)
+    base = assessment.CORRECTNESS_CEILING[finding] if finding else VERDICT_MASTERY[verdict]
     return min(base, issue_ceiling(len(issues)))
 
 
 def attempt_score(outcome: str, verdict: str | None = None, issues: Sequence[dict] = ()) -> float:
-    """One solve, scored 1-5. Without a review the outcome carries full weight."""
+    """One solve, scored 1-5: the blend, never above the grade the attempt earned.
+
+    Without a review the outcome carries full weight.
+    """
+    earned = assessment.effective_quality(outcome, verdict, issues)
     if verdict is None:
-        return float(QUALITY[outcome])
-    return OUTCOME_WEIGHT * QUALITY[outcome] + REVIEW_WEIGHT * review_mastery(verdict, issues)
+        return float(earned)
+    blended = OUTCOME_WEIGHT * QUALITY[outcome] + REVIEW_WEIGHT * review_mastery(verdict, issues)
+    return float(min(blended, earned))
 
 
 def fold(scores: Iterable[float]) -> float | None:
@@ -103,7 +112,7 @@ class ScoredAttempt:
     problem: int
     day: date
     outcome: str
-    score: float  # attempt_score(), with the review blended in when there is one
+    score: float  # attempt_score(): the review blended in and capped, when there is one
 
 
 def load_history(conn: sqlite3.Connection) -> list[ScoredAttempt]:

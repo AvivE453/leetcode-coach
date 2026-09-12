@@ -397,8 +397,8 @@ def test_a_stored_review_pulls_the_pattern_score_down(tmp_path, monkeypatch):
         conn, result.solution_id, service.get_problem(conn, 1), CODE, refresh=True
     )
 
-    # 0.7*5 + 0.3*1 = 3.8 for that solve, folded in at alpha 0.2: 0.8*5 + 0.2*3.8
-    assert service.pattern_standings(conn, ["hashmap"])[0].score == pytest.approx(4.76)
+    # the reported bug holds that solve at 1, folded in at alpha 0.2: 0.8*5 + 0.2*1
+    assert service.pattern_standings(conn, ["hashmap"])[0].score == pytest.approx(4.2)
 
 
 def test_saved_evidence_is_read_without_any_rebuild(tmp_path, monkeypatch):
@@ -413,7 +413,7 @@ def test_saved_evidence_is_read_without_any_rebuild(tmp_path, monkeypatch):
     review.save(conn, result.solution_id, FEEDBACK)
     conn.commit()
 
-    reviewed = pytest.approx(4.76)  # four clean solves, then 0.7*5 + 0.3*1 folded in
+    reviewed = pytest.approx(4.2)  # four clean solves, then the bug-capped 1 folded in
     assert service.pattern_table(conn)[0]["score"] == reviewed
     assert service.pattern_standings(conn, ["hashmap"], today)[0].score == reviewed
     plan = service.daily_plan(conn, today, config.DAILY_TARGET)

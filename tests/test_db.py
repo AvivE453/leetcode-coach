@@ -184,8 +184,8 @@ def test_init_schema_drops_pattern_scores_and_keeps_the_history_it_came_from(tmp
     tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "pattern_scores" not in tables
     assert snapshot() == before
-    # the score the cache held is still what the history says: 0.7*5 + 0.3*1
-    assert mastery.pattern_stats(mastery.load_history(conn))[0]["score"] == pytest.approx(3.8)
+    # and the history the cache was built from still scores: a clean solve held at 1 by its bug
+    assert mastery.pattern_stats(mastery.load_history(conn))[0]["score"] == pytest.approx(1.0)
 
 
 def test_init_schema_rebuilds_single_pattern_enrichments_as_main_patterns(tmp_path):

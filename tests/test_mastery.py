@@ -19,13 +19,16 @@ def issues(*categories):
         ("acceptable", (), 4),
         ("acceptable", ("complexity",), 4),
         # two findings cap at 3, three cap at 2, five bottom out at 1
-        ("acceptable", ("complexity", "edge-case"), 3),
-        ("acceptable", ("complexity", "edge-case", "edge-case"), 2),
+        ("acceptable", ("complexity", "complexity"), 3),
+        ("acceptable", ("complexity", "complexity", "complexity"), 2),
         ("optimal", ("edge-case",) * 5, 1),
-        # a bug is a misunderstanding of the pattern, so it scores lowest outright
+        # a reported failure scores its correctness ceiling, whatever the verdict says
         ("needs-work", ("bug",), 1),
+        ("optimal", ("bug",), 1),
         ("needs-work", ("edge-case",), 2),
+        ("acceptable", ("complexity", "edge-case"), 2),
         ("needs-work", ("edge-case", "complexity"), 2),
+        ("needs-work", (), 2),
         ("needs-work", ("bug", "edge-case", "complexity"), 1),
     ],
 )
@@ -41,12 +44,25 @@ def test_attempt_score_falls_back_to_the_outcome_without_a_review():
     assert mastery.attempt_score("failed") == 1.0
 
 
-def test_attempt_score_blends_the_review_at_three_tenths():
-    # felt clean, carried a bug: 0.7*5 + 0.3*1
-    assert mastery.attempt_score("clean", "needs-work", issues("bug")) == pytest.approx(3.8)
-    # felt rough, came out optimal: 0.7*3 + 0.3*5
-    assert mastery.attempt_score("struggled", "optimal") == pytest.approx(3.6)
-    assert mastery.attempt_score("clean", "optimal") == pytest.approx(5.0)
+@pytest.mark.parametrize(
+    "outcome, verdict, found, expected",
+    [
+        # felt clean, carried a bug: the 3.8 blend is held at the bug's ceiling
+        ("clean", "needs-work", ("bug",), 1.0),
+        ("clean", "needs-work", ("edge-case",), 2.0),
+        ("clean", "optimal", (), 5.0),
+        # a complexity finding still describes correct code, so the blend stands: 0.7*5 + 0.3*4
+        ("clean", "acceptable", ("complexity",), 4.7),
+        # a good review never lifts a solve above its outcome: 3.6, 2.9 and 2.2 held down
+        ("struggled", "optimal", (), 3.0),
+        ("hints", "optimal", (), 2.0),
+        ("failed", "optimal", (), 1.0),
+    ],
+)
+def test_attempt_score_blends_the_review_but_never_above_what_was_earned(
+    outcome, verdict, found, expected
+):
+    assert mastery.attempt_score(outcome, verdict, issues(*found)) == pytest.approx(expected)
 
 
 def test_fold_seeds_on_the_first_attempt_and_eases_toward_later_ones():
@@ -104,9 +120,7 @@ def add_pinned_history(conn):
     # hashmap - on-track. Inserted out of date order; two solves tie on 09-05, so the
     # id breaks the tie; and the 08-25 solve is only reviewed after the window opened.
     late = add_solve(conn, "2026-08-25", "clean", "hashmap")
-    add_solve(
-        conn, "2026-08-10", "struggled", "hashmap", review=("acceptable", ("complexity", "edge-case"))
-    )
+    add_solve(conn, "2026-08-10", "struggled", "hashmap", review=("acceptable", ("complexity",)))
     add_solve(conn, "2026-09-05", "clean", "hashmap")
     add_solve(conn, "2026-09-05", "failed", "hashmap")
     add_solve(conn, "2026-08-30", "hints", "hashmap", secondary=["two-pointers"])
@@ -132,9 +146,11 @@ def add_pinned_history(conn):
 def test_scoring_behavior_is_pinned(tmp_path):
     """Every reader of mastery, over one history, against numbers worked by hand.
 
-    Per solve: 0.7 x outcome + 0.3 x review, the review capped by its issue count.
-    dp-1d: 1, 2.7, 2.0, 1.0, 3.8. hashmap in date order: 3.0, 3.8 (its late bug
-    review), 2, 5, 1. graph: 1.9, 1, 1, 1. Each folded oldest-first at alpha 0.2.
+    Per solve: 0.7 x outcome + 0.3 x review, the review capped by its issue count, and
+    the solve capped by what it earned - its outcome, and 1 for a reported bug or 2 for
+    an edge case. dp-1d: 1, 2, 2, 1, 2. hashmap in date order: 3 (a 3.3 blend held at
+    struggled), 1 (its late bug review), 2, 5, 1. graph: 1 (a failed solve an acceptable
+    review cannot lift), 1, 1, 1. Each folded oldest-first at alpha 0.2.
     """
     conn = make_db(tmp_path)
     add_pinned_history(conn)
@@ -142,19 +158,19 @@ def test_scoring_behavior_is_pinned(tmp_path):
     analysis = weekly_analyze.analyze(conn, PIN_TODAY)
     assert analysis["patterns"] == [
         {"pattern": "dp-1d", "solved": 1, "attempts": 5, "rough": 4, "struggle_rate": 0.8,
-         "score": pytest.approx(1.86208), "last_date": date(2026, 9, 3)},
+         "score": pytest.approx(1.4304), "last_date": date(2026, 9, 3)},
         {"pattern": "graph", "solved": 1, "attempts": 4, "rough": 4, "struggle_rate": 1.0,
-         "score": pytest.approx(1.4608), "last_date": date(2026, 9, 4)},
+         "score": pytest.approx(1.0), "last_date": date(2026, 9, 4)},
         {"pattern": "hashmap", "solved": 1, "attempts": 5, "rough": 3, "struggle_rate": 0.6,
-         "score": pytest.approx(2.87392), "last_date": date(2026, 9, 5)},
+         "score": pytest.approx(2.5872), "last_date": date(2026, 9, 5)},
     ]
     assert analysis["weak_patterns"] == ["dp-1d"]
 
     # two-pointers, a secondary on one hashmap solve, practiced nothing: no row
     assert service.pattern_table(conn) == [
-        {"pattern": "dp-1d", "solved": 1, "score": pytest.approx(1.86208), "attempts": 5, "rough": 4},
-        {"pattern": "graph", "solved": 1, "score": pytest.approx(1.4608), "attempts": 4, "rough": 4},
-        {"pattern": "hashmap", "solved": 1, "score": pytest.approx(2.87392), "attempts": 5, "rough": 3},
+        {"pattern": "dp-1d", "solved": 1, "score": pytest.approx(1.4304), "attempts": 5, "rough": 4},
+        {"pattern": "graph", "solved": 1, "score": pytest.approx(1.0), "attempts": 4, "rough": 4},
+        {"pattern": "hashmap", "solved": 1, "score": pytest.approx(2.5872), "attempts": 5, "rough": 3},
     ]
 
     review = service.weekly_review(conn, PIN_TODAY)
@@ -163,11 +179,23 @@ def test_scoring_behavior_is_pinned(tmp_path):
         (p.pattern, p.attempts_week, p.attempts_total, p.score, p.score_before, p.standing)
         for p in review.patterns
     ] == [
-        ("dp-1d", 2, 5, pytest.approx(1.86208), pytest.approx(1.472), "weak"),
+        ("dp-1d", 2, 5, pytest.approx(1.4304), pytest.approx(1.36), "weak"),
         # the late review re-scores its pre-window solve on both sides of the cut
-        ("hashmap", 2, 5, pytest.approx(2.87392), pytest.approx(2.928), "on-track"),
-        ("graph", 4, 4, pytest.approx(1.4608), None, "too-early"),
+        ("hashmap", 2, 5, pytest.approx(2.5872), pytest.approx(2.48), "on-track"),
+        ("graph", 4, 4, pytest.approx(1.0), None, "too-early"),
     ]
+
+
+def test_clean_solves_that_each_carry_a_bug_make_the_pattern_weak(tmp_path):
+    """Each used to blend to 3.8, so no number of them could ever read as weak."""
+    conn = make_db(tmp_path)
+    for day in range(1, 6):
+        add_solve(conn, f"2026-08-0{day}", "clean", "hashmap", review=("needs-work", ("bug",)))
+
+    analysis = weekly_analyze.analyze(conn, date(2026, 8, 5))
+
+    assert analysis["patterns"][0]["score"] == pytest.approx(1.0)
+    assert analysis["weak_patterns"] == ["hashmap"]
 
 
 def test_is_weak_needs_both_a_low_score_and_enough_attempts():
@@ -181,7 +209,7 @@ def test_load_history_scores_each_solve_oldest_first(tmp_path):
     conn = make_db(tmp_path)
     add_solve(conn, "2026-08-02", "failed", "hashmap")
     add_solve(
-        conn, "2026-08-01", "clean", "hashmap", review=("acceptable", ("complexity", "edge-case"))
+        conn, "2026-08-01", "clean", "hashmap", review=("acceptable", ("complexity", "complexity"))
     )
     add_solve(conn, "2026-08-01", "struggled", "dp-1d")
 
@@ -257,5 +285,5 @@ def test_a_late_review_counts_the_moment_it_is_saved(tmp_path):
 
     add_review(conn, solution_id, "needs-work", ("bug",), day="2026-08-09")
 
-    # the second solve is now 3.8, folded onto the 5.0 seed
-    assert mastery.pattern_stats(mastery.load_history(conn))[0]["score"] == pytest.approx(4.76)
+    # the reported bug holds the second solve at 1, folded onto the 5.0 seed
+    assert mastery.pattern_stats(mastery.load_history(conn))[0]["score"] == pytest.approx(4.2)
