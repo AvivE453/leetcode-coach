@@ -11,7 +11,7 @@ from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 
-from coach import config, curriculum, embed, enrich, llm, mastery, scheduler
+from coach import assessment, config, curriculum, embed, enrich, llm, mastery, scheduler
 from coach import review as review_llm
 from coach.weekly import analyze as weekly_analyze
 from coach.weekly import collect as weekly_collect
@@ -165,17 +165,33 @@ def problem_canonical(problem) -> enrich.Canonical:
 
 
 def update_review_state(conn: sqlite3.Connection, number: int) -> scheduler.ReviewState:
-    """Reschedule one problem from every attempt logged against it.
+    """Reschedule one problem from every attempt logged against it, and their reviews.
 
     Replayed from the attempts instead of stepped forward from the stored row: what a
-    solve does to the schedule depends on the other solves that day, and
-    scheduler.replay() is the one owner of that rule.
+    solve does to the schedule depends on the other solves that day and on a review that
+    can arrive days later, and scheduler.replay() is the one owner of that rule. Each
+    attempt is graded by assessment.effective_quality() - the grade mastery caps its
+    score at - so an unreviewed or untagged attempt counts at its logged outcome.
     """
-    attempts = [
-        (date.fromisoformat(r["date"]), r["outcome"])
-        for r in conn.execute("SELECT date, outcome FROM attempts WHERE problem_number = ?", (number,))
-    ]
-    new = scheduler.replay(attempts)
+    rows = conn.execute(
+        """
+        SELECT a.date, a.outcome, rv.verdict, rv.issues
+        FROM attempts a
+        LEFT JOIN solutions s ON s.attempt_id = a.id
+        LEFT JOIN reviews rv ON rv.solution_id = s.id
+        WHERE a.problem_number = ?
+        """,
+        (number,),
+    )
+    new = scheduler.replay(
+        [
+            (
+                date.fromisoformat(r["date"]),
+                assessment.effective_quality(r["outcome"], r["verdict"], json_list(r["issues"])),
+            )
+            for r in rows
+        ]
+    )
     conn.execute(
         """
         INSERT INTO review_state (problem_number, ease, interval_days, next_due, reps, lapses)

@@ -95,6 +95,49 @@ def test_a_failed_retry_the_same_day_still_brings_the_review_forward(tmp_path, m
     assert result.next_due == date(2026, 9, 4)
 
 
+def stored_schedule(conn, number=1) -> tuple[date, int, int]:
+    """(next_due, reps, lapses) as review_state holds them."""
+    row = conn.execute(
+        "SELECT next_due, reps, lapses FROM review_state WHERE problem_number = ?", (number,)
+    ).fetchone()
+    return date.fromisoformat(row["next_due"]), row["reps"], row["lapses"]
+
+
+def test_a_stored_bug_review_lapses_the_attempt_it_judges(tmp_path, monkeypatch):
+    """The solve felt clean, but its review reported a bug: the schedule reads that attempt
+    as a lapse. log_solve never tags, so this also shows scheduling needs no enrichment."""
+    conn = seed_db(tmp_path, monkeypatch)
+    result = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+    review.save(conn, result.solution_id, FEEDBACK)
+
+    service.rebuild_review_states(conn)
+
+    assert stored_schedule(conn) == (date(2026, 9, 4), 0, 1)
+
+
+def test_logging_after_a_bug_review_replays_through_it(tmp_path, monkeypatch):
+    """The next solve reschedules from the whole history, so it cannot forget the finding:
+    a lapse on 09-01, then a first interval from 09-08 - not 09-08's second interval."""
+    conn = seed_db(tmp_path, monkeypatch)
+    first = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+    review.save(conn, first.solution_id, FEEDBACK)
+
+    result = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 8))
+
+    assert result.next_due == date(2026, 9, 15)
+    assert stored_schedule(conn) == (date(2026, 9, 15), 1, 1)
+
+
+def test_a_clean_retry_the_same_day_does_not_clear_a_reported_bug(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+    first = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+    review.save(conn, first.solution_id, FEEDBACK)
+
+    result = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+
+    assert result.next_due == date(2026, 9, 4)
+
+
 def test_enrich_solution_now_reports_llm_degradation(tmp_path, monkeypatch):
     conn = seed_db(tmp_path, monkeypatch)
     result = service.log_solve(conn, 1, "clean", CODE)

@@ -20,8 +20,9 @@ class ReviewState:
     lapses: int
 
 
-def review(state: ReviewState | None, outcome: str, today: date) -> ReviewState:
-    quality = QUALITY[outcome]
+def review(state: ReviewState | None, quality: int, today: date) -> ReviewState:
+    """One SM-2 step for a 1-5 grade: QUALITY for a bare outcome, capped by a review's
+    findings in assessment.effective_quality(). Below 3 is a lapse."""
     ease = state.ease if state else INITIAL_EASE
     reps = state.reps if state else 0
     lapses = state.lapses if state else 0
@@ -50,8 +51,8 @@ def review(state: ReviewState | None, outcome: str, today: date) -> ReviewState:
     )
 
 
-def replay(attempts: list[tuple[date, str]]) -> ReviewState | None:
-    """The review state one problem's (day, outcome) attempts add up to.
+def replay(graded: list[tuple[date, int]]) -> ReviewState | None:
+    """The review state one problem's (day, grade) attempts add up to.
 
     A day is one review, graded by its worst attempt. Solving a problem again in the
     same sitting - after reading the solution, or just once more - shows nothing about
@@ -59,15 +60,18 @@ def replay(attempts: list[tuple[date, str]]) -> ReviewState | None:
     day to a 39-day interval. A failure is evidence whichever order it comes in, so it
     still grades its day, and three failed tries lapse the problem once instead of
     flooring its ease.
+
+    The grades arrive already capped by any review, so this stays plain SM-2: a review
+    saved days later changes the grade of the attempt it judges, and the replay puts
+    that lapse on the day the attempt happened, never on the day the review arrived.
     """
-    by_day: dict[date, list[str]] = {}
-    for day, outcome in attempts:
-        by_day.setdefault(day, []).append(outcome)
+    by_day: dict[date, list[int]] = {}
+    for day, quality in graded:
+        by_day.setdefault(day, []).append(quality)
 
     state = None
     for day in sorted(by_day):
-        worst = min(by_day[day], key=QUALITY.__getitem__)
-        state = review(state, worst, day)
+        state = review(state, min(by_day[day]), day)
     return state
 
 

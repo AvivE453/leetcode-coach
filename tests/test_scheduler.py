@@ -6,9 +6,13 @@ from coach import scheduler
 
 TODAY = date(2026, 8, 31)
 
+CLEAN, STRUGGLED, HINTS, FAILED = (
+    scheduler.QUALITY[outcome] for outcome in ("clean", "struggled", "hints", "failed")
+)
+
 
 def test_first_clean_review_due_in_a_week():
-    s = scheduler.review(None, "clean", TODAY)
+    s = scheduler.review(None, CLEAN, TODAY)
     assert s.reps == 1
     assert s.interval_days == scheduler.FIRST_INTERVAL
     assert s.next_due == TODAY + timedelta(days=7)
@@ -16,28 +20,28 @@ def test_first_clean_review_due_in_a_week():
 
 
 def test_clean_progression_stretches_intervals():
-    s = scheduler.review(None, "clean", TODAY)
-    s = scheduler.review(s, "clean", TODAY + timedelta(days=7))
+    s = scheduler.review(None, CLEAN, TODAY)
+    s = scheduler.review(s, CLEAN, TODAY + timedelta(days=7))
     assert s.interval_days == scheduler.SECOND_INTERVAL
 
-    s2 = scheduler.review(s, "clean", TODAY + timedelta(days=21))
+    s2 = scheduler.review(s, CLEAN, TODAY + timedelta(days=21))
     assert s2.interval_days == pytest.approx(s.interval_days * s2.ease)
     assert s2.interval_days > 30
 
 
 def test_struggled_advances_but_lowers_ease():
-    s = scheduler.review(None, "clean", TODAY)
+    s = scheduler.review(None, CLEAN, TODAY)
     ease_before = s.ease
-    s = scheduler.review(s, "struggled", TODAY + timedelta(days=7))
+    s = scheduler.review(s, STRUGGLED, TODAY + timedelta(days=7))
     assert s.reps == 2
     assert s.interval_days == scheduler.SECOND_INTERVAL
     assert s.ease < ease_before
 
 
 def test_failed_resets_to_the_lapse_interval():
-    s = scheduler.review(None, "clean", TODAY)
-    s = scheduler.review(s, "clean", TODAY + timedelta(days=7))
-    s = scheduler.review(s, "failed", TODAY + timedelta(days=21))
+    s = scheduler.review(None, CLEAN, TODAY)
+    s = scheduler.review(s, CLEAN, TODAY + timedelta(days=7))
+    s = scheduler.review(s, FAILED, TODAY + timedelta(days=21))
     assert s.reps == 0
     assert s.lapses == 1
     assert s.interval_days == scheduler.LAPSE_INTERVAL
@@ -45,7 +49,7 @@ def test_failed_resets_to_the_lapse_interval():
 
 
 def test_hints_also_resets():
-    s = scheduler.review(None, "hints", TODAY)
+    s = scheduler.review(None, HINTS, TODAY)
     assert s.reps == 0
     assert s.lapses == 1
     assert s.interval_days == scheduler.LAPSE_INTERVAL
@@ -55,7 +59,7 @@ def test_intervals_stop_growing_at_the_cap():
     s = None
     day = TODAY
     for _ in range(10):
-        s = scheduler.review(s, "clean", day)
+        s = scheduler.review(s, CLEAN, day)
         day += timedelta(days=round(s.interval_days))
     assert s.interval_days == scheduler.MAX_INTERVAL
 
@@ -70,7 +74,7 @@ def test_a_capped_interval_stays_capped():
         reps=8,
         lapses=0,
     )
-    s = scheduler.review(capped, "clean", TODAY)
+    s = scheduler.review(capped, CLEAN, TODAY)
     assert s.interval_days == scheduler.MAX_INTERVAL
     assert s.next_due == TODAY + timedelta(days=180)
 
@@ -79,7 +83,7 @@ def test_ease_never_drops_below_floor():
     s = None
     day = TODAY
     for _ in range(10):
-        s = scheduler.review(s, "failed", day)
+        s = scheduler.review(s, FAILED, day)
         day += timedelta(days=1)
     assert s.ease == pytest.approx(scheduler.MIN_EASE)
 
@@ -87,31 +91,40 @@ def test_ease_never_drops_below_floor():
 def test_same_day_attempts_count_as_one_review():
     """Logging a problem again in the same sitting proves nothing about remembering it a
     week out, so three clean logs in a day schedule like one: 7 days, not 7, 14, then 39."""
-    s = scheduler.replay([(TODAY, "clean")] * 3)
+    s = scheduler.replay([(TODAY, CLEAN)] * 3)
 
-    assert s == scheduler.review(None, "clean", TODAY)
+    assert s == scheduler.review(None, CLEAN, TODAY)
     assert s.next_due == TODAY + timedelta(days=7)
 
 
-@pytest.mark.parametrize("first, second", [("failed", "clean"), ("clean", "failed")])
+@pytest.mark.parametrize("first, second", [(FAILED, CLEAN), (CLEAN, FAILED)])
 def test_a_day_is_graded_by_its_worst_attempt(first, second):
     """A clean retry after reading the solution does not undo the failure before it, and a
     failed retry still undoes the clean solve before it: either way the day is a lapse."""
     review_day = TODAY + timedelta(days=7)
 
-    s = scheduler.replay([(TODAY, "clean"), (review_day, first), (review_day, second)])
+    s = scheduler.replay([(TODAY, CLEAN), (review_day, first), (review_day, second)])
 
     assert (s.reps, s.lapses) == (0, 1)
     assert s.interval_days == scheduler.LAPSE_INTERVAL
     assert s.next_due == review_day + timedelta(days=3)
 
 
+def test_a_day_holding_a_grade_capped_below_three_is_a_lapse():
+    """A clean solve whose review reported an edge case grades 2 - under the lapse line
+    that struggled's 3 sits on - so a clean retry beside it still lapses the problem."""
+    s = scheduler.replay([(TODAY, CLEAN), (TODAY, 2)])
+
+    assert (s.reps, s.lapses) == (0, 1)
+    assert s.next_due == TODAY + timedelta(days=3)
+
+
 def test_failing_repeatedly_in_one_day_lapses_once():
     """The mirror of the same-day stretch: three failed tries in one sitting would stack
     three lapses and floor the ease, shortening every interval the problem has after."""
-    s = scheduler.replay([(TODAY, "failed")] * 3)
+    s = scheduler.replay([(TODAY, FAILED)] * 3)
 
-    assert s == scheduler.review(None, "failed", TODAY)
+    assert s == scheduler.review(None, FAILED, TODAY)
     assert s.lapses == 1
     assert s.ease > scheduler.MIN_EASE
 
@@ -122,9 +135,9 @@ def test_attempts_on_different_days_are_separate_reviews():
     days = [TODAY, TODAY + timedelta(days=7), TODAY + timedelta(days=21)]
     by_hand = None
     for day in days:
-        by_hand = scheduler.review(by_hand, "clean", day)
+        by_hand = scheduler.review(by_hand, CLEAN, day)
 
-    s = scheduler.replay([(day, "clean") for day in days])
+    s = scheduler.replay([(day, CLEAN) for day in days])
 
     assert s == by_hand
     assert s.interval_days > scheduler.SECOND_INTERVAL
