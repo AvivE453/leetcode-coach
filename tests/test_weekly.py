@@ -2,6 +2,7 @@ import json
 from datetime import date, timedelta
 
 import pytest
+from conftest import tag_solution
 
 from coach import db
 from coach.weekly import analyze as weekly_analyze
@@ -38,13 +39,7 @@ def add_attempt(conn, number, day, outcome="clean", pattern=None, minutes=None):
         (number, attempt_id, day.isoformat()),
     ).lastrowid
     if pattern:
-        conn.execute(
-            """
-            INSERT INTO enrichments (solution_id, pattern, secondary_patterns, data_structures)
-            VALUES (?, ?, '[]', '[]')
-            """,
-            (solution_id, pattern),
-        )
+        tag_solution(conn, solution_id, pattern)
     return solution_id
 
 
@@ -67,7 +62,7 @@ def test_collect_window_excludes_older_attempts(tmp_path):
     week = weekly_collect.collect(conn, TODAY)
     assert len(week["attempts"]) == 1
     assert week["distinct_problems"] == 1
-    assert week["attempts"][0]["pattern"] == "hashmap"
+    assert week["attempts"][0]["main_patterns"] == ["hashmap"]
     assert week["start"] == TODAY - timedelta(days=6)
 
 

@@ -267,7 +267,7 @@ def enrich_corpus(refresh: bool, model: str) -> dict:
 def json_safe_enrich(row, code, model) -> dict:
     e = enrich.enrich_solution(row, code, model=model)
     return {
-        "pattern": e.pattern,
+        "main_patterns": e.main_patterns,
         "intended_pattern": e.intended_pattern,
         # Recorded but not scored: enrich-v3 added it, and the corpus labels only
         # cover the central intended_pattern (see RESULTS.md).
@@ -293,7 +293,7 @@ def run_enrichment(cached: dict) -> dict:
         else:
             wrong.append(f"{entry.slug}: said {result['intended_pattern']}, "
                          f"accepted {list(entry.accept)}")
-        if result["pattern"] == result["intended_pattern"]:
+        if result["intended_pattern"] in result["main_patterns"]:
             agree += 1
     return {
         "prompt_version": enrich.PROMPT_VERSION,
@@ -340,7 +340,7 @@ def run_retrieval(cached: dict) -> dict:
     raw = embed.encode([e.code for e in entries])
     cards = embed.encode([
         embed.card_text(
-            e.title, cached[enrich_key(e)]["pattern"], cached[enrich_key(e)]["key_trick"], e.code
+            e.title, cached[enrich_key(e)]["main_patterns"], cached[enrich_key(e)]["key_trick"], e.code
         )
         for e in entries
     ])

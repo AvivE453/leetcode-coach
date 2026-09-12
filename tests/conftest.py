@@ -1,9 +1,10 @@
-"""Shared test setup. Test modules import CODE / TWO_SUM / seed_db from here.
+"""Shared test setup. Test modules import CODE / TWO_SUM / seed_db / tag_solution from here.
 
 pytest puts this directory on sys.path (there is no tests/__init__.py), so
 `from conftest import ...` reaches the module pytest has already loaded.
 """
 
+import json
 import sqlite3
 
 import pytest
@@ -48,3 +49,18 @@ def seed_db(tmp_path, monkeypatch, problems=None) -> sqlite3.Connection:
     db.init_schema(conn)
     db.upsert_problems(conn, problems if problems is not None else TWO_SUM)
     return conn
+
+
+def tag_solution(conn, solution_id, *main_patterns, secondary=()) -> None:
+    """Store a solve's tags directly, as enrichment would, without calling the model.
+
+    The one copy of the enrichments insert for every suite that builds history by
+    hand, so the next change to that table's columns is one edit here.
+    """
+    conn.execute(
+        """
+        INSERT INTO enrichments (solution_id, main_patterns, secondary_patterns, data_structures)
+        VALUES (?, ?, ?, '[]')
+        """,
+        (solution_id, json.dumps(list(main_patterns)), json.dumps(list(secondary))),
+    )

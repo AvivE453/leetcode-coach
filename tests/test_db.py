@@ -1,4 +1,5 @@
 import pytest
+from conftest import tag_solution
 
 from coach import db, mastery, review
 
@@ -149,7 +150,7 @@ def test_init_schema_drops_pattern_scores_and_keeps_the_history_it_came_from(tmp
         VALUES (1, 1, 1, 'code', '2026-09-01')
         """
     )
-    conn.execute("INSERT INTO enrichments (solution_id, pattern) VALUES (1, 'hashmap')")
+    tag_solution(conn, 1, "hashmap")
     review.save(
         conn,
         1,
@@ -185,6 +186,74 @@ def test_init_schema_drops_pattern_scores_and_keeps_the_history_it_came_from(tmp
     assert snapshot() == before
     # the score the cache held is still what the history says: 0.7*5 + 0.3*1
     assert mastery.pattern_stats(mastery.load_history(conn))[0]["score"] == pytest.approx(3.8)
+
+
+def test_init_schema_rebuilds_single_pattern_enrichments_as_main_patterns(tmp_path):
+    """A solve can have several main patterns now. SQLite before 3.35 cannot drop the old
+    NOT NULL `pattern` column, so the table is rebuilt - and every row in it, and every
+    table beside it, has to come through intact."""
+    conn = db.connect(tmp_path / "test.db")
+    db.init_schema(conn)
+    conn.execute("DROP TABLE enrichments")
+    conn.execute(
+        """
+        CREATE TABLE enrichments (
+            solution_id INTEGER PRIMARY KEY REFERENCES solutions(id),
+            pattern TEXT NOT NULL,
+            secondary_patterns TEXT NOT NULL DEFAULT '[]',
+            data_structures TEXT NOT NULL DEFAULT '[]',
+            key_trick TEXT,
+            time_complexity TEXT,
+            space_complexity TEXT,
+            model TEXT,
+            prompt_version TEXT
+        )
+        """
+    )
+    db.upsert_problems(conn, [make_problem()])
+    conn.execute(
+        "INSERT INTO attempts (id, problem_number, date, outcome) VALUES (1, 1, '2026-09-01', 'clean')"
+    )
+    conn.execute(
+        """
+        INSERT INTO solutions (id, problem_number, attempt_id, code, created_at)
+        VALUES (1, 1, 1, 'code', '2026-09-01')
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO enrichments VALUES (1, 'dp-knapsack', '["dfs"]', '["list"]',
+            'Count the ways per coin.', 'O(n*k)', 'O(k)', 'claude-sonnet-5', 'enrich-v3')
+        """
+    )
+    conn.execute("INSERT INTO embeddings (solution_id, vector) VALUES (1, x'0000803f')")
+    conn.commit()
+    beside = ("problems", "attempts", "solutions", "embeddings")
+
+    def snapshot():
+        return {t: [tuple(r) for r in conn.execute(f"SELECT * FROM {t}")] for t in beside}
+
+    before = snapshot()
+
+    db.init_schema(conn)
+    db.init_schema(conn)  # and again, on a table that is already rebuilt
+
+    columns = {r["name"] for r in conn.execute("PRAGMA table_info(enrichments)")}
+    assert "pattern" not in columns
+    assert dict(conn.execute("SELECT * FROM enrichments").fetchone()) == {
+        "solution_id": 1,
+        "main_patterns": '["dp-knapsack"]',
+        "secondary_patterns": '["dfs"]',
+        "data_structures": '["list"]',
+        "key_trick": "Count the ways per coin.",
+        "time_complexity": "O(n*k)",
+        "space_complexity": "O(k)",
+        "model": "claude-sonnet-5",
+        "prompt_version": "enrich-v3",
+    }
+    assert snapshot() == before
+    tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert not any(t.startswith("enrichments_") for t in tables)
 
 
 def test_reviews_round_trip_through_the_store(tmp_path):

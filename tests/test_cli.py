@@ -1,5 +1,7 @@
+import json
+
 import numpy as np
-from conftest import CODE, seed_db
+from conftest import CODE, seed_db, tag_solution
 from typer.testing import CliRunner
 
 from coach import db, embed, enrich, llm, service
@@ -14,7 +16,7 @@ def setup_env(tmp_path, monkeypatch):
 
 
 ENRICHMENT = enrich.Enrichment(
-    pattern="hashmap",
+    main_patterns=["hashmap"],
     intended_pattern="hashmap",
     intended_secondary_patterns=["two-pointers"],
     secondary_patterns=[],
@@ -76,7 +78,7 @@ def test_enrich_judges_against_the_stored_canonical_set(tmp_path, monkeypatch):
     enrich.save_intended(conn, 1, "hashmap", ["two-pointers"])
     conn.commit()
     conn.close()
-    answer(monkeypatch, pattern="two-pointers", intended_secondary_patterns=[])
+    answer(monkeypatch, main_patterns=["two-pointers"], intended_secondary_patterns=[])
 
     result = runner.invoke(app, ["enrich"])
 
@@ -87,7 +89,7 @@ def test_enrich_judges_against_the_stored_canonical_set(tmp_path, monkeypatch):
 
 def test_enrich_marks_an_off_pattern_solve(tmp_path, monkeypatch):
     log_unenriched(tmp_path, monkeypatch).close()
-    answer(monkeypatch, pattern="prefix-sum", intended_pattern="dp-1d")
+    answer(monkeypatch, main_patterns=["prefix-sum"], intended_pattern="dp-1d")
 
     result = runner.invoke(app, ["enrich"])
 
@@ -105,7 +107,7 @@ def test_enrich_without_a_key_stops_and_keeps_the_solve(tmp_path, monkeypatch):
     assert "Enriched 0/1" in result.output
     assert count("solutions") == 1
     conn = db.connect()
-    assert len(enrich.missing(conn)) == 1
+    assert len(enrich.to_tag(conn)) == 1
 
 
 def test_enrich_embeds_on_a_later_run_what_an_earlier_run_only_tagged(tmp_path, monkeypatch):
@@ -152,6 +154,30 @@ def test_enrich_resumes_a_backfill_that_stopped_partway(tmp_path, monkeypatch):
     assert (count("enrichments"), count("embeddings")) == (2, 2)
 
 
+def test_enrich_retag_re_tags_and_re_embeds_tagged_solves(tmp_path, monkeypatch):
+    """A new prompt only reaches old solves if they can be tagged again: plain `enrich`
+    leaves a tagged solve alone, `--retag` replaces its tags - and the stored vector,
+    whose card text names the patterns, so it never describes the tags it replaced."""
+    log_unenriched(tmp_path, monkeypatch).close()
+    answer(monkeypatch)
+    runner.invoke(app, ["enrich"])
+    assert "Enriched 0/0" in runner.invoke(app, ["enrich"]).output
+
+    answer(monkeypatch, main_patterns=["hashmap", "two-pointers"])
+    cards = []
+    monkeypatch.setattr("coach.embed.encode", lambda texts: cards.extend(texts) or fake_encode(texts))
+    result = runner.invoke(app, ["enrich", "--retag"])
+
+    assert result.exit_code == 0, result.output
+    assert "#1 Two Sum: hashmap, two-pointers" in result.output
+    assert "Enriched 1/1" in result.output
+    conn = db.connect()
+    stored = conn.execute("SELECT main_patterns FROM enrichments").fetchone()[0]
+    assert json.loads(stored) == ["hashmap", "two-pointers"]
+    assert (count("enrichments"), count("embeddings")) == (1, 1)
+    assert len(cards) == 1 and "\npattern: hashmap, two-pointers\n" in cards[0]
+
+
 def test_enrich_no_longer_offers_missing(tmp_path, monkeypatch):
     """--missing was declared and never read; asking for it now fails loudly."""
     setup_env(tmp_path, monkeypatch)
@@ -180,9 +206,7 @@ def test_similar_by_number(tmp_path, monkeypatch):
             "INSERT INTO solutions (problem_number, code, created_at) VALUES (?, 'c', '2026-01-01')",
             (number,),
         ).lastrowid
-        conn.execute(
-            "INSERT INTO enrichments (solution_id, pattern) VALUES (?, 'hashmap')", (solution_id,)
-        )
+        tag_solution(conn, solution_id, "hashmap")
         embed.store(conn, solution_id, np.array(vector, dtype=np.float32))
     conn.commit()
     conn.close()

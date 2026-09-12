@@ -1,5 +1,5 @@
 /* Home page: progress numbers, the pattern table, and the log form.
-   el()/getJSON() come from dom.js, loaded before this script. */
+   el()/getJSON()/patternBadges() come from dom.js, loaded before this script. */
 
 /* ---------- stats ---------- */
 
@@ -40,18 +40,12 @@ function statCard(label, value, note) {
 
 /* ---------- pattern table ---------- */
 
-/* Practice columns are null for a pattern only ever credited as a secondary
-   approach - no solve led with it, so there is nothing to measure. */
-function orDash(value, format = String) {
-  return value === null ? "—" : format(value);
-}
-
 const PATTERN_COLUMNS = [
   ["Pattern", (p) => p.pattern],
   ["Problems solved", (p) => String(p.solved)],
-  ["Mastery (1–5)", (p) => orDash(p.score, (v) => v.toFixed(1))],
-  ["Attempts", (p) => orDash(p.attempts)],
-  ["Not clean", (p) => orDash(p.rough)],
+  ["Mastery (1–5)", (p) => p.score.toFixed(1)],
+  ["Attempts", (p) => String(p.attempts)],
+  ["Not clean", (p) => String(p.rough)],
 ];
 
 function renderPatternTable(patterns) {
@@ -101,9 +95,8 @@ function showError(message) {
 }
 
 function renderStanding(box, standing) {
-  /* The weekly analysis for this one pattern, shown a week early. Chip classes
-     are the Plan page's, so a weak pattern reads the same red in both places. */
-  if (!standing) return;
+  /* The weekly analysis for one of the solve's main patterns, shown a week early. Chip
+     classes are the Plan page's, so a weak pattern reads the same red in both places. */
   const mastery = `mastery ${standing.score.toFixed(1)}/5`;
   if (!standing.enough_data) {
     const plural = standing.attempts === 1 ? "" : "s";
@@ -145,11 +138,11 @@ function renderLogResult(data) {
 
   box.append(
     el("p", {}, [
-      el("span", { class: "badge pattern", text: e.pattern }),
+      ...patternBadges(e.main_patterns),
       el("span", { text: ` ${e.key_trick}` }),
     ])
   );
-  renderStanding(box, data.pattern_standing);
+  for (const standing of data.pattern_standings) renderStanding(box, standing);
   if (e.secondary_patterns.length) {
     box.append(el("p", { class: "hint", text: `Also uses: ${e.secondary_patterns.join(", ")}` }));
   }
@@ -171,11 +164,11 @@ function renderLogResult(data) {
     box.append(el("p", { class: "hint", text: "Similar solved problems:" }));
     box.append(
       el("ul", {}, e.neighbors.map((n) =>
-        el("li", { text: `(${n.number}) ${n.title} [${n.difficulty}] — ${n.pattern || "untagged"}` })
+        el("li", { text: `(${n.number}) ${n.title} [${n.difficulty}] — ${n.main_patterns.join(", ") || "untagged"}` })
       ))
     );
   } else {
-    box.append(el("p", { class: "hint", text: `No other solved problems tagged as ${e.pattern} yet.` }));
+    box.append(el("p", { class: "hint", text: `No other solved problems tagged as ${e.main_patterns.join(" or ")} yet.` }));
   }
 }
 

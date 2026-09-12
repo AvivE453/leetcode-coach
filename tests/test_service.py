@@ -3,14 +3,14 @@ from datetime import date, timedelta
 
 import numpy as np
 import pytest
-from conftest import CODE, TWO_SUM, seed_db
+from conftest import CODE, TWO_SUM, seed_db, tag_solution
 
 from coach import config, embed, enrich, mastery, review, service
 from coach.weekly import analyze as weekly_analyze
 from coach.weekly import collect as weekly_collect
 
 ENRICHMENT = enrich.Enrichment(
-    pattern="hashmap",
+    main_patterns=["hashmap"],
     intended_pattern="hashmap",
     # Two Sum really does have a second canonical route (sort + two-pointers), so
     # every fixture carries one - the empty case would not exercise much.
@@ -79,7 +79,7 @@ def test_enrich_solution_now_reports_llm_degradation(tmp_path, monkeypatch):
 
     e = service.enrich_solution_now(conn, result.solution_id, problem, CODE)
 
-    assert e.pattern is None
+    assert e.main_patterns == []
     assert "ANTHROPIC_API_KEY" in e.skipped
     assert conn.execute("SELECT COUNT(*) FROM enrichments").fetchone()[0] == 0
 
@@ -96,7 +96,7 @@ def test_enrich_solution_now_reports_embedding_degradation(tmp_path, monkeypatch
 
     e = service.enrich_solution_now(conn, result.solution_id, service.get_problem(conn, 1), CODE)
 
-    assert e.pattern == "hashmap"
+    assert e.main_patterns == ["hashmap"]
     assert e.embed_skipped
     assert e.neighbors == []
     # the tags still landed - only the vector is missing
@@ -105,7 +105,9 @@ def test_enrich_solution_now_reports_embedding_degradation(tmp_path, monkeypatch
 
 def test_enrich_solution_now_flags_off_pattern(tmp_path, monkeypatch):
     conn = seed_db(tmp_path, monkeypatch)
-    off = ENRICHMENT.model_copy(update={"pattern": "prefix-sum", "intended_pattern": "dp-1d"})
+    off = ENRICHMENT.model_copy(
+        update={"main_patterns": ["prefix-sum"], "intended_pattern": "dp-1d"}
+    )
     monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: off)
     monkeypatch.setattr("coach.embed.encode", fake_encode)
     result = service.log_solve(conn, 1, "clean", CODE)
@@ -122,7 +124,7 @@ def test_enrich_solution_now_accepts_a_canonical_alternate_approach(tmp_path, mo
     """The whole point of intended_secondary_patterns: a different but still
     canonical route is not off-pattern, and earns no forced re-solve."""
     conn = seed_db(tmp_path, monkeypatch)
-    alternate = ENRICHMENT.model_copy(update={"pattern": "two-pointers"})
+    alternate = ENRICHMENT.model_copy(update={"main_patterns": ["two-pointers"]})
     monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: alternate)
     monkeypatch.setattr("coach.embed.encode", fake_encode)
     result = service.log_solve(conn, 1, "clean", CODE)
@@ -139,7 +141,9 @@ def test_enrich_solution_now_accepts_a_canonical_alternate_approach(tmp_path, mo
 def test_enrich_solution_now_carries_both_signals_when_embedding_fails(tmp_path, monkeypatch):
     """The early return path must not drop the new fields."""
     conn = seed_db(tmp_path, monkeypatch)
-    off = ENRICHMENT.model_copy(update={"pattern": "prefix-sum", "intended_pattern": "dp-1d"})
+    off = ENRICHMENT.model_copy(
+        update={"main_patterns": ["prefix-sum"], "intended_pattern": "dp-1d"}
+    )
     monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: off)
     monkeypatch.setattr(
         "coach.embed.encode",
@@ -176,7 +180,7 @@ def test_enrich_solution_now_judges_against_the_stored_set_not_the_latest_answer
     conn = seed_db(tmp_path, monkeypatch)
 
     e = enrich_against_stored_canonical(
-        conn, monkeypatch, pattern="two-pointers", intended_secondary_patterns=[]
+        conn, monkeypatch, main_patterns=["two-pointers"], intended_secondary_patterns=[]
     )
 
     assert e.off_pattern is False
@@ -195,7 +199,7 @@ def test_enrich_solution_now_keeps_a_demoted_central_pattern_canonical(tmp_path,
     e = enrich_against_stored_canonical(
         conn,
         monkeypatch,
-        pattern="hashmap",
+        main_patterns=["hashmap"],
         intended_pattern="two-pointers",
         intended_secondary_patterns=[],
     )
@@ -217,114 +221,143 @@ def test_enrich_solution_now_lists_a_repeated_alternate_once(tmp_path, monkeypat
     assert e.also_solvable_with == ["two-pointers"]
 
 
-def test_pattern_counts_credits_every_pattern_a_problem_was_practiced_with(tmp_path, monkeypatch):
-    conn = seed_db(tmp_path, monkeypatch)
+def log_tagged(conn, monkeypatch, number, outcome="clean", **tags):
+    """Log a solve of `number`, tagged as ENRICHMENT with `tags` overriding it."""
+    e = ENRICHMENT.model_copy(update=tags)
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: e)
     monkeypatch.setattr("coach.embed.encode", fake_encode)
+    result = service.log_solve(conn, number, outcome, CODE)
+    service.enrich_solution_now(conn, result.solution_id, service.get_problem(conn, number), CODE)
+
+
+def test_pattern_table_credits_a_problem_once_per_approach(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
 
     # one problem solved three times: two approaches, the second one repeated
     for pattern in ("prefix-sum", "hashmap", "hashmap"):
-        e = ENRICHMENT.model_copy(update={"pattern": pattern})
-        monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, _e=e, **kw: _e)
-        r = service.log_solve(conn, 1, "clean", CODE)
-        service.enrich_solution_now(conn, r.solution_id, service.get_problem(conn, 1), CODE)
+        log_tagged(conn, monkeypatch, 1, main_patterns=[pattern])
 
-    # both approaches counted, and the repeated one still counts once
-    assert service.pattern_counts(conn) == [
-        {"pattern": "hashmap", "solved": 1},
-        {"pattern": "prefix-sum", "solved": 1},
+    # both approaches counted, the repeated one still one problem - but two attempts
+    assert service.pattern_table(conn) == [
+        {"pattern": "hashmap", "solved": 1, "score": 5.0, "attempts": 2, "rough": 0},
+        {"pattern": "prefix-sum", "solved": 1, "score": 5.0, "attempts": 1, "rough": 0},
     ]
 
 
-def test_pattern_counts_includes_a_solutions_secondary_patterns(tmp_path, monkeypatch):
+def test_pattern_table_leaves_out_patterns_only_used_as_a_secondary(tmp_path, monkeypatch):
+    """A secondary is a step the solve leaned on, not a pattern it practiced: it has
+    nothing to be scored on, so it gets no row rather than a row of dashes."""
     conn = seed_db(tmp_path, monkeypatch)
-    monkeypatch.setattr("coach.embed.encode", fake_encode)
-    e = ENRICHMENT.model_copy(update={"secondary_patterns": ["two-pointers"]})
-    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: e)
-    r = service.log_solve(conn, 1, "clean", CODE)
-    service.enrich_solution_now(conn, r.solution_id, service.get_problem(conn, 1), CODE)
+    log_tagged(conn, monkeypatch, 1, "struggled", secondary_patterns=["two-pointers"])
 
-    assert service.pattern_counts(conn) == [
-        {"pattern": "hashmap", "solved": 1},
-        {"pattern": "two-pointers", "solved": 1},
+    assert service.pattern_table(conn) == [
+        {"pattern": "hashmap", "solved": 1, "score": 3.0, "attempts": 1, "rough": 1},
+    ]
+
+
+def test_pattern_table_does_not_count_a_secondary_toward_solved(tmp_path, monkeypatch):
+    """Every column of a row describes the same solves. two-pointers led only the
+    3Sum solve, so it has solved one problem - not two beside one attempt."""
+    conn = seed_db(tmp_path, monkeypatch, TWO_SUM + [THREE_SUM])
+    log_tagged(conn, monkeypatch, 1, secondary_patterns=["two-pointers"])
+    log_tagged(conn, monkeypatch, 15, main_patterns=["two-pointers"])
+
+    table = {row["pattern"]: row for row in service.pattern_table(conn)}
+
+    assert table["two-pointers"] == {
+        "pattern": "two-pointers", "solved": 1, "score": 5.0, "attempts": 1, "rough": 0,
+    }
+
+
+def test_pattern_table_counts_a_problem_under_each_of_its_main_patterns(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch, TWO_SUM + [THREE_SUM])
+    log_tagged(conn, monkeypatch, 1, "struggled", main_patterns=["hashmap", "two-pointers"])
+    log_tagged(conn, monkeypatch, 15, main_patterns=["two-pointers"])
+
+    # two-pointers: the struggled Two Sum solve at 3.0, then 3Sum's 5.0 folded in at alpha 0.2
+    assert service.pattern_table(conn) == [
+        {"pattern": "two-pointers", "solved": 2, "score": pytest.approx(3.4),
+         "attempts": 2, "rough": 1},
+        {"pattern": "hashmap", "solved": 1, "score": 3.0, "attempts": 1, "rough": 1},
     ]
 
 
 def log_and_enrich(conn, monkeypatch, outcome, pattern="hashmap"):
-    e = ENRICHMENT.model_copy(update={"pattern": pattern, "intended_pattern": pattern})
+    e = ENRICHMENT.model_copy(update={"main_patterns": [pattern], "intended_pattern": pattern})
     monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, _e=e, **kw: _e)
     monkeypatch.setattr("coach.embed.encode", fake_encode)
     r = service.log_solve(conn, 1, outcome, CODE)
     return service.enrich_solution_now(conn, r.solution_id, service.get_problem(conn, 1), CODE)
 
 
-def test_pattern_table_joins_mastery_to_every_credited_pattern(tmp_path, monkeypatch):
-    """Practice is measured on the pattern a solve led with. A pattern credited only
-    as a secondary has coverage but no practice - None, not a zero that would read
-    as practiced-and-failed."""
-    conn = seed_db(tmp_path, monkeypatch)
-    e = ENRICHMENT.model_copy(update={"secondary_patterns": ["two-pointers"]})
-    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: e)
-    monkeypatch.setattr("coach.embed.encode", fake_encode)
-    result = service.log_solve(conn, 1, "struggled", CODE)
-    service.enrich_solution_now(conn, result.solution_id, service.get_problem(conn, 1), CODE)
-
-    table = {row["pattern"]: row for row in service.pattern_table(conn)}
-
-    assert table["hashmap"] == {
-        "pattern": "hashmap", "solved": 1, "score": 3.0, "attempts": 1, "rough": 1,
-    }
-    assert table["two-pointers"] == {
-        "pattern": "two-pointers", "solved": 1, "score": None, "attempts": None, "rough": None,
-    }
-
-
-def test_pattern_standing_is_none_without_a_pattern(tmp_path, monkeypatch):
-    """No pattern means enrichment was skipped - there is nothing to stand on."""
+def test_pattern_standings_are_empty_with_nothing_to_stand_on(tmp_path, monkeypatch):
+    """No patterns means enrichment was skipped; a pattern never practiced has no record."""
     conn = seed_db(tmp_path, monkeypatch)
 
-    assert service.pattern_standing(conn, None) is None
-    assert service.pattern_standing(conn, "never-solved") is None
+    assert service.pattern_standings(conn, []) == []
+    assert service.pattern_standings(conn, ["hashmap"]) == []
 
 
-def test_pattern_standing_withholds_a_verdict_on_a_first_attempt(tmp_path, monkeypatch):
+def test_pattern_standings_withhold_a_verdict_on_a_first_attempt(tmp_path, monkeypatch):
     conn = seed_db(tmp_path, monkeypatch)
     log_and_enrich(conn, monkeypatch, "failed")
 
-    assert service.pattern_standing(conn, "hashmap") == service.PatternStanding(
-        pattern="hashmap", attempts=1, struggle_rate=1.0, score=1.0, weak=False, enough_data=False
-    )
+    assert service.pattern_standings(conn, ["hashmap"]) == [
+        service.PatternStanding(
+            pattern="hashmap", attempts=1, struggle_rate=1.0, score=1.0,
+            weak=False, enough_data=False,
+        )
+    ]
 
 
-def test_pattern_standing_calls_a_pattern_weak_once_there_is_data(tmp_path, monkeypatch):
+def test_pattern_standings_call_a_pattern_weak_once_there_is_data(tmp_path, monkeypatch):
     conn = seed_db(tmp_path, monkeypatch)
     for _ in range(5):
         log_and_enrich(conn, monkeypatch, "failed")
 
-    assert service.pattern_standing(conn, "hashmap") == service.PatternStanding(
-        pattern="hashmap", attempts=5, struggle_rate=1.0, score=1.0, weak=True, enough_data=True
-    )
+    assert service.pattern_standings(conn, ["hashmap"]) == [
+        service.PatternStanding(
+            pattern="hashmap", attempts=5, struggle_rate=1.0, score=1.0,
+            weak=True, enough_data=True,
+        )
+    ]
 
 
-def test_pattern_standing_stays_clear_of_weak_on_clean_solves(tmp_path, monkeypatch):
+def test_pattern_standings_stay_clear_of_weak_on_clean_solves(tmp_path, monkeypatch):
     conn = seed_db(tmp_path, monkeypatch)
     for _ in range(5):
         log_and_enrich(conn, monkeypatch, "clean")
 
-    assert service.pattern_standing(conn, "hashmap") == service.PatternStanding(
-        pattern="hashmap", attempts=5, struggle_rate=0.0, score=5.0, weak=False, enough_data=True
-    )
+    assert service.pattern_standings(conn, ["hashmap"]) == [
+        service.PatternStanding(
+            pattern="hashmap", attempts=5, struggle_rate=0.0, score=5.0,
+            weak=False, enough_data=True,
+        )
+    ]
 
 
-def test_pattern_standing_separates_struggling_from_failing(tmp_path, monkeypatch):
+def test_pattern_standings_separate_struggling_from_failing(tmp_path, monkeypatch):
     """Same 100% struggle rate as the weak case above, a very different score."""
     conn = seed_db(tmp_path, monkeypatch)
     for _ in range(5):
         log_and_enrich(conn, monkeypatch, "struggled")
 
-    standing = service.pattern_standing(conn, "hashmap")
+    [standing] = service.pattern_standings(conn, ["hashmap"])
     assert standing.struggle_rate == 1.0
     assert standing.score == pytest.approx(3.0)
     assert standing.weak is False
+
+
+def test_pattern_standings_report_every_main_pattern_of_the_solve(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+    log_tagged(conn, monkeypatch, 1, "failed", main_patterns=["hashmap", "two-pointers"])
+
+    standings = service.pattern_standings(conn, ["hashmap", "two-pointers"])
+
+    assert [(s.pattern, s.attempts, s.score) for s in standings] == [
+        ("hashmap", 1, 1.0),
+        ("two-pointers", 1, 1.0),
+    ]
 
 
 def test_a_stored_review_pulls_the_pattern_score_down(tmp_path, monkeypatch):
@@ -334,7 +367,7 @@ def test_a_stored_review_pulls_the_pattern_score_down(tmp_path, monkeypatch):
         log_and_enrich(conn, monkeypatch, "clean")
     result = service.log_solve(conn, 1, "clean", CODE)
     service.enrich_solution_now(conn, result.solution_id, service.get_problem(conn, 1), CODE)
-    assert service.pattern_standing(conn, "hashmap").score == 5.0
+    assert service.pattern_standings(conn, ["hashmap"])[0].score == 5.0
 
     monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: FEEDBACK)
     service.review_solution_now(
@@ -342,7 +375,7 @@ def test_a_stored_review_pulls_the_pattern_score_down(tmp_path, monkeypatch):
     )
 
     # 0.7*5 + 0.3*1 = 3.8 for that solve, folded in at alpha 0.2: 0.8*5 + 0.2*3.8
-    assert service.pattern_standing(conn, "hashmap").score == pytest.approx(4.76)
+    assert service.pattern_standings(conn, ["hashmap"])[0].score == pytest.approx(4.76)
 
 
 def test_saved_evidence_is_read_without_any_rebuild(tmp_path, monkeypatch):
@@ -359,7 +392,7 @@ def test_saved_evidence_is_read_without_any_rebuild(tmp_path, monkeypatch):
 
     reviewed = pytest.approx(4.76)  # four clean solves, then 0.7*5 + 0.3*1 folded in
     assert service.pattern_table(conn)[0]["score"] == reviewed
-    assert service.pattern_standing(conn, "hashmap", today).score == reviewed
+    assert service.pattern_standings(conn, ["hashmap"], today)[0].score == reviewed
     plan = service.daily_plan(conn, today, config.DAILY_TARGET)
     assert plan.analysis["patterns"][0]["score"] == reviewed
     assert service.weekly_review(conn, today).patterns[0].score == reviewed
@@ -377,7 +410,7 @@ def test_mastery_readers_write_nothing_and_call_no_model(tmp_path, monkeypatch):
     before = conn.total_changes
 
     service.pattern_table(conn)
-    service.pattern_standing(conn, "hashmap", today)
+    service.pattern_standings(conn, ["hashmap"], today)
     service.daily_plan(conn, today, config.DAILY_TARGET)
     service.weekly_review(conn, today)
 
@@ -456,8 +489,8 @@ def test_solution_history_returns_every_solve_newest_first(tmp_path, monkeypatch
     assert history["title"] == "Two Sum"
     assert [s["outcome"] for s in history["solves"]] == ["clean", "failed"]
     assert history["solves"][1]["code"] == "first attempt"
-    assert history["solves"][0]["pattern"] == "hashmap"
-    assert history["solves"][1]["pattern"] is None  # logged before enrichment ran
+    assert history["solves"][0]["main_patterns"] == ["hashmap"]
+    assert history["solves"][1]["main_patterns"] == []  # logged before enrichment ran
 
 
 def test_solution_history_notes_the_canonical_approaches_not_used(tmp_path, monkeypatch):
@@ -497,7 +530,7 @@ def test_solved_problems_aggregates_one_row_per_problem(tmp_path, monkeypatch):
     assert rows[0]["number"] == 1
     assert rows[0]["solves"] == 2
     assert rows[0]["last_outcome"] == "clean"
-    assert rows[0]["pattern"] == "hashmap"
+    assert rows[0]["main_patterns"] == ["hashmap"]
 
 
 THREE_SUM = {
@@ -572,13 +605,7 @@ def scored_attempt(conn, day, outcome, pattern="hashmap", number=1):
         (number, attempt_id, day.isoformat()),
     ).lastrowid
     if pattern:
-        conn.execute(
-            """
-            INSERT INTO enrichments (solution_id, pattern, secondary_patterns, data_structures)
-            VALUES (?, ?, '[]', '[]')
-            """,
-            (solution_id, pattern),
-        )
+        tag_solution(conn, solution_id, pattern)
     conn.commit()
     return solution_id
 
@@ -606,8 +633,22 @@ def test_weekly_review_counts_an_untagged_solve_without_inventing_a_pattern(tmp_
     review = service.weekly_review(conn, WEEK_TODAY)
 
     assert len(review.attempts) == 1
-    assert review.attempts[0]["pattern"] is None
+    assert review.attempts[0]["main_patterns"] == []
     assert review.patterns == []
+
+
+def test_weekly_review_lists_every_main_pattern_of_a_solve(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+    solution_id = scored_attempt(conn, WEEK_TODAY, "clean", pattern=None)
+    tag_solution(conn, solution_id, "hashmap", "two-pointers")
+
+    review = service.weekly_review(conn, WEEK_TODAY)
+
+    assert review.attempts[0]["main_patterns"] == ["hashmap", "two-pointers"]
+    assert [(p.pattern, p.attempts_week) for p in review.patterns] == [
+        ("hashmap", 1),
+        ("two-pointers", 1),
+    ]
 
 
 def test_weekly_review_says_too_early_below_the_attempt_floor(tmp_path, monkeypatch):

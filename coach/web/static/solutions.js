@@ -1,9 +1,9 @@
 /* Solutions page: every solved problem, expanding to the code you wrote.
-   el()/getJSON() come from dom.js, loaded before this script. */
+   el()/getJSON()/patternBadges() come from dom.js, loaded before this script. */
 
 function summaryLine(p) {
   const parts = [`${p.solves} solve${p.solves === 1 ? "" : "s"}`, `last ${p.last_solved} · ${p.last_outcome}`];
-  if (p.pattern) parts.push(p.pattern);
+  if (p.main_patterns.length) parts.push(p.main_patterns.join(", "));
   return parts.join(" · ");
 }
 
@@ -105,10 +105,10 @@ function renderSolve(s, number) {
   const block = el("div", { class: "solve" }, [
     el("p", { class: "solve-meta", text: meta.join(" · ") }),
   ]);
-  if (s.pattern) {
+  if (s.main_patterns.length) {
     block.append(
       el("p", {}, [
-        el("span", { class: "badge pattern", text: s.pattern }),
+        ...patternBadges(s.main_patterns),
         el("span", { text: s.key_trick ? ` ${s.key_trick}` : "" }),
       ])
     );

@@ -30,3 +30,12 @@ function topicCard(title, hint, items, render) {
   card.append(el("ul", {}, items.map(render)));
   return card;
 }
+
+/* One badge per main pattern of a solve, space-separated. Main patterns are equal,
+   so none is drawn as the lead - Home's log result and Solutions show the same. */
+function patternBadges(patterns) {
+  return patterns.flatMap((pattern, i) => [
+    ...(i ? [" "] : []),
+    el("span", { class: "badge pattern", text: pattern }),
+  ]);
+}

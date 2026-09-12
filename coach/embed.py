@@ -1,3 +1,4 @@
+import json
 import sqlite3
 
 import numpy as np
@@ -9,8 +10,8 @@ class EmbeddingsUnavailable(Exception):
     """sentence-transformers isn't installed (it lives in the optional `embed` extra)."""
 
 
-def card_text(title: str, pattern: str, key_trick: str, code: str) -> str:
-    return f"{title}\npattern: {pattern}\ntrick: {key_trick}\n\n{code}"
+def card_text(title: str, main_patterns: list[str], key_trick: str, code: str) -> str:
+    return f"{title}\npattern: {', '.join(main_patterns)}\ntrick: {key_trick}\n\n{code}"
 
 
 _model = None
@@ -41,17 +42,17 @@ def search(
     query: np.ndarray,
     top_k: int = 5,
     exclude_problem: int | None = None,
-    pattern: str | None = None,
+    patterns: list[str] | None = None,
 ) -> list[tuple[int, float]]:
     """Best cosine score per solved problem, descending. Vectors are unit-norm.
 
-    With `pattern` set, only solutions tagged with that pattern are considered -
-    the embedding then ranks *within* the pattern instead of across all of them,
-    so an unrelated pattern never wins just for being the least-bad match.
+    With `patterns` set, only solutions sharing at least one of those main patterns
+    are considered - the embedding then ranks *within* them instead of across every
+    pattern, so an unrelated pattern never wins just for being the least-bad match.
     """
     rows = conn.execute(
         """
-        SELECT e.vector, s.problem_number, en.pattern
+        SELECT e.vector, s.problem_number, en.main_patterns
         FROM embeddings e
         JOIN solutions s ON s.id = e.solution_id
         JOIN enrichments en ON en.solution_id = s.id
@@ -63,7 +64,7 @@ def search(
         number = row["problem_number"]
         if number == exclude_problem:
             continue
-        if pattern is not None and row["pattern"] != pattern:
+        if patterns is not None and set(patterns).isdisjoint(json.loads(row["main_patterns"])):
             continue
         vector = np.frombuffer(row["vector"], dtype=np.float32)
         score = float(np.dot(vector, query))

@@ -1,9 +1,13 @@
 import json
 
+import pytest
+from conftest import tag_solution
+from pydantic import ValidationError
+
 from coach import db, enrich
 
 ENRICHMENT = enrich.Enrichment(
-    pattern="hashmap",
+    main_patterns=["hashmap"],
     intended_pattern="hashmap",
     intended_secondary_patterns=["two-pointers"],
     secondary_patterns=[],
@@ -30,6 +34,11 @@ def add_solution(conn, code="code"):
     ).lastrowid
 
 
+def answer_with(**fields):
+    """A model answer with `fields` overriding ENRICHMENT, validated the way a real one is."""
+    return enrich.Enrichment(**{**ENRICHMENT.model_dump(), **fields})
+
+
 def test_pattern_vocabulary_is_unique_and_kebab_case():
     assert len(enrich.PATTERNS) == 26
     assert len(set(enrich.PATTERNS)) == 26
@@ -38,20 +47,59 @@ def test_pattern_vocabulary_is_unique_and_kebab_case():
         assert " " not in pattern
 
 
-def test_save_and_missing(tmp_path):
+def test_an_answer_without_a_main_pattern_is_rejected():
+    """Every tagged solve needs something to be scored under. An answer that breaks
+    that raises here, and llm.parse turns it into LLMUnavailable - the solve stays
+    saved, untagged, for `coach enrich` to backfill."""
+    with pytest.raises(ValidationError):
+        answer_with(main_patterns=[])
+
+
+def test_an_answer_lists_each_pattern_once():
+    """A repeated main pattern would count one solve twice toward its mastery, and a
+    main pattern repeated as a secondary would be shown twice after logging."""
+    e = answer_with(
+        main_patterns=["dfs", "dp-knapsack", "dfs"], secondary_patterns=["dfs", "hashmap"]
+    )
+
+    assert e.main_patterns == ["dfs", "dp-knapsack"]
+    assert e.secondary_patterns == ["hashmap"]
+
+
+def test_save_and_to_tag(tmp_path):
     conn = make_db(tmp_path)
     first = add_solution(conn)
     second = add_solution(conn)
 
-    assert [r["solution_id"] for r in enrich.missing(conn)] == [first, second]
+    assert [r["solution_id"] for r in enrich.to_tag(conn)] == [first, second]
 
     enrich.save(conn, first, ENRICHMENT)
-    assert [r["solution_id"] for r in enrich.missing(conn)] == [second]
+    assert [r["solution_id"] for r in enrich.to_tag(conn)] == [second]
 
     row = conn.execute("SELECT * FROM enrichments WHERE solution_id = ?", (first,)).fetchone()
-    assert row["pattern"] == "hashmap"
+    assert json.loads(row["main_patterns"]) == ["hashmap"]
     assert json.loads(row["data_structures"]) == ["dict"]
     assert row["prompt_version"] == enrich.PROMPT_VERSION
+
+
+def test_save_stores_every_main_pattern(tmp_path):
+    conn = make_db(tmp_path)
+    solution_id = add_solution(conn)
+
+    enrich.save(conn, solution_id, answer_with(main_patterns=["dfs", "dp-knapsack"]))
+
+    row = conn.execute("SELECT main_patterns FROM enrichments").fetchone()
+    assert json.loads(row["main_patterns"]) == ["dfs", "dp-knapsack"]
+
+
+def test_to_tag_includes_tagged_solutions_only_when_retagging(tmp_path):
+    conn = make_db(tmp_path)
+    tagged = add_solution(conn)
+    untagged = add_solution(conn)
+    enrich.save(conn, tagged, ENRICHMENT)
+
+    assert [r["solution_id"] for r in enrich.to_tag(conn)] == [untagged]
+    assert [r["solution_id"] for r in enrich.to_tag(conn, retag=True)] == [tagged, untagged]
 
 
 def stored_canonical(conn):
@@ -116,33 +164,31 @@ CANONICAL = ("hashmap", ["two-pointers"])
 def test_off_pattern_accepts_any_canonical_approach():
     intended, alternates = CANONICAL
     # the central approach, and an alternate one, are both on-pattern
-    assert enrich.off_pattern("hashmap", [], intended, alternates) is False
-    assert enrich.off_pattern("two-pointers", [], intended, alternates) is False
-    # so is a solve that reached one of them as a secondary tag
-    assert enrich.off_pattern("math", ["two-pointers"], intended, alternates) is False
+    assert enrich.off_pattern(["hashmap"], [], intended, alternates) is False
+    assert enrich.off_pattern(["two-pointers"], [], intended, alternates) is False
+    # so is a solve that reached one of them as another main pattern, or as a secondary tag
+    assert enrich.off_pattern(["math", "two-pointers"], [], intended, alternates) is False
+    assert enrich.off_pattern(["math"], ["two-pointers"], intended, alternates) is False
     # nothing canonical anywhere -> the sharp signal fires
-    assert enrich.off_pattern("math", ["stack"], intended, alternates) is True
+    assert enrich.off_pattern(["math", "stack"], ["greedy"], intended, alternates) is True
     # a problem that was never enriched has no canonical set to be outside of
-    assert enrich.off_pattern("math", [], None, []) is False
+    assert enrich.off_pattern(["math"], [], None, []) is False
 
 
 def test_unused_canonical_lists_what_is_left_central_first():
     intended, alternates = CANONICAL
-    assert enrich.unused_canonical("hashmap", [], intended, alternates) == ["two-pointers"]
-    assert enrich.unused_canonical("two-pointers", [], intended, alternates) == ["hashmap"]
+    assert enrich.unused_canonical(["hashmap"], [], intended, alternates) == ["two-pointers"]
+    assert enrich.unused_canonical(["two-pointers"], [], intended, alternates) == ["hashmap"]
     # an off-pattern solve gets the whole canonical set, central approach first
-    assert enrich.unused_canonical("math", [], intended, alternates) == ["hashmap", "two-pointers"]
+    assert enrich.unused_canonical(["math"], [], intended, alternates) == ["hashmap", "two-pointers"]
     # nothing left to suggest once every canonical approach has been practised
-    assert enrich.unused_canonical("hashmap", ["two-pointers"], intended, alternates) == []
-    assert enrich.unused_canonical("math", [], None, []) == []
+    assert enrich.unused_canonical(["hashmap"], ["two-pointers"], intended, alternates) == []
+    assert enrich.unused_canonical(["hashmap", "two-pointers"], [], intended, alternates) == []
+    assert enrich.unused_canonical(["math"], [], None, []) == []
 
 
-def enrich_solution_row(conn, pattern, secondary=()):
-    solution_id = add_solution(conn)
-    conn.execute(
-        "INSERT INTO enrichments (solution_id, pattern, secondary_patterns) VALUES (?, ?, ?)",
-        (solution_id, pattern, json.dumps(list(secondary))),
-    )
+def enrich_solution_row(conn, *main_patterns, secondary=()):
+    tag_solution(conn, add_solution(conn), *main_patterns, secondary=secondary)
     conn.commit()
 
 
@@ -161,6 +207,14 @@ def test_off_pattern_problems_matches_an_alternate_in_solution_secondaries(tmp_p
     conn = make_db(tmp_path)
     enrich.save_intended(conn, 1, "hashmap", ["two-pointers"])
     enrich_solution_row(conn, "math", secondary=["two-pointers"])
+
+    assert enrich.off_pattern_problems(conn) == []
+
+
+def test_off_pattern_problems_clears_on_a_canonical_second_main_pattern(tmp_path):
+    conn = make_db(tmp_path)
+    enrich.save_intended(conn, 1, "hashmap", ["two-pointers"])
+    enrich_solution_row(conn, "math", "two-pointers")
 
     assert enrich.off_pattern_problems(conn) == []
 

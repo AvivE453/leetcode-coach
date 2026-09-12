@@ -2,11 +2,11 @@ import json
 import sqlite3
 from typing import Literal, NamedTuple, get_args
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 from coach import config, llm
 
-PROMPT_VERSION = "enrich-v3"
+PROMPT_VERSION = "enrich-v5"
 
 Pattern = Literal[
     "two-pointers",
@@ -41,7 +41,7 @@ PATTERNS: tuple[str, ...] = get_args(Pattern)
 
 
 class Enrichment(BaseModel):
-    pattern: Pattern
+    main_patterns: list[Pattern] = Field(min_length=1)
     intended_pattern: Pattern
     intended_secondary_patterns: list[Pattern]
     secondary_patterns: list[Pattern]
@@ -49,6 +49,15 @@ class Enrichment(BaseModel):
     key_trick: str
     time_complexity: str
     space_complexity: str
+
+    @model_validator(mode="after")
+    def list_each_pattern_once(self) -> "Enrichment":
+        """Every main pattern is scored in full, so a repeat would count one solve twice."""
+        self.main_patterns = list(dict.fromkeys(self.main_patterns))
+        self.secondary_patterns = [
+            p for p in dict.fromkeys(self.secondary_patterns) if p not in self.main_patterns
+        ]
+        return self
 
 
 PROMPT = """\
@@ -65,10 +74,14 @@ Solution code:
 ```
 
 Fill in:
-- pattern: the single algorithmic pattern that best describes this solution's approach,
-  as written - even when that approach is suboptimal or wrong
+- main_patterns: every algorithmic pattern this solution is genuinely built on, as written
+  - even when that approach is suboptimal or wrong. Judge this solution on its own merits;
+  do not default to naming just one. List every pattern the solution cannot be properly
+  described without (a memoized DFS computing a knapsack recurrence is genuinely both dfs
+  and dp-knapsack, for example) - a step that merely supports the approach belongs in
+  secondary_patterns instead. No main pattern ranks above another
 - intended_pattern: the pattern the canonical optimal solution to this PROBLEM uses,
-  regardless of how this code solved it (equal to pattern when the author took the
+  regardless of how this code solved it (one of main_patterns when the author took the
   intended approach)
 - intended_secondary_patterns: other approaches that are genuinely canonical for this
   PROBLEM - judge the problem itself, not the code above. Include a pattern only if a
@@ -76,7 +89,7 @@ Fill in:
   problem properly. Never repeat intended_pattern; never list brute force, nor a
   generic supporting structure the real approach happens to use. Usually empty
 - secondary_patterns: other patterns genuinely load-bearing in this solution (usually
-  empty; never repeat the primary pattern)
+  empty; never repeat a main pattern)
 - data_structures: concrete data structures the code relies on (e.g. "dict", "deque")
 - key_trick: one sentence capturing the core insight, specific enough to distinguish
   this problem from others with the same pattern
@@ -101,13 +114,13 @@ def save(
     conn.execute(
         """
         INSERT OR REPLACE INTO enrichments
-            (solution_id, pattern, secondary_patterns, data_structures,
+            (solution_id, main_patterns, secondary_patterns, data_structures,
              key_trick, time_complexity, space_complexity, model, prompt_version)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             solution_id,
-            e.pattern,
+            json.dumps(e.main_patterns),
             json.dumps(e.secondary_patterns),
             json.dumps(e.data_structures),
             e.key_trick,
@@ -177,7 +190,7 @@ def canonical_patterns(intended: str | None, intended_secondary: list[str] | Non
 
 
 def off_pattern(
-    pattern: str,
+    main_patterns: list[str],
     secondary: list[str] | None,
     intended: str | None,
     intended_secondary: list[str] | None,
@@ -186,16 +199,17 @@ def off_pattern(
 
     The sharp signal: it drives the off-pattern warning on a logged solve and the plan's forced
     re-solve slot, so it must not fire for a solve that simply took a different but
-    equally canonical route. Unknown canonical set (never enriched) is never off.
+    equally canonical route - as any of its main patterns, or as a secondary.
+    Unknown canonical set (never enriched) is never off.
     """
     canonical = canonical_patterns(intended, intended_secondary)
     if not canonical:
         return False
-    return {pattern, *(secondary or [])}.isdisjoint(canonical)
+    return {*main_patterns, *(secondary or [])}.isdisjoint(canonical)
 
 
 def unused_canonical(
-    pattern: str,
+    main_patterns: list[str],
     secondary: list[str] | None,
     intended: str | None,
     intended_secondary: list[str] | None,
@@ -206,34 +220,40 @@ def unused_canonical(
     informational: it is computed from stored columns, costs no API call, and is
     shown whether or not `off_pattern` fired.
     """
-    used = {pattern, *(secondary or [])}
+    used = {*main_patterns, *(secondary or [])}
     return [p for p in canonical_patterns(intended, intended_secondary) if p not in used]
 
 
 def off_pattern_problems(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """Solved problems where no solution ever used any canonical approach.
 
-    A problem clears this list as soon as one solve touches one accepted pattern -
+    A problem clears this list as soon as one solve used one accepted pattern -
     whether that is `intended_pattern` or one of `intended_secondary_patterns`, and
-    whether it was that solve's primary or a secondary tag.
+    whether the solve had it as a main pattern or a secondary. `used` flattens every
+    solve's tags into (problem, pattern) pairs, so the check reads a single list.
     """
     return conn.execute(
         """
+        WITH used AS (
+            SELECT s.problem_number, tag.value AS pattern
+            FROM solutions s
+            JOIN enrichments en ON en.solution_id = s.id
+            JOIN json_each(en.main_patterns) tag
+            UNION
+            SELECT s.problem_number, tag.value
+            FROM solutions s
+            JOIN enrichments en ON en.solution_id = s.id
+            JOIN json_each(en.secondary_patterns) tag
+        )
         SELECT p.number, p.slug, p.title, p.difficulty, p.intended_pattern,
                p.intended_secondary_patterns
         FROM problems p
         WHERE p.intended_pattern IS NOT NULL
           AND NOT EXISTS (
-            SELECT 1
-            FROM solutions s JOIN enrichments en ON en.solution_id = s.id
-            WHERE s.problem_number = p.number
-              AND (en.pattern = p.intended_pattern
-                   OR en.secondary_patterns LIKE '%"' || p.intended_pattern || '"%'
-                   OR EXISTS (
-                     SELECT 1 FROM json_each(p.intended_secondary_patterns) j
-                     WHERE en.pattern = j.value
-                        OR en.secondary_patterns LIKE '%"' || j.value || '"%'
-                   ))
+            SELECT 1 FROM used
+            WHERE used.problem_number = p.number
+              AND (used.pattern = p.intended_pattern
+                   OR used.pattern IN (SELECT value FROM json_each(p.intended_secondary_patterns)))
           )
         ORDER BY p.number
         """
@@ -260,15 +280,20 @@ def hypothesize(statement: str, model: str | None = None) -> QueryCard:
     return llm.parse(QUERY_PROMPT.format(statement=statement), QueryCard, model=model)
 
 
-def missing(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Solutions that still need an enrichment row."""
+def to_tag(conn: sqlite3.Connection, retag: bool = False) -> list[sqlite3.Row]:
+    """Solutions to send to the model: the untagged ones, or every one when re-tagging.
+
+    Re-tagging is how a changed prompt reaches solves tagged before it. It costs one
+    API call per solution, so it is only ever asked for, never the default.
+    """
     return conn.execute(
         """
         SELECT s.id AS solution_id, s.code, p.*
         FROM solutions s
         JOIN problems p ON p.number = s.problem_number
         LEFT JOIN enrichments e ON e.solution_id = s.id
-        WHERE e.solution_id IS NULL
+        WHERE ? OR e.solution_id IS NULL
         ORDER BY s.id
-        """
+        """,
+        (retag,),
     ).fetchall()

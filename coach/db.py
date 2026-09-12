@@ -3,7 +3,22 @@ from pathlib import Path
 
 from coach import config
 
-SCHEMA = """
+# Its own constant because rebuild_single_pattern_enrichments() recreates the table from it.
+ENRICHMENTS_TABLE = """
+CREATE TABLE IF NOT EXISTS enrichments (
+    solution_id INTEGER PRIMARY KEY REFERENCES solutions(id),
+    main_patterns TEXT NOT NULL,
+    secondary_patterns TEXT NOT NULL DEFAULT '[]',
+    data_structures TEXT NOT NULL DEFAULT '[]',
+    key_trick TEXT,
+    time_complexity TEXT,
+    space_complexity TEXT,
+    model TEXT,
+    prompt_version TEXT
+);
+"""
+
+SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS problems (
     number INTEGER PRIMARY KEY,
     slug TEXT NOT NULL UNIQUE,
@@ -34,18 +49,7 @@ CREATE TABLE IF NOT EXISTS solutions (
     created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS enrichments (
-    solution_id INTEGER PRIMARY KEY REFERENCES solutions(id),
-    pattern TEXT NOT NULL,
-    secondary_patterns TEXT NOT NULL DEFAULT '[]',
-    data_structures TEXT NOT NULL DEFAULT '[]',
-    key_trick TEXT,
-    time_complexity TEXT,
-    space_complexity TEXT,
-    model TEXT,
-    prompt_version TEXT
-);
-
+{ENRICHMENTS_TABLE}
 CREATE TABLE IF NOT EXISTS reviews (
     solution_id INTEGER PRIMARY KEY REFERENCES solutions(id),
     verdict TEXT NOT NULL,
@@ -88,6 +92,7 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
 
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    rebuild_single_pattern_enrichments(conn)
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(problems)")}
     if "intended_pattern" not in columns:
         conn.execute("ALTER TABLE problems ADD COLUMN intended_pattern TEXT")
@@ -102,6 +107,38 @@ def init_schema(conn: sqlite3.Connection) -> None:
     # cached it has no reader left.
     conn.execute("DROP TABLE IF EXISTS pattern_scores")
     conn.commit()
+
+
+def rebuild_single_pattern_enrichments(conn: sqlite3.Connection) -> None:
+    """Carry enrichments tagged with one `pattern` over to a `main_patterns` list.
+
+    A solve can have several main patterns now. SQLite before 3.35 cannot drop a
+    column, and the old one was NOT NULL - every writer would have had to keep
+    filling it - so the table is rebuilt instead, in one transaction: a failure
+    part-way rolls back to the old table exactly as it was.
+    """
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(enrichments)")}
+    if "pattern" not in columns:
+        return
+    try:
+        conn.executescript(
+            f"""
+            BEGIN;
+            ALTER TABLE enrichments RENAME TO enrichments_single_pattern;
+            {ENRICHMENTS_TABLE}
+            INSERT INTO enrichments
+                (solution_id, main_patterns, secondary_patterns, data_structures,
+                 key_trick, time_complexity, space_complexity, model, prompt_version)
+            SELECT solution_id, json_array(pattern), secondary_patterns, data_structures,
+                   key_trick, time_complexity, space_complexity, model, prompt_version
+            FROM enrichments_single_pattern;
+            DROP TABLE enrichments_single_pattern;
+            COMMIT;
+            """
+        )
+    except sqlite3.Error:
+        conn.rollback()
+        raise
 
 
 def upsert_problems(conn: sqlite3.Connection, problems: list[dict]) -> None:

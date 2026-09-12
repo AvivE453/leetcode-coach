@@ -56,8 +56,8 @@ def init(
 def echo_neighbors(neighbors: list[service.Neighbor]) -> None:
     for i, n in enumerate(neighbors, 1):
         typer.echo(f"  {i}. #{n.number} {n.title} [{n.difficulty}]  {n.score:.2f}")
-        if n.pattern:
-            typer.echo(f"     {n.pattern}: {n.key_trick}")
+        if n.main_patterns:
+            typer.echo(f"     {', '.join(n.main_patterns)}: {n.key_trick}")
 
 
 @app.command()
@@ -108,10 +108,12 @@ def similar(
 
 
 @app.command("enrich")
-def enrich_cmd():
+def enrich_cmd(
+    retag: bool = typer.Option(False, "--retag", help="Re-tag every solution, not just untagged ones (one API call each)"),
+):
     """Backfill pattern tags and embeddings for solutions logged without them."""
     conn = db.connect()
-    todo = enrich.missing(conn)
+    todo = enrich.to_tag(conn, retag)
     done = 0
     for row in todo:
         tagged = service.tag_solution_now(conn, row["solution_id"], row, row["code"])
@@ -119,27 +121,36 @@ def enrich_cmd():
             typer.echo(f"Stopped at #{row['number']}: {tagged.skipped}")
             break
         mismatch = f"  (canonical: {tagged.intended_pattern})" if tagged.off_pattern else ""
-        typer.echo(f"#{row['number']} {row['title']}: {tagged.pattern} · {tagged.key_trick}{mismatch}")
+        patterns = ", ".join(tagged.main_patterns)
+        typer.echo(f"#{row['number']} {row['title']}: {patterns} · {tagged.key_trick}{mismatch}")
         done += 1
     typer.echo(f"Enriched {done}/{len(todo)} solution(s).")
 
     # Read from the database rather than from this run's results, so a solution
-    # tagged by an earlier run that stopped before embedding is picked up too.
+    # tagged by an earlier run that stopped before embedding is picked up too. A
+    # re-tag re-embeds every tagged solve: the card names its patterns, so a vector
+    # kept from before would describe tags the solve no longer has.
     pending = conn.execute(
         """
-        SELECT s.id AS solution_id, s.code, p.title, en.pattern, en.key_trick
+        SELECT s.id AS solution_id, s.code, p.title, en.main_patterns, en.key_trick
         FROM solutions s
         JOIN problems p ON p.number = s.problem_number
         JOIN enrichments en ON en.solution_id = s.id
         LEFT JOIN embeddings em ON em.solution_id = s.id
-        WHERE em.solution_id IS NULL
+        WHERE ? OR em.solution_id IS NULL
         ORDER BY s.id
-        """
+        """,
+        (retag,),
     ).fetchall()
     if pending:
         try:
             vectors = embed.encode(
-                [embed.card_text(r["title"], r["pattern"], r["key_trick"], r["code"]) for r in pending]
+                [
+                    embed.card_text(
+                        r["title"], json.loads(r["main_patterns"]), r["key_trick"], r["code"]
+                    )
+                    for r in pending
+                ]
             )
         except embed.EmbeddingsUnavailable as exc:
             typer.echo(f"Embeddings skipped ({exc})")

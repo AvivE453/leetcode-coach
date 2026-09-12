@@ -2,6 +2,7 @@ import json
 from datetime import date
 
 import pytest
+from conftest import tag_solution
 
 from coach import db, mastery, service
 from coach.weekly import analyze as weekly_analyze
@@ -67,24 +68,18 @@ def make_db(tmp_path):
     return conn
 
 
-def add_solve(conn, day, outcome, pattern, review=None, secondary=()):
+def add_solve(conn, day, outcome, pattern, review=None, secondary=(), problem=1):
     """One attempt and its solution; tagged when `pattern` is given, reviewed when `review` is."""
     attempt_id = conn.execute(
-        "INSERT INTO attempts (problem_number, date, outcome) VALUES (1, ?, ?)",
-        (day, outcome),
+        "INSERT INTO attempts (problem_number, date, outcome) VALUES (?, ?, ?)",
+        (problem, day, outcome),
     ).lastrowid
     solution_id = conn.execute(
-        "INSERT INTO solutions (problem_number, attempt_id, code, created_at) VALUES (1, ?, 'c', ?)",
-        (attempt_id, day),
+        "INSERT INTO solutions (problem_number, attempt_id, code, created_at) VALUES (?, ?, 'c', ?)",
+        (problem, attempt_id, day),
     ).lastrowid
     if pattern:
-        conn.execute(
-            """
-            INSERT INTO enrichments (solution_id, pattern, secondary_patterns, data_structures)
-            VALUES (?, ?, ?, '[]')
-            """,
-            (solution_id, pattern, json.dumps(list(secondary))),
-        )
+        tag_solution(conn, solution_id, pattern, secondary=secondary)
     if review:
         add_review(conn, solution_id, *review, day=day)
     return solution_id
@@ -146,21 +141,20 @@ def test_scoring_behavior_is_pinned(tmp_path):
 
     analysis = weekly_analyze.analyze(conn, PIN_TODAY)
     assert analysis["patterns"] == [
-        {"pattern": "dp-1d", "attempts": 5, "rough": 4, "struggle_rate": 0.8,
+        {"pattern": "dp-1d", "solved": 1, "attempts": 5, "rough": 4, "struggle_rate": 0.8,
          "score": pytest.approx(1.86208), "last_date": date(2026, 9, 3)},
-        {"pattern": "graph", "attempts": 4, "rough": 4, "struggle_rate": 1.0,
+        {"pattern": "graph", "solved": 1, "attempts": 4, "rough": 4, "struggle_rate": 1.0,
          "score": pytest.approx(1.4608), "last_date": date(2026, 9, 4)},
-        {"pattern": "hashmap", "attempts": 5, "rough": 3, "struggle_rate": 0.6,
+        {"pattern": "hashmap", "solved": 1, "attempts": 5, "rough": 3, "struggle_rate": 0.6,
          "score": pytest.approx(2.87392), "last_date": date(2026, 9, 5)},
     ]
     assert analysis["weak_patterns"] == ["dp-1d"]
 
+    # two-pointers, a secondary on one hashmap solve, practiced nothing: no row
     assert service.pattern_table(conn) == [
         {"pattern": "dp-1d", "solved": 1, "score": pytest.approx(1.86208), "attempts": 5, "rough": 4},
         {"pattern": "graph", "solved": 1, "score": pytest.approx(1.4608), "attempts": 4, "rough": 4},
         {"pattern": "hashmap", "solved": 1, "score": pytest.approx(2.87392), "attempts": 5, "rough": 3},
-        # only ever a secondary: it has coverage, but no practice to score
-        {"pattern": "two-pointers", "solved": 1, "score": None, "attempts": None, "rough": None},
     ]
 
     review = service.weekly_review(conn, PIN_TODAY)
@@ -213,12 +207,45 @@ def test_pattern_stats_takes_every_field_from_the_same_attempts(tmp_path):
     add_solve(conn, "2026-08-03", "struggled", "dp-1d")
 
     assert mastery.pattern_stats(mastery.load_history(conn)) == [
-        {"pattern": "dp-1d", "attempts": 1, "rough": 1, "struggle_rate": 1.0,
+        {"pattern": "dp-1d", "solved": 1, "attempts": 1, "rough": 1, "struggle_rate": 1.0,
          "score": 3.0, "last_date": date(2026, 8, 3)},
-        {"pattern": "hashmap", "attempts": 2, "rough": 1, "struggle_rate": 0.5,
+        {"pattern": "hashmap", "solved": 1, "attempts": 2, "rough": 1, "struggle_rate": 0.5,
          "score": pytest.approx(4.2), "last_date": date(2026, 8, 2)},
     ]
     assert mastery.pattern_stats([]) == []
+
+
+def test_pattern_stats_counts_distinct_problems(tmp_path):
+    """Solved is problems, not attempts: re-solving a problem adds practice, not coverage."""
+    conn = make_db(tmp_path)
+    conn.execute(
+        "INSERT INTO problems (number, slug, title, difficulty) VALUES (15, '3sum', '3Sum', 'Medium')"
+    )
+    add_solve(conn, "2026-08-01", "clean", "two-pointers")
+    add_solve(conn, "2026-08-02", "failed", "two-pointers")
+    add_solve(conn, "2026-08-03", "clean", "two-pointers", problem=15)
+
+    [stats] = mastery.pattern_stats(mastery.load_history(conn))
+
+    assert (stats["solved"], stats["attempts"]) == (2, 3)
+
+
+def test_a_solve_with_two_main_patterns_scores_each_in_full(tmp_path):
+    """Main patterns are equal: the solve is one attempt of each at its whole score -
+    never split between them, and never credited to the first one alone."""
+    conn = make_db(tmp_path)
+    solution_id = add_solve(conn, "2026-08-01", "struggled", None)
+    tag_solution(conn, solution_id, "dfs", "dp-knapsack")
+
+    history = mastery.load_history(conn)
+
+    assert [(a.pattern, a.problem, a.score) for a in history] == [
+        ("dfs", 1, 3.0),
+        ("dp-knapsack", 1, 3.0),
+    ]
+    assert [
+        (p["pattern"], p["solved"], p["attempts"], p["score"]) for p in mastery.pattern_stats(history)
+    ] == [("dfs", 1, 1, 3.0), ("dp-knapsack", 1, 1, 3.0)]
 
 
 def test_a_late_review_counts_the_moment_it_is_saved(tmp_path):

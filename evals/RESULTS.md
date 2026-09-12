@@ -77,6 +77,19 @@ with a label and the disagreement turned out to be the model's point:
 > the corpus labels one canonical section per problem, so there is no ground truth for
 > "which alternates are also acceptable" to score against. The numbers above were not
 > re-run, on the same reasoning as `review-v3`'s `strengths` field.
+>
+> `enrich-v4` replaced the solution's single `pattern` with `main_patterns` — every
+> pattern the code is built on, usually one, all equal — so `run_evals.py` now reads the
+> second row as "`intended_pattern` is among `main_patterns`". `intended_pattern` is asked
+> for exactly as before. Not re-run either: the corpus has no labels for which solutions
+> genuinely rest on two patterns, so the new behaviour has nothing to be scored against.
+>
+> `enrich-v5` reworded the `main_patterns` instruction to drop "usually exactly one" -
+> that framing biased the model toward a single pattern even when a solution genuinely
+> rested on two (observed on `data/coach.db`: a tree-traversal-via-DFS solve got only
+> `dfs`, never `tree`, while the prompt's only worked example was a *different* pattern
+> pair - dfs + dp-knapsack). The field, its meaning, and the worked example are
+> unchanged; only the framing around it changed. Not re-run: same reasoning as v4.
 
 The two-layer design holds: on canonical solutions the layers agree (as they should,
 since a canonical solution *is* the intended approach), and the one disagreement is

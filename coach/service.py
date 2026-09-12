@@ -42,7 +42,7 @@ class Neighbor:
     title: str
     difficulty: str
     score: float
-    pattern: str | None = None
+    main_patterns: list[str] = field(default_factory=list)
     key_trick: str | None = None
 
 
@@ -54,7 +54,7 @@ class EnrichResult:
     whether or not the API answers, so neither is an error.
     """
 
-    pattern: str | None = None
+    main_patterns: list[str] = field(default_factory=list)
     secondary_patterns: list[str] = field(default_factory=list)
     key_trick: str | None = None
     intended_pattern: str | None = None
@@ -113,7 +113,7 @@ class WeeklyReview:
 
     start: date
     end: date
-    attempts: list[sqlite3.Row]
+    attempts: list[dict]
     distinct_problems: int
     patterns: list[WeekPattern]
 
@@ -238,7 +238,7 @@ def log_solve(
 
 
 def neighbor_details(conn: sqlite3.Connection, neighbors: list[tuple[int, float]]) -> list[Neighbor]:
-    """Attach titles and the latest pattern/trick to raw (number, score) hits."""
+    """Attach titles and the latest main patterns/trick to raw (number, score) hits."""
     out = []
     for number, score in neighbors:
         p = conn.execute(
@@ -246,7 +246,7 @@ def neighbor_details(conn: sqlite3.Connection, neighbors: list[tuple[int, float]
         ).fetchone()
         en = conn.execute(
             """
-            SELECT en.pattern, en.key_trick
+            SELECT en.main_patterns, en.key_trick
             FROM solutions s JOIN enrichments en ON en.solution_id = s.id
             WHERE s.problem_number = ? ORDER BY s.id DESC LIMIT 1
             """,
@@ -258,7 +258,7 @@ def neighbor_details(conn: sqlite3.Connection, neighbors: list[tuple[int, float]
                 title=p["title"] if p else f"#{number}",
                 difficulty=p["difficulty"] if p else "",
                 score=score,
-                pattern=en["pattern"] if en else None,
+                main_patterns=json_list(en["main_patterns"]) if en else [],
                 key_trick=en["key_trick"] if en else None,
             )
         )
@@ -289,13 +289,15 @@ def tag_solution_now(
     # Two signals off one free set comparison: off_pattern is the sharp one (no
     # canonical approach used at all), also_solvable_with is informational.
     return EnrichResult(
-        pattern=e.pattern,
+        main_patterns=list(e.main_patterns),
         secondary_patterns=list(e.secondary_patterns),
         key_trick=e.key_trick,
         intended_pattern=canonical.intended,
         intended_secondary_patterns=canonical.secondary,
-        off_pattern=enrich.off_pattern(e.pattern, e.secondary_patterns, *canonical),
-        also_solvable_with=enrich.unused_canonical(e.pattern, e.secondary_patterns, *canonical),
+        off_pattern=enrich.off_pattern(e.main_patterns, e.secondary_patterns, *canonical),
+        also_solvable_with=enrich.unused_canonical(
+            e.main_patterns, e.secondary_patterns, *canonical
+        ),
     )
 
 
@@ -311,7 +313,7 @@ def enrich_solution_now(
     if tagged.skipped:
         return tagged
 
-    card = embed.card_text(problem["title"], tagged.pattern, tagged.key_trick, code)
+    card = embed.card_text(problem["title"], tagged.main_patterns, tagged.key_trick, code)
     try:
         vector = embed.encode([card])[0]
     except embed.EmbeddingsUnavailable as exc:
@@ -320,7 +322,7 @@ def enrich_solution_now(
     embed.store(conn, solution_id, vector)
     conn.commit()
     hits = embed.search(
-        conn, vector, top_k=3, exclude_problem=problem["number"], pattern=tagged.pattern
+        conn, vector, top_k=3, exclude_problem=problem["number"], patterns=tagged.main_patterns
     )
     return replace(tagged, neighbors=neighbor_details(conn, hits))
 
@@ -367,30 +369,37 @@ def standing_of(analysis: dict, pattern: str, attempts: int) -> str:
     return "weak" if pattern in analysis["weak_patterns"] else "on-track"
 
 
-def pattern_standing(
-    conn: sqlite3.Connection, pattern: str | None, today: date | None = None
-) -> PatternStanding | None:
-    """Struggle rate and weak/not-weak for one pattern, right after logging it.
+def pattern_standings(
+    conn: sqlite3.Connection, patterns: list[str], today: date | None = None
+) -> list[PatternStanding]:
+    """Struggle rate and weak/not-weak for each of a solve's main patterns, right after logging.
 
     Reuses weekly.analyze.analyze() wholesale rather than re-deriving its SQL - it is
-    pure SQL/Python, so recomputing it on every log costs nothing. Returns None when
-    there is no pattern to look up (enrichment was skipped).
+    pure SQL/Python, so recomputing it on every log costs nothing, and one analysis
+    answers for every pattern. No patterns (enrichment was skipped) means no
+    standings, and a pattern with no tagged history yet has nothing to stand on.
     """
-    if pattern is None:
-        return None
+    if not patterns:
+        return []
     analysis = weekly_analyze.analyze(conn, today or date.today())
-    row = next((p for p in analysis["patterns"] if p["pattern"] == pattern), None)
-    if row is None:
-        return None
-    standing = standing_of(analysis, pattern, row["attempts"])
-    return PatternStanding(
-        pattern=pattern,
-        attempts=row["attempts"],
-        struggle_rate=row["struggle_rate"],
-        score=row["score"],
-        weak=standing == "weak",
-        enough_data=standing != "too-early",
-    )
+    rows = {p["pattern"]: p for p in analysis["patterns"]}
+    standings = []
+    for pattern in patterns:
+        row = rows.get(pattern)
+        if row is None:
+            continue
+        standing = standing_of(analysis, pattern, row["attempts"])
+        standings.append(
+            PatternStanding(
+                pattern=pattern,
+                attempts=row["attempts"],
+                struggle_rate=row["struggle_rate"],
+                score=row["score"],
+                weak=standing == "weak",
+                enough_data=standing != "too-early",
+            )
+        )
+    return standings
 
 
 def stats_summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
@@ -449,16 +458,16 @@ def solved_problems(conn: sqlite3.Connection) -> list[dict]:
                    WHERE s2.problem_number = p.number ORDER BY s2.id DESC LIMIT 1
                ) AS last_outcome,
                (
-                   SELECT en.pattern FROM solutions s3
+                   SELECT en.main_patterns FROM solutions s3
                    JOIN enrichments en ON en.solution_id = s3.id
                    WHERE s3.problem_number = p.number ORDER BY s3.id DESC LIMIT 1
-               ) AS pattern
+               ) AS main_patterns
         FROM problems p JOIN solutions s ON s.problem_number = p.number
         GROUP BY p.number
         ORDER BY last_solved DESC, MAX(s.id) DESC
         """
     ).fetchall()
-    return [dict(r) for r in rows]
+    return [{**dict(r), "main_patterns": json_list(r["main_patterns"])} for r in rows]
 
 
 def matches_problem(problem: dict, query: str) -> bool:
@@ -509,7 +518,7 @@ def solution_history(conn: sqlite3.Connection, number: int) -> dict:
         """
         SELECT s.id, s.code, s.created_at,
                a.outcome, a.minutes, a.note,
-               en.pattern, en.secondary_patterns, en.key_trick,
+               en.main_patterns, en.secondary_patterns, en.key_trick,
                en.time_complexity, en.space_complexity
         FROM solutions s
         LEFT JOIN attempts a ON a.id = s.attempt_id
@@ -523,12 +532,13 @@ def solution_history(conn: sqlite3.Connection, number: int) -> dict:
     solves = []
     for r in rows:
         solve = dict(r)
+        solve["main_patterns"] = json_list(r["main_patterns"])
         solve["secondary_patterns"] = json_list(r["secondary_patterns"])
         solve["also_solvable_with"] = (
             enrich.unused_canonical(
-                r["pattern"], solve["secondary_patterns"], intended, intended_secondary
+                solve["main_patterns"], solve["secondary_patterns"], intended, intended_secondary
             )
-            if r["pattern"]
+            if solve["main_patterns"]
             else []
         )
         stored = review_llm.load(conn, r["id"])
@@ -586,8 +596,9 @@ def weekly_review(conn: sqlite3.Connection, today: date | None = None) -> Weekly
 
     all_time = {p["pattern"]: p for p in analysis["patterns"]}
     # Untagged solves (enrichment was skipped) still count as attempts and still
-    # show in the table; they just have no pattern to say anything about.
-    used = Counter(r["pattern"] for r in week["attempts"] if r["pattern"])
+    # show in the table; they just have no pattern to say anything about. A solve
+    # with several main patterns was practice of each.
+    used = Counter(pattern for r in week["attempts"] for pattern in r["main_patterns"])
 
     patterns = [
         WeekPattern(
@@ -611,47 +622,26 @@ def weekly_review(conn: sqlite3.Connection, today: date | None = None) -> Weekly
     )
 
 
-def pattern_counts(conn: sqlite3.Connection) -> list[dict]:
-    """Distinct solved problems per pattern — the coverage half of `pattern_table`.
-
-    A problem counts once under every pattern it was ever practiced with, primary
-    or secondary, across all of its solves: solving one problem two ways credits
-    both patterns, and re-solving the same way twice still credits it once. The
-    inner UNION deduplicates (problem, pattern) pairs before they are counted.
-    """
-    rows = conn.execute(
-        """
-        SELECT pattern, COUNT(DISTINCT problem_number) AS solved
-        FROM (
-            SELECT s.problem_number, en.pattern AS pattern
-            FROM solutions s JOIN enrichments en ON en.solution_id = s.id
-            UNION
-            SELECT s.problem_number, j.value AS pattern
-            FROM solutions s
-            JOIN enrichments en ON en.solution_id = s.id,
-                 json_each(en.secondary_patterns) j
-        )
-        GROUP BY pattern
-        ORDER BY solved DESC, pattern
-        """
-    ).fetchall()
-    return [{"pattern": r["pattern"], "solved": r["solved"]} for r in rows]
-
-
 def pattern_table(conn: sqlite3.Connection) -> list[dict]:
-    """The home page's pattern table: coverage and practice, one row per pattern.
+    """The home page's pattern table: one row per pattern a solve led with, most solved first.
 
-    Composed from the two definitions that already exist rather than a third query:
-    which patterns each problem credits (`pattern_counts`) and how each pattern is
-    going (`mastery.pattern_stats`). Practice is measured on the pattern a solve led
-    with, so a pattern only ever credited as a secondary has no practice row - its
-    score/attempts/rough are None, not a zero that would read as practiced-and-failed.
+    Every column comes from `mastery.pattern_stats`, so problems solved, mastery,
+    attempts and not-clean all count the same solves. The table used to join that to
+    a second query that also credited each solve's secondary patterns, which listed
+    patterns no solve had led with - rows of dashes, and solved counts larger than
+    the attempts beside them.
     """
-    practice = {p["pattern"]: p for p in mastery.pattern_stats(mastery.load_history(conn))}
-    table = []
-    for row in pattern_counts(conn):
-        p = practice.get(row["pattern"], {})
-        table.append(
-            {**row, "score": p.get("score"), "attempts": p.get("attempts"), "rough": p.get("rough")}
-        )
-    return table
+    stats = sorted(
+        mastery.pattern_stats(mastery.load_history(conn)),
+        key=lambda p: (-p["solved"], p["pattern"]),
+    )
+    return [
+        {
+            "pattern": p["pattern"],
+            "solved": p["solved"],
+            "score": p["score"],
+            "attempts": p["attempts"],
+            "rough": p["rough"],
+        }
+        for p in stats
+    ]

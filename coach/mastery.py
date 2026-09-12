@@ -99,7 +99,8 @@ def fold(scores: Iterable[float]) -> float | None:
 class ScoredAttempt:
     """One tagged solve, as mastery sees it."""
 
-    pattern: str  # the pattern the solve led with - never one of its secondaries
+    pattern: str  # one of the solve's main patterns - never one of its secondaries
+    problem: int
     day: date
     outcome: str
     score: float  # attempt_score(), with the review blended in when there is one
@@ -108,19 +109,23 @@ class ScoredAttempt:
 def load_history(conn: sqlite3.Connection) -> list[ScoredAttempt]:
     """Every tagged solve, scored, oldest first - the one read mastery is computed from.
 
-    Ordered by date and then id, so two solves from the same day fold in logging
-    order. Each review is joined onto the attempt it judges, so a review saved days
-    later re-scores that attempt wherever it sits. Untagged solves are left out:
-    with no pattern there is nothing to attribute them to.
+    A solve with several main patterns is one attempt of each, at its full score:
+    main patterns are equal, so the solve is neither split between them nor credited
+    to the first alone. Ordered by date and then id, so two solves from the same day
+    fold in logging order. Each review is joined onto the attempt it judges, so a
+    review saved days later re-scores that attempt wherever it sits. Untagged solves
+    are left out: with no pattern there is nothing to attribute them to.
     """
     rows = conn.execute(
         """
-        SELECT en.pattern, a.date, a.outcome, rv.verdict, rv.issues
+        SELECT tag.value AS pattern, a.problem_number, a.date, a.outcome,
+               rv.verdict, rv.issues
         FROM attempts a
         JOIN solutions s ON s.attempt_id = a.id
         JOIN enrichments en ON en.solution_id = s.id
+        JOIN json_each(en.main_patterns) tag
         LEFT JOIN reviews rv ON rv.solution_id = s.id
-        ORDER BY a.date, a.id
+        ORDER BY a.date, a.id, tag.key
         """
     ).fetchall()
 
@@ -130,6 +135,7 @@ def load_history(conn: sqlite3.Connection) -> list[ScoredAttempt]:
         history.append(
             ScoredAttempt(
                 pattern=r["pattern"],
+                problem=r["problem_number"],
                 day=date.fromisoformat(r["date"]),
                 outcome=r["outcome"],
                 score=attempt_score(r["outcome"], r["verdict"], issues),
@@ -141,11 +147,12 @@ def load_history(conn: sqlite3.Connection) -> list[ScoredAttempt]:
 def pattern_stats(history: Sequence[ScoredAttempt]) -> list[dict]:
     """Per-pattern practice aggregates, one row per pattern, ordered by name.
 
-    The single answer to "how is each pattern going": how many attempts, how many
-    were not clean (raw as `rough`, and as `struggle_rate`), the folded mastery
-    score, and when it was last practiced - all taken from the same attempts, so
-    the count and the score can never describe different data. The home page's
-    pattern table and the weekly analysis both read this.
+    The single answer to "how is each pattern going": how many problems it solved,
+    how many attempts, how many were not clean (raw as `rough`, and as
+    `struggle_rate`), the folded mastery score, and when it was last practiced -
+    all taken from the same attempts, so the counts and the score can never
+    describe different data. The home page's pattern table and the weekly analysis
+    both read this.
 
     Pure over a loaded history, so where the patterns stood at an earlier date is
     this same function over the attempts before it, not a second query to drift.
@@ -161,6 +168,7 @@ def pattern_stats(history: Sequence[ScoredAttempt]) -> list[dict]:
         stats.append(
             {
                 "pattern": pattern,
+                "solved": len({a.problem for a in attempts}),
                 "attempts": len(attempts),
                 "rough": rough,
                 "struggle_rate": rough / len(attempts),

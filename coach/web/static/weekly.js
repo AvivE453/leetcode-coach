@@ -32,7 +32,7 @@ function weekTable(rows) {
       el(
         "tr",
         {},
-        ["Date", "Problem", "Difficulty", "Outcome", "Minutes", "Pattern"].map((h) => el("th", { text: h }))
+        ["Date", "Problem", "Difficulty", "Outcome", "Minutes", "Patterns"].map((h) => el("th", { text: h }))
       ),
     ]),
     el(
@@ -45,7 +45,7 @@ function weekTable(rows) {
           el("td", {}, [el("span", { class: `diff ${r.difficulty}`, text: r.difficulty })]),
           el("td", { text: r.outcome }),
           el("td", { text: r.minutes == null ? "" : String(r.minutes) }),
-          el("td", { text: r.pattern || "untagged" }),
+          el("td", { text: r.main_patterns.join(", ") || "untagged" }),
         ])
       )
     ),

@@ -10,7 +10,7 @@ from coach.web.app import app
 from coach.weekly import analyze as weekly_analyze
 
 ENRICHMENT = enrich.Enrichment(
-    pattern="hashmap",
+    main_patterns=["hashmap"],
     intended_pattern="hashmap",
     intended_secondary_patterns=["two-pointers"],
     secondary_patterns=[],
@@ -91,7 +91,7 @@ def test_log_endpoint_stores_and_enriches(client, monkeypatch):
     body = res.json()
     assert body["title"] == "Two Sum"
     assert body["enrichment"]["status"] == "ok"
-    assert body["enrichment"]["pattern"] == "hashmap"
+    assert body["enrichment"]["main_patterns"] == ["hashmap"]
     assert body["enrichment"]["off_pattern"] is False
 
     conn = db.connect()
@@ -101,7 +101,7 @@ def test_log_endpoint_stores_and_enriches(client, monkeypatch):
 
 
 def test_log_endpoint_flags_off_pattern_solves(client, monkeypatch):
-    enriched(monkeypatch, pattern="prefix-sum", intended_pattern="dp-1d")
+    enriched(monkeypatch, main_patterns=["prefix-sum"], intended_pattern="dp-1d")
 
     body = client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE}).json()
 
@@ -114,7 +114,7 @@ def test_log_endpoint_flags_off_pattern_solves(client, monkeypatch):
 def test_log_endpoint_accepts_a_canonical_alternate_approach(client, monkeypatch):
     """An alternate canonical route is not off-pattern, but the unused central
     approach is still worth mentioning."""
-    enriched(monkeypatch, pattern="two-pointers", intended_pattern="hashmap")
+    enriched(monkeypatch, main_patterns=["two-pointers"], intended_pattern="hashmap")
 
     body = client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE}).json()
 
@@ -128,7 +128,7 @@ def test_log_endpoint_agrees_with_the_stored_canonical_set_and_the_plan(client, 
     enriched(monkeypatch)  # stores hashmap + two-pointers
     client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
 
-    enriched(monkeypatch, pattern="two-pointers", intended_secondary_patterns=[])
+    enriched(monkeypatch, main_patterns=["two-pointers"], intended_secondary_patterns=[])
     body = client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE}).json()
 
     enrichment = body["enrichment"]
@@ -147,6 +147,8 @@ def test_solution_history_endpoint_carries_the_canonical_note(client, monkeypatc
     assert body["intended_secondary_patterns"] == ["two-pointers"]
     assert body["solves"][0]["also_solvable_with"] == ["two-pointers"]
     assert body["solves"][0]["secondary_patterns"] == []
+    assert body["solves"][0]["main_patterns"] == ["hashmap"]
+    assert client.get("/api/solutions").json()["problems"][0]["main_patterns"] == ["hashmap"]
 
 
 def test_log_endpoint_degrades_without_an_api_key(client):
@@ -167,14 +169,16 @@ def test_log_endpoint_withholds_a_standing_on_a_first_solve(client, monkeypatch)
 
     body = client.post("/api/log", json={"number": 1, "outcome": "failed", "code": CODE}).json()
 
-    assert body["pattern_standing"] == {
-        "pattern": "hashmap",
-        "attempts": 1,
-        "struggle_rate": 1.0,
-        "score": 1.0,
-        "weak": False,
-        "enough_data": False,
-    }
+    assert body["pattern_standings"] == [
+        {
+            "pattern": "hashmap",
+            "attempts": 1,
+            "struggle_rate": 1.0,
+            "score": 1.0,
+            "weak": False,
+            "enough_data": False,
+        }
+    ]
 
 
 def test_log_endpoint_reports_a_weak_pattern(client, monkeypatch):
@@ -184,21 +188,48 @@ def test_log_endpoint_reports_a_weak_pattern(client, monkeypatch):
 
     body = client.post("/api/log", json={"number": 1, "outcome": "failed", "code": CODE}).json()
 
-    assert body["pattern_standing"] == {
-        "pattern": "hashmap",
-        "attempts": 5,
-        "struggle_rate": 1.0,
-        "score": 1.0,
-        "weak": True,
-        "enough_data": True,
-    }
+    assert body["pattern_standings"] == [
+        {
+            "pattern": "hashmap",
+            "attempts": 5,
+            "struggle_rate": 1.0,
+            "score": 1.0,
+            "weak": True,
+            "enough_data": True,
+        }
+    ]
+
+
+def test_log_endpoint_reports_a_standing_for_every_main_pattern(client, monkeypatch):
+    enriched(monkeypatch, main_patterns=["hashmap", "two-pointers"])
+
+    body = client.post("/api/log", json={"number": 1, "outcome": "failed", "code": CODE}).json()
+
+    assert body["enrichment"]["main_patterns"] == ["hashmap", "two-pointers"]
+    assert [(s["pattern"], s["score"]) for s in body["pattern_standings"]] == [
+        ("hashmap", 1.0),
+        ("two-pointers", 1.0),
+    ]
+
+
+def test_log_endpoint_lists_similar_solves_with_their_main_patterns(client, monkeypatch):
+    enriched(monkeypatch, main_patterns=["hashmap", "two-pointers"])
+    client.post("/api/log", json={"number": 15, "outcome": "clean", "code": CODE})
+    enriched(monkeypatch)
+
+    body = client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE}).json()
+
+    # 3Sum shares hashmap with this solve, so it is a neighbor - shown with both its mains
+    assert [(n["number"], n["main_patterns"]) for n in body["enrichment"]["neighbors"]] == [
+        (15, ["hashmap", "two-pointers"])
+    ]
 
 
 def test_log_endpoint_has_no_standing_without_enrichment(client):
     body = client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE}).json()
 
     assert body["enrichment"]["status"] == "skipped"
-    assert body["pattern_standing"] is None
+    assert body["pattern_standings"] == []
 
 
 def test_log_endpoint_rejects_unknown_problem_and_empty_code(client):
@@ -268,7 +299,7 @@ def test_plan_endpoint_labels_a_weak_pattern_pick(client, monkeypatch):
     unsolved problem has to carry the matching official tag - which is exactly why
     it went uncovered while the kind was recovered by parsing the reason sentence.
     """
-    enriched(monkeypatch, pattern="two-pointers")
+    enriched(monkeypatch, main_patterns=["two-pointers"])
     for _ in range(mastery.WEAK_MIN_ATTEMPTS):
         client.post("/api/log", json={"number": 1, "outcome": "failed", "code": CODE})
 
@@ -315,7 +346,7 @@ def test_plan_endpoint_serves_the_thresholds_the_page_quotes(client):
 
 
 def test_plan_endpoint_surfaces_off_pattern_topics(client, monkeypatch):
-    enriched(monkeypatch, pattern="prefix-sum", intended_pattern="dp-1d")
+    enriched(monkeypatch, main_patterns=["prefix-sum"], intended_pattern="dp-1d")
     client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
 
     plan = client.get("/api/plan").json()
@@ -339,7 +370,7 @@ def test_solutions_endpoints_list_and_serve_stored_code(client, monkeypatch):
     history = client.get("/api/solutions/1").json()
     assert [s["outcome"] for s in history["solves"]] == ["clean", "failed"]
     assert history["solves"][0]["code"] == CODE.strip()
-    assert history["solves"][0]["pattern"] == "hashmap"
+    assert history["solves"][0]["main_patterns"] == ["hashmap"]
 
 
 def test_solutions_endpoint_searches_and_counts_everything(client, monkeypatch):
@@ -476,6 +507,7 @@ def test_weekly_endpoint_recomputes_from_the_logged_solves(client, monkeypatch):
 
     assert [a["number"] for a in week["attempts"]] == [1]
     assert week["attempts"][0]["outcome"] == "struggled"
+    assert week["attempts"][0]["main_patterns"] == ["hashmap"]
     assert week["distinct_problems"] == 1
     assert week["patterns"] == [
         {

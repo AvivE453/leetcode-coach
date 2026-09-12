@@ -61,13 +61,19 @@ one batch at the end.
 ## Design decisions
 
 **Two tag layers, because "solved" and "learned" are different questions.**
-Each solution gets a `pattern` describing *the approach as written* — even when that
-approach is a brute force. Each problem separately gets an `intended_pattern`: the
-canonical optimal approach. Tagging your solution honestly is what keeps struggle
-analytics truthful; if a brute-forced Maximum Subarray were filed under `dp-1d`, the
-planner would never schedule the one thing you most need to learn. The **disagreement
-between the layers** is the useful signal: it marks a problem you solved without
-learning what it teaches, and the planner forces a re-solve.
+Each solution gets `main_patterns` describing *the approach as written* — even when that
+approach is a brute force. Usually that is one pattern; a solution genuinely built on two
+(a memoized DFS computing a knapsack recurrence) gets both, and they are equal: the solve
+is an attempt of each at its full score, never split between them or credited to
+whichever the model named first. Patterns a solution merely leans on go in
+`secondary_patterns`, which count toward the off-pattern check below but never toward
+mastery or the pattern table — a row there always describes solves that pattern was built
+into. Each problem separately gets an `intended_pattern`: the canonical optimal approach.
+Tagging your solution honestly is what keeps struggle analytics truthful; if a
+brute-forced Maximum Subarray were filed under `dp-1d`, the planner would never schedule
+the one thing you most need to learn. The **disagreement between the layers** is the
+useful signal: it marks a problem you solved without learning what it teaches, and the
+planner forces a re-solve.
 
 **A problem can have more than one canonical approach.**
 Best Time to Buy and Sell Stock is a one-pass greedy *and* a textbook 1-D DP; solving it
@@ -106,9 +112,10 @@ but for the opposite job — they are coarse enough to *find new problems*, whil
 vocabulary is fine enough to *diagnose weaknesses*.
 
 **Embed an enriched card, not raw code.**
-Each solution is embedded as `title + pattern + key trick + code`, so two problems that
-share a technique retrieve each other even when they share no vocabulary. Measured, not
-assumed: see the retrieval eval below — it wins, but only modestly.
+Each solution is embedded as `title + main patterns + key trick + code`, so two problems
+that share a technique retrieve each other even when they share no vocabulary; after a
+solve is logged, similar past solves are those sharing any of its main patterns. Measured,
+not assumed: see the retrieval eval below — it wins, but only modestly.
 
 **No vector database.**
 Brute-force numpy cosine over float32 blobs in SQLite. At a few hundred solutions this

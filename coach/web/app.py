@@ -92,7 +92,7 @@ def api_log(body: LogRequest) -> dict:
             conn, body.number, body.outcome, body.code, minutes=body.minutes, note=body.note
         )
         e = service.enrich_solution_now(conn, result.solution_id, problem, body.code.strip())
-        standing = service.pattern_standing(conn, e.pattern)
+        standings = service.pattern_standings(conn, e.main_patterns)
 
     return {
         "number": result.number,
@@ -103,7 +103,7 @@ def api_log(body: LogRequest) -> dict:
         "enrichment": {
             "status": "skipped" if e.skipped else "ok",
             "reason": e.skipped,
-            "pattern": e.pattern,
+            "main_patterns": e.main_patterns,
             "secondary_patterns": e.secondary_patterns,
             "key_trick": e.key_trick,
             "intended_pattern": e.intended_pattern,
@@ -117,24 +117,23 @@ def api_log(body: LogRequest) -> dict:
                     "title": n.title,
                     "difficulty": n.difficulty,
                     "score": round(n.score, 3),
-                    "pattern": n.pattern,
+                    "main_patterns": n.main_patterns,
                     "key_trick": n.key_trick,
                 }
                 for n in e.neighbors
             ],
         },
-        "pattern_standing": (
+        "pattern_standings": [
             {
-                "pattern": standing.pattern,
-                "attempts": standing.attempts,
-                "struggle_rate": round(standing.struggle_rate, 3),
-                "score": round(standing.score, 2) if standing.score is not None else None,
-                "weak": standing.weak,
-                "enough_data": standing.enough_data,
+                "pattern": s.pattern,
+                "attempts": s.attempts,
+                "struggle_rate": round(s.struggle_rate, 3),
+                "score": round(s.score, 2),
+                "weak": s.weak,
+                "enough_data": s.enough_data,
             }
-            if standing is not None
-            else None
-        ),
+            for s in standings
+        ],
     }
 
 
@@ -255,7 +254,7 @@ def api_weekly() -> dict:
                 "difficulty": r["difficulty"],
                 "outcome": r["outcome"],
                 "minutes": r["minutes"],
-                "pattern": r["pattern"],
+                "main_patterns": r["main_patterns"],
             }
             for r in review.attempts
         ],
