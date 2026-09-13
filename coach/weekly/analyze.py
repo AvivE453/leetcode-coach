@@ -7,7 +7,8 @@ from coach import assessment, corrections, curriculum, mastery, scheduler
 STALE_DAYS = 30
 # How far ahead a plan counts a review as due. The weekly plan covers the next
 # seven days, so it pulls in everything through today+6; a daily plan passes 0,
-# because solving a review early re-anchors SM-2 from today and shortens it.
+# because a success before a review is due does not count as the review
+# (scheduler.counts_as_review), so an early slot would move nothing.
 PLAN_LOOKAHEAD_DAYS = 6
 
 

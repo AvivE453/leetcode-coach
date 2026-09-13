@@ -110,8 +110,9 @@ attempt closes it for good: brute-forcing the problem again later is an experime
 forgetting the approach is SM-2's job. An untagged solve is neither evidence nor success
 until `coach enrich` tags it, though it still moves the date, because it was practice. On
 the Daily Plan a problem owed both a review and approach practice is one item carrying both
-reasons; both dates count from the latest attempt and SM-2's shortest step is its three-day
-lapse, so that happens exactly when the last practice day was a failure day.
+reasons. Completing approach practice never advances the review: a success before the review
+is due leaves its date where it was (below), so the review can also come due first, and each
+is then listed on its own date.
 
 **One mastery score per pattern, not a struggle rate.**
 "Weak" used to mean *at least half the attempts were not clean* — a binary that read five
@@ -134,7 +135,7 @@ writer has to remember to refresh a cache. That costs something, measured on syn
 histories: the Weekly Review's read takes 0.2 ms at today's size, 7 ms at a year of 25
 solves a week, and 83 ms at ten years, against 0.2, 6 and 60 ms for the cache it replaced.
 
-**One review per day, graded by its worst attempt.**
+**One review per day, graded by its worst attempt, and none before it is due.**
 A review is only worth scheduling from if it tested memory, and counting every logged solve
 as one did not: solving a problem three times in one sitting stepped its schedule 7 → 14 →
 39 days, and a clean retry typed in right after reading the solution passed for a month of
@@ -142,7 +143,13 @@ retention. So a problem's attempts on the same day are one SM-2 review, graded b
 of them. Every attempt is still stored; only the schedule reads the day once. A failure
 grades its day whichever order it came in, because it is real evidence, but three failed
 tries lapse the problem once rather than flooring its ease and shortening every interval
-after it. The stored schedule is a replay of the attempts (`scheduler.replay()`), not a
+after it. The same stretch survived across days: three clean solves on consecutive days still
+reached 39 days, and approach practice — owed three days after an off-pattern solve, four
+before its review — stepped the review to 14 days from the practice, though it tested nothing
+about remembering. So a passing day counts only once its review is due
+(`scheduler.counts_as_review()`); before that it changes nothing, not even the ease. A failing
+day always counts, however early, because forgetting is evidence whenever it shows, and
+reviews taken on their due dates schedule exactly as before. The stored schedule is a replay of the attempts (`scheduler.replay()`), not a
 running total stepped once per solve, so the rule has one owner, and `coach init` re-derives
 every stored schedule when the rule changes.
 
