@@ -137,8 +137,8 @@ def test_analyze_reports_due_and_curriculum(tmp_path):
 def test_analyze_lookahead_narrows_due_to_today(tmp_path):
     """The daily plan passes lookahead_days=0 so it only sees what is owed today.
 
-    Solving a review early re-anchors SM-2 from today and shortens the interval,
-    so a four-slot list must not be padded with Friday's reviews.
+    A success before its review is due does not count as the review, so a four-slot
+    list padded with Friday's reviews would spend slots without moving their schedules.
     """
     conn = make_db(tmp_path)
     add_problem(conn, 1, "two-sum", "Two Sum")
@@ -324,16 +324,16 @@ def test_approach_practice_joins_the_plan_on_its_due_date_and_not_before(
     assert [c.problem["number"] for c in analysis["corrections_upcoming"]] == upcoming
 
 
-def test_a_review_due_before_its_approach_practice_carries_only_its_own_reason(tmp_path, monkeypatch):
-    """With today's numbers approach practice is never due after the review: both count from
-    the last attempt, and SM-2's shortest step is the three-day lapse. Only a longer
-    correction interval can put the review first - and then the review is listed alone,
-    while the approach practice waits for its own date rather than riding along early."""
-    monkeypatch.setattr(corrections, "CORRECTION_INTERVAL_DAYS", 5)
+def test_a_review_due_before_its_approach_practice_carries_only_its_own_reason(tmp_path):
+    """Approach practice counts from the latest attempt, but a success before the review is
+    due leaves the review where it was. Solved off-pattern a week ago and again yesterday:
+    the review is due today and is listed alone, while the approach practice waits for its
+    own date rather than riding along early."""
     conn = make_db(tmp_path)
     add_problem(conn, 2, "maximum-subarray", "Maximum Subarray", intended="dp-1d")
-    add_attempt(conn, 2, TODAY - timedelta(days=3), outcome="failed", pattern="prefix-sum")
-    set_due(conn, 2, TODAY)
+    add_attempt(conn, 2, TODAY - timedelta(days=7), pattern="prefix-sum")
+    add_attempt(conn, 2, TODAY - timedelta(days=1), pattern="prefix-sum")
+    set_due(conn, 2, TODAY)  # where the replay leaves it: yesterday's clean solve was early
 
     analysis = weekly_analyze.analyze(conn, TODAY, lookahead_days=0)
     items = weekly_plan.build_plan(conn, analysis, target=10)

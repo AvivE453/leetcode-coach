@@ -130,8 +130,8 @@ def test_failing_repeatedly_in_one_day_lapses_once():
 
 
 def test_attempts_on_different_days_are_separate_reviews():
-    """Across days, replaying is exactly the step-by-step fold: the 7 -> 14 -> x ease
-    ladder is untouched by the same-day rule."""
+    """Days that land on their due dates replay exactly as the step-by-step fold: the
+    7 -> 14 -> x ease ladder is untouched by the same-day and early-success rules."""
     days = [TODAY, TODAY + timedelta(days=7), TODAY + timedelta(days=21)]
     by_hand = None
     for day in days:
@@ -141,3 +141,71 @@ def test_attempts_on_different_days_are_separate_reviews():
 
     assert s == by_hand
     assert s.interval_days > scheduler.SECOND_INTERVAL
+
+
+def test_clean_solves_on_consecutive_days_schedule_like_one():
+    """The same-day stretch spread over a few days: solving again the next morning shows no
+    more remembering than solving again that afternoon, so it is still 7 days, not 39."""
+    days = [TODAY + timedelta(days=offset) for offset in range(3)]
+
+    s = scheduler.replay([(day, CLEAN) for day in days])
+
+    assert s == scheduler.review(None, CLEAN, TODAY)
+    assert s.next_due == TODAY + timedelta(days=7)
+
+
+@pytest.mark.parametrize("quality", [CLEAN, STRUGGLED])
+def test_a_success_before_the_review_is_due_changes_nothing(quality):
+    """Approach practice brings a problem back after three days, four before its review:
+    solving it then neither stretches the interval nor touches the ease."""
+    s = scheduler.replay([(TODAY, CLEAN), (TODAY + timedelta(days=3), quality)])
+
+    assert s == scheduler.review(None, CLEAN, TODAY)
+
+
+@pytest.mark.parametrize("quality", [HINTS, FAILED])
+def test_a_failure_before_the_review_is_due_still_lapses(quality):
+    """Forgetting is evidence whenever it shows, so an early failure resets the problem."""
+    failed_on = TODAY + timedelta(days=2)
+
+    s = scheduler.replay([(TODAY, CLEAN), (failed_on, quality)])
+
+    assert (s.reps, s.lapses) == (0, 1)
+    assert s.next_due == failed_on + timedelta(days=3)
+
+
+@pytest.mark.parametrize("offset, reps, due_offset", [(6, 1, 7), (7, 2, 21), (10, 2, 24)])
+def test_a_passing_day_counts_from_its_due_date(offset, reps, due_offset):
+    """The day before the review is still early; the due date itself and any later day count."""
+    s = scheduler.replay([(TODAY, CLEAN), (TODAY + timedelta(days=offset), CLEAN)])
+
+    assert (s.reps, s.next_due) == (reps, TODAY + timedelta(days=due_offset))
+
+
+def test_after_a_lapse_a_success_waits_for_the_lapse_interval():
+    """A clean retry the next day, after reading the solution, is not the problem remembered:
+    the lapse still brings it back on the third day, and only that solve restarts the ladder."""
+    retries = [(TODAY, FAILED), (TODAY + timedelta(days=1), CLEAN), (TODAY + timedelta(days=2), CLEAN)]
+
+    lapsed = scheduler.replay(retries)
+    relearned = scheduler.replay([*retries, (TODAY + timedelta(days=3), CLEAN)])
+
+    assert lapsed == scheduler.review(None, FAILED, TODAY)
+    assert (relearned.reps, relearned.next_due) == (1, TODAY + timedelta(days=10))
+
+
+SOLVED_TODAY = scheduler.review(None, CLEAN, TODAY)  # due in a week
+
+
+@pytest.mark.parametrize(
+    "state, quality, day, counts",
+    [
+        (None, CLEAN, TODAY, True),  # the first day
+        (SOLVED_TODAY, FAILED, TODAY + timedelta(days=1), True),  # a failure, however early
+        (SOLVED_TODAY, STRUGGLED, TODAY + timedelta(days=1), False),  # a success before the due date
+        (SOLVED_TODAY, CLEAN, TODAY + timedelta(days=7), True),  # on the due date
+        (SOLVED_TODAY, CLEAN, TODAY + timedelta(days=30), True),  # overdue
+    ],
+)
+def test_counts_as_review(state, quality, day, counts):
+    assert scheduler.counts_as_review(state, quality, day) is counts

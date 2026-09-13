@@ -1,6 +1,7 @@
 import json
 
 import numpy as np
+import pytest
 from conftest import CODE, seed_db, tag_solution
 from typer.testing import CliRunner
 
@@ -217,15 +218,21 @@ def test_similar_by_number(tmp_path, monkeypatch):
     assert "#1 Two Sum" not in result.output  # the query problem itself is excluded
 
 
-def test_init_reschedules_problems_from_their_attempts(tmp_path, monkeypatch):
-    """A schedule stored while every same-day solve still counted stays stretched until
-    that problem is logged again, so `coach init` re-derives each one from its attempts."""
+@pytest.mark.parametrize(
+    "days",
+    [("2026-09-01",) * 3, ("2026-09-01", "2026-09-02", "2026-09-03")],
+    ids=["same-day", "before-due"],
+)
+def test_init_reschedules_problems_from_their_attempts(tmp_path, monkeypatch, days):
+    """A schedule stored while every solve still counted - three in one day, or three days
+    running before the first review was due - stays stretched until that problem is logged
+    again, so `coach init` re-derives each one from its attempts."""
     conn = seed_db(tmp_path, monkeypatch)
-    for _ in range(3):
+    for day in days:
         conn.execute(
-            "INSERT INTO attempts (problem_number, date, outcome) VALUES (1, '2026-09-01', 'clean')"
+            "INSERT INTO attempts (problem_number, date, outcome) VALUES (1, ?, 'clean')", (day,)
         )
-    # what one review per logged solve stored after those three
+    # what counting every solve as a review stored after those three
     conn.execute(
         """
         INSERT INTO review_state (problem_number, ease, interval_days, next_due, reps, lapses)

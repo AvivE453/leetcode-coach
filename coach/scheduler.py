@@ -64,9 +64,14 @@ def replay(graded: list[tuple[date, int]]) -> ReviewState | None:
     still grades its day, and three failed tries lapse the problem once instead of
     flooring its ease.
 
+    A passing day before the problem is due is no review at all (counts_as_review). The
+    same three clean solves spread over three days also reached 39 days, and approach
+    practice, owed three days after a solve, stepped a review it was never testing.
+
     The grades arrive already capped by any review, so this stays plain SM-2: a review
     saved days later changes the grade of the attempt it judges, and the replay puts
     that lapse on the day the attempt happened, never on the day the review arrived.
+    Which later days were early is judged again in the same pass.
     """
     by_day: dict[date, list[int]] = {}
     for day, quality in graded:
@@ -74,8 +79,20 @@ def replay(graded: list[tuple[date, int]]) -> ReviewState | None:
 
     state = None
     for day in sorted(by_day):
-        state = review(state, min(by_day[day]), day)
+        quality = min(by_day[day])
+        if counts_as_review(state, quality, day):
+            state = review(state, quality, day)
     return state
+
+
+def counts_as_review(state: ReviewState | None, quality: int, day: date) -> bool:
+    """Whether one practice day, graded by its worst attempt, moves the schedule.
+
+    The first day always counts, and so does a failing one: forgetting is evidence
+    whenever it shows. A passing day counts only once the review is due - solving early
+    shows nothing about remembering the problem at the interval SM-2 would stretch to.
+    """
+    return state is None or quality < PASSING_QUALITY or day >= state.next_due
 
 
 def due_reviews(

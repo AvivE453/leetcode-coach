@@ -103,6 +103,30 @@ def stored_schedule(conn, number=1) -> tuple[date, int, int]:
     return date.fromisoformat(row["next_due"]), row["reps"], row["lapses"]
 
 
+def test_a_clean_solve_before_the_review_is_due_keeps_its_date(tmp_path, monkeypatch):
+    """Solving again two days on shows nothing about remembering it a week out, so the
+    review stays on 09-08 - it used to step to a 14-day interval from 09-03."""
+    conn = seed_db(tmp_path, monkeypatch)
+
+    results = [
+        service.log_solve(conn, 1, "clean", CODE, today=day)
+        for day in (date(2026, 9, 1), date(2026, 9, 3))
+    ]
+
+    assert [r.next_due for r in results] == [date(2026, 9, 8)] * 2
+    assert stored_schedule(conn) == (date(2026, 9, 8), 1, 0)
+
+
+def test_a_failed_solve_before_the_review_is_due_resets_it(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+    service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+
+    result = service.log_solve(conn, 1, "failed", CODE, today=date(2026, 9, 3))
+
+    assert result.next_due == date(2026, 9, 6)
+    assert stored_schedule(conn) == (date(2026, 9, 6), 0, 1)
+
+
 def test_a_stored_bug_review_lapses_the_attempt_it_judges(tmp_path, monkeypatch):
     """The solve felt clean, but its review reported a bug: the schedule reads that attempt
     as a lapse. log_solve never tags, so this also shows scheduling needs no enrichment."""
@@ -232,6 +256,22 @@ def test_the_order_reviews_arrive_in_does_not_change_the_schedule(tmp_path, monk
     assert schedules[0] == schedules[1]
     # two lapses: 09-01 held at 1 by the bug, 09-08 at 2 by the edge case
     assert schedules[0][0][3:] == ("2026-09-11", 0, 2)
+
+
+def test_a_review_that_lapses_an_earlier_day_can_make_a_later_solve_count(tmp_path, monkeypatch):
+    """The 09-05 solve was early against a 09-08 review. Once a bug lapses 09-01 the review
+    was due 09-04, so the replay counts 09-05 after all: a first interval, due 09-12."""
+    conn = seed_db(tmp_path, monkeypatch)
+    older = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+    service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 5))
+
+    result = review_with(conn, monkeypatch, older.solution_id, FEEDBACK)
+
+    assert stored_schedule(conn) == (date(2026, 9, 12), 1, 1)
+    assert (result.effect.next_due_before, result.effect.next_due) == (
+        date(2026, 9, 8),
+        date(2026, 9, 12),
+    )
 
 
 def test_asking_again_for_a_stored_review_writes_nothing(tmp_path, monkeypatch):
@@ -715,6 +755,20 @@ def test_practice_dates_say_which_log_completed_approach_practice(tmp_path, monk
     ]
     assert (succeeded.correction, succeeded.completed) == (None, True)
     assert succeeded.next_practice == succeeded.review_due == date(2026, 9, 25)
+
+
+def test_approach_practice_completes_without_advancing_the_review(tmp_path, monkeypatch):
+    """The two dates answer different questions. On 09-15 the accepted approach completes
+    approach practice, but the review is not due until 09-19, so it stays there - where it
+    used to step to 09-29 as if a second week of remembering had been shown."""
+    conn = seed_db(tmp_path, monkeypatch)
+    log_on(conn, monkeypatch, date(2026, 9, 12), "clean", "prefix-sum")
+
+    logged = log_on(conn, monkeypatch, date(2026, 9, 15), "clean", "dp-1d")
+    dates = service.practice_dates(conn, 1, logged.attempt_id)
+
+    assert (dates.correction, dates.completed) == (None, True)
+    assert dates.review_due == date(2026, 9, 19)
 
 
 def test_practice_dates_owe_nothing_before_any_attempt(tmp_path, monkeypatch):
