@@ -11,7 +11,17 @@ from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 
-from coach import assessment, config, curriculum, embed, enrich, llm, mastery, scheduler
+from coach import (
+    assessment,
+    config,
+    corrections,
+    curriculum,
+    embed,
+    enrich,
+    llm,
+    mastery,
+    scheduler,
+)
 from coach import review as review_llm
 from coach.weekly import analyze as weekly_analyze
 from coach.weekly import collect as weekly_collect
@@ -32,8 +42,30 @@ class LogResult:
     title: str
     outcome: str
     minutes: int | None
+    attempt_id: int
     solution_id: int
     next_due: date
+
+
+@dataclass(frozen=True)
+class PracticeDates:
+    """When a problem is next owed practice, with its two reasons kept apart.
+
+    `review_due` is SM-2's date for remembering the problem. `correction` is approach
+    practice still owed after a solve that used the wrong approach. They answer different
+    questions, so neither is folded into the other: `next_practice` is only the earlier.
+    """
+
+    review_due: date | None  # None before the first attempt
+    correction: corrections.Correction | None
+    completed: bool = False  # the attempt just logged completed an outstanding requirement
+
+    @property
+    def next_practice(self) -> date | None:
+        dates = [self.review_due] if self.review_due else []
+        if self.correction:
+            dates.append(self.correction.due)
+        return min(dates, default=None)
 
 
 @dataclass(frozen=True)
@@ -261,13 +293,13 @@ def log_solve(
         raise EmptySolution(number)
 
     today = today or date.today()
-    cursor = conn.execute(
+    attempt_id = conn.execute(
         "INSERT INTO attempts (problem_number, date, outcome, minutes, note) VALUES (?, ?, ?, ?, ?)",
         (number, today.isoformat(), outcome, minutes, note),
-    )
+    ).lastrowid
     solution_id = conn.execute(
         "INSERT INTO solutions (problem_number, attempt_id, code, created_at) VALUES (?, ?, ?, ?)",
-        (number, cursor.lastrowid, code, today.isoformat()),
+        (number, attempt_id, code, today.isoformat()),
     ).lastrowid
     state = update_review_state(conn, number)
     conn.commit()
@@ -277,8 +309,37 @@ def log_solve(
         title=problem["title"],
         outcome=outcome,
         minutes=minutes,
+        attempt_id=attempt_id,
         solution_id=solution_id,
         next_due=state.next_due,
+    )
+
+
+def practice_dates(
+    conn: sqlite3.Connection, number: int, logged_attempt: int | None = None
+) -> PracticeDates:
+    """When one problem is next owed practice: its SM-2 review and any approach practice.
+
+    Pass the attempt just logged to also learn whether it completed approach practice: the
+    same history judged without that attempt still owed it, and judged with it owes nothing.
+    One load judged twice in memory, so there is no before-and-after snapshot to keep in step.
+    """
+    row = conn.execute(
+        "SELECT next_due FROM review_state WHERE problem_number = ?", (number,)
+    ).fetchone()
+    review_due = date.fromisoformat(row["next_due"]) if row else None
+    histories = corrections.load(conn, number)
+    if not histories:
+        return PracticeDates(review_due, correction=None)
+
+    [history] = histories
+    correction = corrections.evaluate(history.problem, history.canonical, history.attempts)
+    if logged_attempt is None:
+        return PracticeDates(review_due, correction)
+    earlier = [a for a in history.attempts if a.id != logged_attempt]
+    owed_before = corrections.evaluate(history.problem, history.canonical, earlier)
+    return PracticeDates(
+        review_due, correction, completed=owed_before is not None and correction is None
     )
 
 

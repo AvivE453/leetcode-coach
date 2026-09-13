@@ -72,8 +72,8 @@ into. Each problem separately gets an `intended_pattern`: the canonical optimal 
 Tagging your solution honestly is what keeps struggle analytics truthful; if a
 brute-forced Maximum Subarray were filed under `dp-1d`, the planner would never schedule
 the one thing you most need to learn. The **disagreement between the layers** is the
-useful signal: it marks a problem you solved without learning what it teaches, and the
-planner forces a re-solve.
+useful signal: it marks a problem you solved without learning what it teaches, and that
+problem owes approach practice until you show you have (below).
 
 **A problem can have more than one canonical approach.**
 Best Time to Buy and Sell Stock is a one-pass greedy *and* a textbook 1-D DP; solving it
@@ -85,10 +85,33 @@ lists the canonical approaches you have not practised here. Both are set arithme
 columns the enrichment call already filled in, so they cost nothing. The accepted set
 accumulates across enrichments, since the model does not name the same alternates every
 time, so a solve is judged against the merged set the write returns, never against the
-answer just received — otherwise one forgetful answer re-flags a solve the planner has
-already cleared. Because the note is
+answer just received — otherwise one forgetful answer re-flags a solve that had already
+completed its approach practice. Because the note is
 computed when you look rather than frozen when the solve was stored, widening a problem's
 canonical set later widens the note on old solves too.
+
+**Approach practice closes on a demonstrated success, not on a tag.**
+An off-pattern solve used to put its problem on the Daily Plan every day until any stored
+solution carried an accepted tag — so a failed attempt, one that needed hints, or one whose
+review found a bug all cleared it, while a problem practised yesterday came straight back
+this morning. It is now three questions, recomputed from the history on every read
+([`coach/corrections.py`](../coach/corrections.py)). A solve is *off-pattern* when its tags
+name none of the accepted approaches. *Approach practice is outstanding* while some solve
+was off-pattern and no attempt **qualifies**: one attempt that used an accepted approach on
+a day that was not a failure day. A failure day is the line SM-2 already lapses a day on —
+something that day failed, needed hints, or has a review reporting a bug, an edge case or
+needs-work — so a clean retry typed in right after a failure completes nothing, for the same
+reason it does not stretch the schedule. The tags and the success must be one attempt's: a
+failed DP solve beside a clean brute force is never "solved with DP". *It is due* three days
+after the latest attempt of any kind, so practising a problem, however it went, never brings
+it back the next day, and a review or a late tag that reopens it is due three days after the
+practice it judges — usually already past — not three days after you read it. One qualifying
+attempt closes it for good: brute-forcing the problem again later is an experiment, and
+forgetting the approach is SM-2's job. An untagged solve is neither evidence nor success
+until `coach enrich` tags it, though it still moves the date, because it was practice. On
+the Daily Plan a problem owed both a review and approach practice is one item carrying both
+reasons; both dates count from the latest attempt and SM-2's shortest step is its three-day
+lapse, so that happens exactly when the last practice day was a failure day.
 
 **One mastery score per pattern, not a struggle rate.**
 "Weak" used to mean *at least half the attempts were not clean* — a binary that read five

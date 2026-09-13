@@ -39,3 +39,12 @@ function patternBadges(patterns) {
     el("span", { class: "badge pattern", text: pattern }),
   ]);
 }
+
+/* Why a problem still owes approach practice, keyed by the reason codes coach/corrections.py
+   sends. Home, Solutions and the Daily Plan word the same codes, so they share this copy. */
+const APPROACH_REASON = {
+  "wrong-approach": "your last practice used none of the accepted approaches",
+  failed: "your last practice day included a failed attempt",
+  assisted: "your last practice day needed hints",
+  "review-finding": "a review reported a problem with your last practice day",
+};

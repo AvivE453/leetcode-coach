@@ -134,9 +134,10 @@ def test_log_endpoint_agrees_with_the_stored_canonical_set_and_the_plan(client, 
 
     enrichment = body["enrichment"]
     stored = client.get("/api/solutions/1").json()["intended_secondary_patterns"]
+    topics = client.get("/api/plan").json()["topics"]
     assert enrichment["off_pattern"] is False
     assert enrichment["intended_secondary_patterns"] == stored == ["two-pointers"]
-    assert client.get("/api/plan").json()["topics"]["off_pattern"] == []
+    assert (topics["corrections_due"], topics["corrections_upcoming"]) == ([], [])
 
 
 def test_solution_history_endpoint_carries_the_canonical_note(client, monkeypatch):
@@ -285,11 +286,17 @@ def test_plan_endpoint_ranks_problems_and_stays_read_only(client, monkeypatch, t
 
     plan = client.get("/api/plan").json()
 
-    numbers = [i["number"] for i in plan["items"]]
-    assert numbers == [1, 15]  # the due review outranks curriculum progression
-    assert plan["items"][0]["kind"] == "review"
-    assert plan["items"][1]["kind"] == "curriculum"
-    assert plan["topics"] == {"weak": [], "stale": [], "off_pattern": []}
+    # the due review outranks curriculum progression
+    assert [(i["number"], [r["kind"] for r in i["reasons"]]) for i in plan["items"]] == [
+        (1, ["review"]),
+        (15, ["curriculum"]),
+    ]
+    assert plan["topics"] == {
+        "weak": [],
+        "stale": [],
+        "corrections_due": [],
+        "corrections_upcoming": [],
+    }
     assert not (tmp_path / "reports").exists()
 
 
@@ -308,8 +315,9 @@ def test_plan_endpoint_labels_a_weak_pattern_pick(client, monkeypatch):
 
     assert plan["topics"]["weak"] == ["two-pointers"]
     # #15 is unsolved, on the curriculum, and officially tagged two-pointers.
-    assert [(i["number"], i["kind"]) for i in plan["items"]] == [(15, "weak-pattern")]
-    assert plan["items"][0]["reason"] == "weak pattern: two-pointers"
+    assert [(i["number"], i["reasons"]) for i in plan["items"]] == [
+        (15, [{"kind": "weak-pattern", "text": "weak pattern: two-pointers"}])
+    ]
 
 
 def test_plan_endpoint_only_counts_reviews_due_today(client, monkeypatch):
@@ -346,16 +354,48 @@ def test_plan_endpoint_serves_the_thresholds_the_page_quotes(client):
     }
 
 
-def test_plan_endpoint_surfaces_off_pattern_topics(client, monkeypatch):
+def test_plan_endpoint_lists_approach_practice_as_upcoming_until_it_is_due(client, monkeypatch):
+    """Solved off-pattern today: owed, but not for three days. It is listed with its date
+    and kept out of today's items, so the solve just logged does not come straight back."""
     enriched(monkeypatch, main_patterns=["prefix-sum"], intended_pattern="dp-1d")
     client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
+    today = date.today()
 
     plan = client.get("/api/plan").json()
 
-    assert plan["topics"]["off_pattern"] == [
-        {"number": 1, "title": "Two Sum", "intended_pattern": "dp-1d"}
+    assert plan["topics"]["corrections_due"] == []
+    assert plan["topics"]["corrections_upcoming"] == [
+        {
+            "number": 1,
+            "title": "Two Sum",
+            "accepted": ["dp-1d", "two-pointers"],
+            "latest_attempt": today.isoformat(),
+            "due": (today + timedelta(days=3)).isoformat(),
+            "reason": "wrong-approach",
+        }
     ]
-    assert plan["items"][0]["kind"] in {"review", "re-solve"}
+    assert 1 not in [i["number"] for i in plan["items"]]
+
+
+def test_plan_endpoint_puts_approach_practice_on_the_list_once_it_is_due(client, monkeypatch):
+    enriched(monkeypatch, main_patterns=["prefix-sum"], intended_pattern="dp-1d")
+    conn = db.connect()
+    logged = service.log_solve(conn, 1, "clean", CODE, today=date.today() - timedelta(days=3))
+    service.tag_solution_now(conn, logged.solution_id, service.get_problem(conn, 1), CODE)
+    conn.close()
+
+    plan = client.get("/api/plan").json()
+
+    assert [c["number"] for c in plan["topics"]["corrections_due"]] == [1]
+    assert plan["items"][0] == {
+        "number": 1,
+        "slug": "two-sum",
+        "title": "Two Sum",
+        "difficulty": "Easy",
+        "reasons": [
+            {"kind": "re-solve", "text": "practice an accepted approach: dp-1d or two-pointers"}
+        ],
+    }
 
 
 def test_solutions_endpoints_list_and_serve_stored_code(client, monkeypatch):
@@ -462,12 +502,84 @@ def test_review_endpoint_reports_what_the_review_did_to_the_schedule(client, mon
         "finding": "bug",
         "attempt_date": today.isoformat(),
         "latest_attempt_date": today.isoformat(),
-        "next_due_before": logged["next_due"],
+        "next_due_before": logged["practice"]["review_due"],
         "next_due": (today + timedelta(days=3)).isoformat(),
         "rescheduled": True,
     }
     assert again["cached"] is True
     assert again["effect"] is None
+
+
+def test_log_endpoint_reports_the_review_and_approach_practice_apart(client, monkeypatch):
+    """Judged after enrichment, so the new tags count: a wrong-approach solve owes approach
+    practice in three days, ahead of its first SM-2 review a week out."""
+    enriched(monkeypatch, main_patterns=["prefix-sum"], intended_pattern="dp-1d")
+    today = date.today()
+
+    body = client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE}).json()
+
+    practice_due = (today + timedelta(days=3)).isoformat()
+    assert body["practice"] == {
+        "review_due": (today + timedelta(days=7)).isoformat(),
+        "correction": {
+            "number": 1,
+            "title": "Two Sum",
+            "accepted": ["dp-1d", "two-pointers"],
+            "latest_attempt": today.isoformat(),
+            "due": practice_due,
+            "reason": "wrong-approach",
+        },
+        "next_practice": practice_due,
+        "completed": False,
+    }
+
+
+def log_off_pattern_days_ago(monkeypatch, days):
+    """A wrong-approach Two Sum solve, logged and tagged `days` ago."""
+    enriched(monkeypatch, main_patterns=["prefix-sum"], intended_pattern="dp-1d")
+    conn = db.connect()
+    logged = service.log_solve(conn, 1, "clean", CODE, today=date.today() - timedelta(days=days))
+    service.tag_solution_now(conn, logged.solution_id, service.get_problem(conn, 1), CODE)
+    conn.close()
+
+
+def test_log_endpoint_keeps_approach_practice_owed_after_a_failed_accepted_solve(
+    client, monkeypatch
+):
+    log_off_pattern_days_ago(monkeypatch, 3)
+    enriched(monkeypatch, main_patterns=["dp-1d"], intended_pattern="dp-1d")
+
+    body = client.post("/api/log", json={"number": 1, "outcome": "failed", "code": CODE}).json()
+
+    correction = body["practice"]["correction"]
+    assert (correction["reason"], correction["due"]) == (
+        "failed",
+        (date.today() + timedelta(days=3)).isoformat(),
+    )
+    assert body["practice"]["completed"] is False
+
+
+def test_log_endpoint_says_when_a_solve_completes_approach_practice(client, monkeypatch):
+    log_off_pattern_days_ago(monkeypatch, 3)
+    enriched(monkeypatch, main_patterns=["dp-1d"], intended_pattern="dp-1d")
+
+    body = client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE}).json()
+
+    assert (body["practice"]["correction"], body["practice"]["completed"]) == (None, True)
+    assert body["practice"]["next_practice"] == body["practice"]["review_due"]
+
+
+def test_solution_history_endpoint_carries_the_same_practice_dates(client, monkeypatch):
+    enriched(monkeypatch, main_patterns=["prefix-sum"], intended_pattern="dp-1d")
+    logged = client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE}).json()
+
+    assert client.get("/api/solutions/1").json()["practice"] == logged["practice"]
+    assert client.get("/api/solutions/15").json()["practice"] == {
+        "review_due": None,
+        "correction": None,
+        "next_practice": None,
+        "completed": False,
+    }
 
 
 def test_plan_endpoint_says_why_a_reviewed_problem_came_back(client, monkeypatch):
@@ -481,8 +593,8 @@ def test_plan_endpoint_says_why_a_reviewed_problem_came_back(client, monkeypatch
 
     plan = client.get("/api/plan").json()
 
-    assert [(i["number"], i["reason"], i["kind"]) for i in plan["items"] if i["number"] == 1] == [
-        (1, "re-solve: review reported a bug", "review")
+    assert [(i["number"], i["reasons"]) for i in plan["items"] if i["number"] == 1] == [
+        (1, [{"kind": "review", "text": "re-solve: review reported a bug"}])
     ]
     assert plan["due_count"] == 1
 
@@ -577,6 +689,7 @@ def test_plan_and_weekly_endpoints_never_call_the_llm(client, monkeypatch):
 
     assert client.get("/api/plan").status_code == 200
     assert client.get("/api/weekly").status_code == 200
+    assert client.get("/api/solutions/1").status_code == 200
 
 
 def test_weekly_endpoint_serves_the_thresholds_the_page_quotes(client):

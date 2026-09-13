@@ -1,7 +1,6 @@
 import json
 
 import pytest
-from conftest import tag_solution
 from pydantic import ValidationError
 
 from coach import db, enrich
@@ -141,23 +140,6 @@ def test_save_intended_accumulates_alternates_across_enrichments(tmp_path):
     assert returned == stored_canonical(conn)
 
 
-def test_re_enriching_does_not_re_flag_a_cleared_solve(tmp_path):
-    """The bug this guards: a solved-correctly problem reappearing as off-pattern.
-
-    #121 is solved with greedy while greedy is canonical. A later enrichment names
-    only dp-1d. Before, that re-flagged the greedy solve and earned it a forced
-    re-solve slot in the Daily Plan.
-    """
-    conn = make_db(tmp_path)
-    enrich.save_intended(conn, 1, "greedy", ["dp-1d"])
-    enrich_solution_row(conn, "greedy")
-    assert enrich.off_pattern_problems(conn) == []
-
-    enrich.save_intended(conn, 1, "dp-1d", [])
-
-    assert [r["number"] for r in enrich.off_pattern_problems(conn)] == []
-
-
 CANONICAL = ("hashmap", ["two-pointers"])
 
 
@@ -185,38 +167,6 @@ def test_unused_canonical_lists_what_is_left_central_first():
     assert enrich.unused_canonical(["hashmap"], ["two-pointers"], intended, alternates) == []
     assert enrich.unused_canonical(["hashmap", "two-pointers"], [], intended, alternates) == []
     assert enrich.unused_canonical(["math"], [], None, []) == []
-
-
-def enrich_solution_row(conn, *main_patterns, secondary=()):
-    tag_solution(conn, add_solution(conn), *main_patterns, secondary=secondary)
-    conn.commit()
-
-
-def test_off_pattern_problems_clears_on_any_canonical_approach(tmp_path):
-    conn = make_db(tmp_path)
-    enrich.save_intended(conn, 1, "hashmap", ["two-pointers"])
-    enrich_solution_row(conn, "math")
-    assert [r["number"] for r in enrich.off_pattern_problems(conn)] == [1]
-
-    # a later solve using the *alternate* canonical approach clears the problem
-    enrich_solution_row(conn, "two-pointers")
-    assert enrich.off_pattern_problems(conn) == []
-
-
-def test_off_pattern_problems_matches_an_alternate_in_solution_secondaries(tmp_path):
-    conn = make_db(tmp_path)
-    enrich.save_intended(conn, 1, "hashmap", ["two-pointers"])
-    enrich_solution_row(conn, "math", secondary=["two-pointers"])
-
-    assert enrich.off_pattern_problems(conn) == []
-
-
-def test_off_pattern_problems_clears_on_a_canonical_second_main_pattern(tmp_path):
-    conn = make_db(tmp_path)
-    enrich.save_intended(conn, 1, "hashmap", ["two-pointers"])
-    enrich_solution_row(conn, "math", "two-pointers")
-
-    assert enrich.off_pattern_problems(conn) == []
 
 
 def test_enrich_solution_builds_prompt_and_parses(monkeypatch):

@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from coach import config, db, mastery, service
+from coach import config, corrections, db, mastery, service
 from coach.weekly import analyze as weekly_analyze
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -52,6 +52,28 @@ def thresholds() -> dict:
     }
 
 
+def correction_payload(c: corrections.Correction) -> dict:
+    """Approach practice a problem owes, as JSON - the one shape every page renders."""
+    return {
+        "number": c.problem["number"],
+        "title": c.problem["title"],
+        "accepted": c.accepted,
+        "latest_attempt": c.latest_attempt.isoformat(),
+        "due": c.due.isoformat(),
+        "reason": c.reason,
+    }
+
+
+def practice_payload(p: service.PracticeDates) -> dict:
+    """When a problem is next owed practice, as JSON: the review and approach practice apart."""
+    return {
+        "review_due": p.review_due.isoformat() if p.review_due else None,
+        "correction": correction_payload(p.correction) if p.correction else None,
+        "next_practice": p.next_practice.isoformat() if p.next_practice else None,
+        "completed": p.completed,
+    }
+
+
 class LogRequest(BaseModel):
     number: int = Field(gt=0)
     outcome: Literal["clean", "struggled", "hints", "failed"]
@@ -78,7 +100,8 @@ def api_patterns() -> dict:
 def api_log(body: LogRequest) -> dict:
     """Log a solve, then enrich it. A saved solve is never an error: if the LLM
     or the embedding model is unavailable the response says so and the solve
-    still stands (`coach enrich` backfills later)."""
+    still stands (`coach enrich` backfills later). The practice dates are read
+    after enrichment, so this solve's own tags decide what approach practice owes."""
     with open_db() as conn:
         problem = service.get_problem(conn, body.number)
         if problem is None:
@@ -93,13 +116,14 @@ def api_log(body: LogRequest) -> dict:
         )
         e = service.enrich_solution_now(conn, result.solution_id, problem, body.code.strip())
         standings = service.pattern_standings(conn, e.main_patterns)
+        practice = service.practice_dates(conn, body.number, result.attempt_id)
 
     return {
         "number": result.number,
         "title": result.title,
         "difficulty": problem["difficulty"],
         "outcome": result.outcome,
-        "next_due": result.next_due.isoformat(),
+        "practice": practice_payload(practice),
         "enrichment": {
             "status": "skipped" if e.skipped else "ok",
             "reason": e.skipped,
@@ -147,11 +171,13 @@ def api_solutions(q: str = "") -> dict:
 def api_solution_history(number: int) -> dict:
     with open_db() as conn:
         try:
-            return service.solution_history(conn, number)
+            history = service.solution_history(conn, number)
         except service.ProblemNotFound:
             raise HTTPException(
                 404, f"Problem {number} is not in the catalog - run `coach init` first?"
             ) from None
+        history["practice"] = practice_payload(service.practice_dates(conn, number))
+    return history
 
 
 class ReviewRequest(BaseModel):
@@ -220,23 +246,19 @@ def api_plan(target: int = config.DAILY_TARGET) -> dict:
                 "slug": i.slug,
                 "title": i.title,
                 "difficulty": i.difficulty,
-                "reason": i.reason,
-                "kind": i.kind,
+                "reasons": [{"kind": r.kind, "text": r.text} for r in i.reasons],
             }
             for i in items
         ],
         "topics": {
             "weak": analysis["weak_patterns"],
             "stale": analysis["stale_patterns"],
-            "off_pattern": [
-                {
-                    "number": r["number"],
-                    "title": r["title"],
-                    "intended_pattern": r["intended_pattern"],
-                }
-                for r in analysis["off_pattern"]
+            "corrections_due": [correction_payload(c) for c in analysis["corrections_due"]],
+            "corrections_upcoming": [
+                correction_payload(c) for c in analysis["corrections_upcoming"]
             ],
         },
+        # SM-2 reviews only: approach practice is counted by its own topics, never added in.
         "due_count": len(analysis["due"]),
         "curriculum": analysis["curriculum"],
         "thresholds": thresholds(),

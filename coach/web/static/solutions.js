@@ -1,5 +1,5 @@
 /* Solutions page: every solved problem, expanding to the code you wrote.
-   el()/getJSON()/patternBadges() come from dom.js, loaded before this script. */
+   el()/getJSON()/patternBadges()/APPROACH_REASON come from dom.js, loaded before this script. */
 
 function summaryLine(p) {
   const parts = [`${p.solves} solve${p.solves === 1 ? "" : "s"}`, `last ${p.last_solved} · ${p.last_outcome}`];
@@ -169,6 +169,14 @@ function renderSolve(s, number) {
   return block;
 }
 
+/* Approach practice the problem still owes, shown above its solves. Nothing once it is
+   completed: the same history decides it here, on Home and on the Daily Plan. */
+function practiceLine(owed) {
+  return el("p", { class: "hint", text:
+    `Approach practice due ${owed.due}: ${APPROACH_REASON[owed.reason]}. ` +
+    `Re-solve it with ${owed.accepted.join(" or ")}.` });
+}
+
 async function toggle(button, panel, number) {
   const open = panel.hidden;
   panel.hidden = !open;
@@ -177,7 +185,11 @@ async function toggle(button, panel, number) {
 
   try {
     const data = await getJSON(`/api/solutions/${number}`);
-    panel.replaceChildren(...data.solves.map((s) => renderSolve(s, number)));
+    const owed = data.practice.correction;
+    panel.replaceChildren(
+      ...(owed ? [practiceLine(owed)] : []),
+      ...data.solves.map((s) => renderSolve(s, number))
+    );
     panel.dataset.loaded = "yes";
   } catch (err) {
     panel.replaceChildren(el("p", { class: "error", text: `Could not load the code: ${err.message}` }));

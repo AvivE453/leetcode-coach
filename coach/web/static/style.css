@@ -314,6 +314,8 @@ ol.plan li:nth-child(-n + 3)::before { background: var(--grad); color: #fff; }
 .chip.re-solve { color: #fcd34d; border-color: #78591a; background: #2a2412; }
 .chip.weak-pattern { color: #fca5a5; border-color: #7f3232; background: #2c1717; }
 .chip.curriculum { color: var(--muted); }
+/* A problem can be on the list for two reasons at once: a chip each, wrapping together. */
+.plan .reasons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 
 /* ---------- solutions page ---------- */
 
@@ -351,8 +353,10 @@ ul.solutions > li {
 .solve p { margin: 4px 0; }
 .solve-meta { color: var(--muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
 
-.review { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
-.review .btn.ghost { margin-top: 6px; }
+/* Scoped to a solve: a bare `.review` also matched the Daily Plan's `chip review`, pushing
+   that chip down with a dashed border and stretching any chip beside it. */
+.solve .review { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.solve .review .btn.ghost { margin-top: 6px; }
 .dots { display: inline-block; width: 3ch; text-align: left; }
 .review-head {
   margin: 10px 0 4px;
@@ -362,10 +366,10 @@ ul.solutions > li {
   letter-spacing: 0.07em;
   color: var(--muted);
 }
-.review ul { margin: 0; padding-left: 20px; }
-.review li { margin: 4px 0; }
-.review ul.good li::marker { color: var(--easy); }
-.review ul.bad li::marker { color: var(--hard); }
+.solve .review ul { margin: 0; padding-left: 20px; }
+.solve .review li { margin: 4px 0; }
+.solve .review ul.good li::marker { color: var(--easy); }
+.solve .review ul.bad li::marker { color: var(--hard); }
 
 /* Same palette as the difficulty badges, so a verdict reads at the same glance. */
 .verdict { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }

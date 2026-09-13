@@ -2,7 +2,7 @@ import sqlite3
 from collections.abc import Sequence
 from datetime import date, timedelta
 
-from coach import assessment, curriculum, enrich, mastery, scheduler
+from coach import assessment, corrections, curriculum, mastery, scheduler
 
 STALE_DAYS = 30
 # How far ahead a plan counts a review as due. The weekly plan covers the next
@@ -33,12 +33,17 @@ def analyze(
     stale = [
         p["pattern"] for p in patterns if p["last_date"] < today - timedelta(days=STALE_DAYS)
     ]
+    # Approach practice keeps the reviews' horizon: what is owed by it goes on the list, and
+    # the rest waits for its date rather than coming back early for being unresolved.
+    horizon = today + timedelta(days=lookahead_days)
+    owed = corrections.outstanding(conn)
 
     return {
         "patterns": patterns,
         "weak_patterns": weak,
         "stale_patterns": stale,
-        "off_pattern": enrich.off_pattern_problems(conn),
+        "corrections_due": [c for c in owed if c.due <= horizon],
+        "corrections_upcoming": [c for c in owed if c.due > horizon],
         "due": scheduler.due_reviews(conn, today, lookahead_days),
         # Why a due problem came back, when its last practice day holds a reported failure.
         "findings": assessment.open_findings(conn),

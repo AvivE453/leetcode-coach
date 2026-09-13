@@ -154,9 +154,9 @@ def save_intended(
     stored. Every re-solve re-enriches and calls this, and the model does not
     always name the same alternates twice - so replacing let a later enrichment
     narrow the canonical set and re-flag a solve that had legitimately used one
-    of the dropped approaches, handing it a forced re-solve slot in the Daily Plan.
+    of the dropped approaches, sending it back to approach practice it had completed.
     Accumulating makes the set a record of every approach ever judged canonical,
-    which is what off_pattern_problems() reads it as.
+    which is what coach/corrections.py reads it as.
 
     `intended_pattern` still takes the newest answer, since it is the single
     central approach the off-pattern warning names; a previous central pattern
@@ -197,10 +197,10 @@ def off_pattern(
 ) -> bool:
     """True when a solve used none of the problem's canonical approaches.
 
-    The sharp signal: it drives the off-pattern warning on a logged solve and the plan's forced
-    re-solve slot, so it must not fire for a solve that simply took a different but
-    equally canonical route - as any of its main patterns, or as a secondary.
-    Unknown canonical set (never enriched) is never off.
+    The sharp signal: it drives the off-pattern warning on a logged solve and is the
+    evidence that opens approach practice (coach/corrections.py), so it must not fire for
+    a solve that simply took a different but equally canonical route - as any of its main
+    patterns, or as a secondary. Unknown canonical set (never enriched) is never off.
     """
     canonical = canonical_patterns(intended, intended_secondary)
     if not canonical:
@@ -222,42 +222,6 @@ def unused_canonical(
     """
     used = {*main_patterns, *(secondary or [])}
     return [p for p in canonical_patterns(intended, intended_secondary) if p not in used]
-
-
-def off_pattern_problems(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Solved problems where no solution ever used any canonical approach.
-
-    A problem clears this list as soon as one solve used one accepted pattern -
-    whether that is `intended_pattern` or one of `intended_secondary_patterns`, and
-    whether the solve had it as a main pattern or a secondary. `used` flattens every
-    solve's tags into (problem, pattern) pairs, so the check reads a single list.
-    """
-    return conn.execute(
-        """
-        WITH used AS (
-            SELECT s.problem_number, tag.value AS pattern
-            FROM solutions s
-            JOIN enrichments en ON en.solution_id = s.id
-            JOIN json_each(en.main_patterns) tag
-            UNION
-            SELECT s.problem_number, tag.value
-            FROM solutions s
-            JOIN enrichments en ON en.solution_id = s.id
-            JOIN json_each(en.secondary_patterns) tag
-        )
-        SELECT p.number, p.slug, p.title, p.difficulty, p.intended_pattern,
-               p.intended_secondary_patterns
-        FROM problems p
-        WHERE p.intended_pattern IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM used
-            WHERE used.problem_number = p.number
-              AND (used.pattern = p.intended_pattern
-                   OR used.pattern IN (SELECT value FROM json_each(p.intended_secondary_patterns)))
-          )
-        ORDER BY p.number
-        """
-    ).fetchall()
 
 
 class QueryCard(BaseModel):

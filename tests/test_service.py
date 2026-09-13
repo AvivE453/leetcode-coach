@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from conftest import CODE, TWO_SUM, seed_db, tag_solution
 
-from coach import config, db, embed, enrich, llm, mastery, review, service
+from coach import config, corrections, db, embed, enrich, llm, mastery, review, service
 from coach.weekly import analyze as weekly_analyze
 from coach.weekly import collect as weekly_collect
 
@@ -316,8 +316,8 @@ def test_a_late_bug_review_puts_the_problem_on_the_plan_with_its_reason(tmp_path
     review_with(conn, monkeypatch, logged.solution_id, FEEDBACK)
 
     items = service.daily_plan(conn, plan_day, config.DAILY_TARGET).items
-    assert [(i.number, i.reason, i.kind) for i in items] == [
-        (1, "re-solve: review reported a bug", "review")
+    assert [(i.number, [(r.kind, r.text) for r in i.reasons]) for i in items] == [
+        (1, [("review", "re-solve: review reported a bug")])
     ]
 
 
@@ -384,7 +384,7 @@ def test_enrich_solution_now_accepts_a_canonical_alternate_approach(tmp_path, mo
     # the note still points at the approach that went unpractised
     assert e.also_solvable_with == ["hashmap"]
     assert e.intended_secondary_patterns == ["two-pointers"]
-    assert enrich.off_pattern_problems(conn) == []
+    assert corrections.outstanding(conn) == []
 
 
 def test_enrich_solution_now_carries_both_signals_when_embedding_fails(tmp_path, monkeypatch):
@@ -439,7 +439,8 @@ def test_enrich_solution_now_judges_against_the_stored_set_not_the_latest_answer
     assert (e.intended_pattern, e.intended_secondary_patterns) == service.problem_canonical(
         service.get_problem(conn, 1)
     )
-    assert weekly_analyze.analyze(conn, date.today())["off_pattern"] == []
+    analysis = weekly_analyze.analyze(conn, date.today())
+    assert (analysis["corrections_due"], analysis["corrections_upcoming"]) == ([], [])
 
 
 def test_enrich_solution_now_keeps_a_demoted_central_pattern_canonical(tmp_path, monkeypatch):
@@ -648,22 +649,85 @@ def test_saved_evidence_is_read_without_any_rebuild(tmp_path, monkeypatch):
 
 
 def test_mastery_readers_write_nothing_and_call_no_model(tmp_path, monkeypatch):
-    """Every page load reads mastery, so reading it must stay free."""
+    """Every page load reads mastery and approach practice, so reading them must stay free."""
     conn = seed_db(tmp_path, monkeypatch)
     for _ in range(5):
         log_and_enrich(conn, monkeypatch, "failed")
+    log_tagged(conn, monkeypatch, 1, main_patterns=["prefix-sum"], intended_pattern="dp-1d")
     monkeypatch.setattr(
-        "coach.llm.parse", lambda *args, **kw: pytest.fail("a mastery reader called the model")
+        "coach.llm.parse", lambda *args, **kw: pytest.fail("a page reader called the model")
     )
     today = date.today()
     before = conn.total_changes
 
     service.pattern_table(conn)
     service.pattern_standings(conn, ["hashmap"], today)
-    service.daily_plan(conn, today, config.DAILY_TARGET)
+    assert service.daily_plan(conn, today, config.DAILY_TARGET).analysis["corrections_upcoming"]
     service.weekly_review(conn, today)
+    service.solution_history(conn, 1)
+    assert service.practice_dates(conn, 1).correction is not None
 
     assert conn.total_changes == before
+
+
+def log_on(conn, monkeypatch, day, outcome, *main_patterns):
+    """Log a Two Sum solve on `day` and tag it, against the canonical set dp-1d + two-pointers."""
+    answer = ENRICHMENT.model_copy(
+        update={"main_patterns": list(main_patterns), "intended_pattern": "dp-1d"}
+    )
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: answer)
+    logged = service.log_solve(conn, 1, outcome, CODE, today=day)
+    service.tag_solution_now(conn, logged.solution_id, service.get_problem(conn, 1), CODE)
+    return logged
+
+
+def test_practice_dates_keep_the_review_and_approach_practice_apart(tmp_path, monkeypatch):
+    """A clean wrong-approach solve: SM-2 wants it back in a week, approach practice in three
+    days. Both dates are kept, and the next practice is the earlier of them."""
+    conn = seed_db(tmp_path, monkeypatch)
+    logged = log_on(conn, monkeypatch, date(2026, 9, 12), "clean", "prefix-sum")
+
+    dates = service.practice_dates(conn, 1, logged.attempt_id)
+
+    assert dates.review_due == date(2026, 9, 19)
+    assert (dates.correction.due, dates.correction.reason) == (date(2026, 9, 15), "wrong-approach")
+    assert dates.next_practice == date(2026, 9, 15)
+    assert dates.completed is False
+
+
+def test_practice_dates_say_which_log_completed_approach_practice(tmp_path, monkeypatch):
+    """The 09-15 failure keeps it owed, and so does the clean retry straight after it - SM-2
+    lapses that day too, so both dates meet on 09-18. The success on 09-18 completes it."""
+    conn = seed_db(tmp_path, monkeypatch)
+
+    def after(day, outcome, *patterns):
+        logged = log_on(conn, monkeypatch, day, outcome, *patterns)
+        return service.practice_dates(conn, 1, logged.attempt_id)
+
+    after(date(2026, 9, 12), "clean", "prefix-sum")
+    failed = after(date(2026, 9, 15), "failed", "dp-1d")
+    retried = after(date(2026, 9, 15), "clean", "dp-1d")
+    succeeded = after(date(2026, 9, 18), "clean", "dp-1d")
+
+    assert [(d.review_due, d.correction.due, d.completed) for d in (failed, retried)] == [
+        (date(2026, 9, 18), date(2026, 9, 18), False),
+        (date(2026, 9, 18), date(2026, 9, 18), False),
+    ]
+    assert (succeeded.correction, succeeded.completed) == (None, True)
+    assert succeeded.next_practice == succeeded.review_due == date(2026, 9, 25)
+
+
+def test_practice_dates_owe_nothing_before_any_attempt(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+
+    dates = service.practice_dates(conn, 1)
+
+    assert (dates.review_due, dates.correction, dates.next_practice, dates.completed) == (
+        None,
+        None,
+        None,
+        False,
+    )
 
 
 def test_stats_summary_counts_distinct_problems_and_curriculum(tmp_path, monkeypatch):
@@ -1008,8 +1072,31 @@ def test_daily_plan_only_counts_reviews_due_today(tmp_path, monkeypatch):
 
     items = service.daily_plan(conn, today, target=4).items
 
-    assert [i.number for i in items] == [1]
-    assert items[0].reason == f"review due {today.isoformat()}"
+    assert [(i.number, [(r.kind, r.text) for r in i.reasons]) for i in items] == [
+        (1, [("review", f"review due {today.isoformat()}")])
+    ]
+
+
+def test_approach_practice_waits_three_days_after_the_solve_that_opened_it(tmp_path, monkeypatch):
+    """Logged off-pattern on 09-12: the problem stays off the Daily Plan for three days and is
+    owed on 09-15, while its SM-2 review keeps its own date a week out."""
+    conn = seed_db(tmp_path, monkeypatch)
+    day = date(2026, 9, 12)
+    off = ENRICHMENT.model_copy(
+        update={"main_patterns": ["prefix-sum"], "intended_pattern": "dp-1d"}
+    )
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: off)
+    monkeypatch.setattr("coach.embed.encode", fake_encode)
+    logged = service.log_solve(conn, 1, "clean", CODE, today=day)
+    service.enrich_solution_now(conn, logged.solution_id, service.get_problem(conn, 1), CODE)
+
+    def planned(offset):
+        items = service.daily_plan(conn, day + timedelta(days=offset), config.DAILY_TARGET).items
+        return [(i.number, [r.kind for r in i.reasons]) for i in items]
+
+    assert [planned(offset) for offset in range(3)] == [[], [], []]
+    assert planned(3) == [(1, ["re-solve"])]
+    assert logged.next_due == date(2026, 9, 19)
 
 
 def test_coach_db_env_var_redirects_the_database(tmp_path, monkeypatch):

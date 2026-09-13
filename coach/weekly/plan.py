@@ -3,7 +3,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Literal
 
-from coach import assessment, config, curriculum
+from coach import assessment, config, corrections, curriculum
 
 # Our fine-grained vocabulary -> official catalog tag, used to find NEW problems
 # practicing a weak pattern (design decision #1: official tags pick problems,
@@ -54,61 +54,85 @@ FINDING_REASON: dict[assessment.Correctness, str] = {
 }
 
 
-# Which of build_plan's four rules put an item on the list. It doubles as the
-# chip class the web UI styles, so it is set where the rule fires and travels
-# with the item. It used to be recovered afterwards by matching the prefix of
-# `reason` - which meant rewording a sentence meant for a human silently
-# reclassified the item, with nothing to fail.
+# Which of build_plan's four rules gave a reason: a due review, approach practice that is
+# due ("re-solve"), a weak-pattern pick, or curriculum progression. It doubles as the chip
+# class the web UI styles, so it is set where the rule fires and travels with the reason.
+# It used to be recovered afterwards by matching the prefix of the sentence - which meant
+# rewording a sentence meant for a human silently reclassified the item, with nothing to fail.
 Kind = Literal["review", "re-solve", "weak-pattern", "curriculum"]
 
 
 @dataclass(frozen=True)
+class Reason:
+    kind: Kind
+    text: str
+
+
+@dataclass(frozen=True)
 class PlanItem:
+    """One problem on the list, with every reason that applies to it today.
+
+    Usually one. A problem owed both a review and approach practice is one item in one
+    slot carrying both - deduplicating used to keep the review's sentence and silently
+    drop the approach to practise.
+    """
+
     number: int
     slug: str
     title: str
     difficulty: str
-    reason: str
-    kind: Kind
+    reasons: tuple[Reason, ...]
 
 
 def hard_cap(target: int) -> int:
     return max(1, target // 5)
 
 
+def review_reason(row: sqlite3.Row, findings: dict[int, assessment.Correctness]) -> Reason:
+    finding = findings.get(row["number"])
+    return Reason("review", FINDING_REASON[finding] if finding else f"review due {row['next_due']}")
+
+
+def practice_reason(correction: corrections.Correction) -> Reason:
+    return Reason("re-solve", f"practice an accepted approach: {' or '.join(correction.accepted)}")
+
+
 def build_plan(conn: sqlite3.Connection, analysis: dict, target: int) -> list[PlanItem]:
     """Fill ~target slots: due reviews (worded by a reported failure when there is
-    one) -> off-pattern re-solves -> weak-pattern picks from the unsolved curriculum
-    -> curriculum progression. Hard problems are capped for new picks (mandatory
-    reviews/re-solves are exempt)."""
+    one) -> approach practice that is due -> weak-pattern picks from the unsolved
+    curriculum -> curriculum progression. Hard problems are capped for new picks
+    (mandatory reviews and approach practice are exempt)."""
     items: list[PlanItem] = []
     seen: set[int] = set()
     hards = 0
 
-    def add(row, reason: str, kind: Kind, mandatory: bool = False) -> None:
+    def add(problem, reasons: list[Reason], mandatory: bool = False) -> None:
         nonlocal hards
-        if row["number"] in seen or len(items) >= target:
+        if problem["number"] in seen or len(items) >= target:
             return
-        if not mandatory and row["difficulty"] == "Hard" and hards >= hard_cap(target):
+        if not mandatory and problem["difficulty"] == "Hard" and hards >= hard_cap(target):
             return
-        if row["difficulty"] == "Hard":
+        if problem["difficulty"] == "Hard":
             hards += 1
-        seen.add(row["number"])
+        seen.add(problem["number"])
         items.append(
-            PlanItem(row["number"], row["slug"], row["title"], row["difficulty"], reason, kind)
+            PlanItem(
+                problem["number"],
+                problem["slug"],
+                problem["title"],
+                problem["difficulty"],
+                tuple(reasons),
+            )
         )
 
+    practice_due = {c.problem["number"]: c for c in analysis["corrections_due"]}
     for row in analysis["due"]:
-        finding = analysis["findings"].get(row["number"])
-        reason = FINDING_REASON[finding] if finding else f"review due {row['next_due']}"
-        add(row, reason, "review", mandatory=True)
-    for row in analysis["off_pattern"]:
-        add(
-            row,
-            f"re-solve with the intended pattern ({row['intended_pattern']})",
-            "re-solve",
-            mandatory=True,
-        )
+        reasons = [review_reason(row, analysis["findings"])]
+        if row["number"] in practice_due:
+            reasons.append(practice_reason(practice_due[row["number"]]))
+        add(row, reasons, mandatory=True)
+    for correction in analysis["corrections_due"]:
+        add(correction.problem, [practice_reason(correction)], mandatory=True)
 
     order = {slug: i for i, slug in enumerate(curriculum.load(config.CURRICULUM))}
     unsolved = conn.execute(
@@ -132,10 +156,10 @@ def build_plan(conn: sqlite3.Connection, analysis: dict, target: int) -> list[Pl
                 break
             if row["number"] not in seen and tag in json.loads(row["official_tags"]):
                 before = len(items)
-                add(row, f"weak pattern: {pattern}", "weak-pattern")
+                add(row, [Reason("weak-pattern", f"weak pattern: {pattern}")])
                 picked += len(items) - before
 
     for row in unsolved:
-        add(row, f"{config.CURRICULUM} progression", "curriculum")
+        add(row, [Reason("curriculum", f"{config.CURRICULUM} progression")])
 
     return items

@@ -1,5 +1,13 @@
 /* Daily Plan page: focus topics, then today's ranked problem list.
-   el()/getJSON()/topicCard() come from dom.js, loaded before this script. */
+   el()/getJSON()/topicCard()/APPROACH_REASON come from dom.js, loaded before this script. */
+
+/* One problem owing approach practice: the approaches that would complete it, its date,
+   and why it is still owed. */
+function correctionItem(c) {
+  return el("li", {
+    text: `(${c.number}) ${c.title} → ${c.accepted.join(" or ")} · due ${c.due} · ${APPROACH_REASON[c.reason]}`,
+  });
+}
 
 function renderTopics(data) {
   const host = document.getElementById("topics");
@@ -24,12 +32,22 @@ function renderTopics(data) {
       (p) => el("li", { text: p })
     )
   );
+  // Due practice is already in today's list below. Upcoming waits for its date, so a
+  // problem just practised does not come straight back for being unresolved.
   host.append(
     topicCard(
-      "Solved off-pattern",
-      "Every solved problem has been done with its canonical approach.",
-      t.off_pattern,
-      (p) => el("li", { text: `(${p.number}) ${p.title} → ${p.intended_pattern}` })
+      "Approach practice due",
+      "No problem is owed an accepted approach today.",
+      t.corrections_due,
+      correctionItem
+    )
+  );
+  host.append(
+    topicCard(
+      "Approach practice upcoming",
+      "Nothing else is waiting on an accepted approach.",
+      t.corrections_upcoming,
+      correctionItem
     )
   );
 
@@ -63,7 +81,10 @@ function renderPlan(data) {
           }),
         ]),
         el("span", { class: `diff ${item.difficulty}`, text: item.difficulty }),
-        el("span", { class: `chip ${item.kind}`, text: item.reason }),
+        // One chip per reason, each styled by the rule that gave it.
+        el("span", { class: "reasons" }, item.reasons.map((r) =>
+          el("span", { class: `chip ${r.kind}`, text: r.text })
+        )),
       ])
     );
   }

@@ -3,6 +3,9 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 QUALITY = {"clean": 5, "struggled": 3, "hints": 2, "failed": 1}
+# The lowest grade that shows the problem was remembered. A day graded below it is a lapse,
+# and the same day cannot complete approach practice (coach/corrections.py).
+PASSING_QUALITY = 3
 INITIAL_EASE = 2.5
 MIN_EASE = 1.3
 FIRST_INTERVAL = 7.0
@@ -22,14 +25,14 @@ class ReviewState:
 
 def review(state: ReviewState | None, quality: int, today: date) -> ReviewState:
     """One SM-2 step for a 1-5 grade: QUALITY for a bare outcome, capped by a review's
-    findings in assessment.effective_quality(). Below 3 is a lapse."""
+    findings in assessment.effective_quality(). Below PASSING_QUALITY is a lapse."""
     ease = state.ease if state else INITIAL_EASE
     reps = state.reps if state else 0
     lapses = state.lapses if state else 0
 
     ease = max(MIN_EASE, ease + 0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
 
-    if quality < 3:
+    if quality < PASSING_QUALITY:
         reps = 0
         lapses += 1
         interval = LAPSE_INTERVAL

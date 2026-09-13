@@ -1,5 +1,5 @@
 /* Home page: progress numbers, the pattern table, and the log form.
-   el()/getJSON()/patternBadges() come from dom.js, loaded before this script. */
+   el()/getJSON()/patternBadges()/APPROACH_REASON come from dom.js, loaded before this script. */
 
 /* ---------- stats ---------- */
 
@@ -117,13 +117,47 @@ function renderStanding(box, standing) {
   );
 }
 
+/* What this solve means for approach practice. The server judges it after tagging, so the
+   solve's own tags count - and with tagging skipped, an earlier solve can still owe it. */
+function approachPracticeNote(data) {
+  const { practice, enrichment: e } = data;
+  const owed = practice.correction;
+  if (practice.completed) {
+    return el("p", { text:
+      `Accepted approach completed successfully. Your next review is ${practice.review_due}.` });
+  }
+  if (!owed) {
+    if (!e.off_pattern) return null;
+    return el("p", {}, [
+      el("span", { class: "badge warn", text: "off-pattern" }),
+      el("span", { text: " but you have already solved it with an accepted approach, so no approach practice is owed." }),
+    ]);
+  }
+  if (e.status === "skipped") {
+    return el("p", { class: "hint", text:
+      `Approach practice is still owed, due ${owed.due}: ${APPROACH_REASON[owed.reason]}.` });
+  }
+  if (e.off_pattern) {
+    return el("p", {}, [
+      el("span", { class: "badge warn", text: "off-pattern" }),
+      el("span", { text:
+        ` none of the accepted approaches (${owed.accepted.join(" or ")}) — approach practice is due ${owed.due}.` }),
+    ]);
+  }
+  return el("p", { text:
+    `This attempt used an accepted approach, but ${APPROACH_REASON[owed.reason]}. ` +
+    `Approach practice is due ${owed.due}.` });
+}
+
 function renderLogResult(data) {
   const box = document.getElementById("log-result");
   box.replaceChildren();
   box.hidden = false;
 
   box.append(el("h3", { text: `Logged (${data.number}) ${data.title} (${data.outcome})` }));
-  box.append(el("p", { text: `Next review: ${data.next_due}` }));
+  box.append(el("p", { text: `Next review: ${data.practice.review_due}` }));
+  const note = approachPracticeNote(data);
+  if (note) box.append(note);
 
   const e = data.enrichment;
   if (e.status === "skipped") {
@@ -145,14 +179,6 @@ function renderLogResult(data) {
   for (const standing of data.pattern_standings) renderStanding(box, standing);
   if (e.secondary_patterns.length) {
     box.append(el("p", { class: "hint", text: `Also uses: ${e.secondary_patterns.join(", ")}` }));
-  }
-  if (e.off_pattern) {
-    box.append(
-      el("p", {}, [
-        el("span", { class: "badge warn", text: "off-pattern" }),
-        el("span", { text: ` the canonical approach is ${e.intended_pattern} — worth re-solving that way.` }),
-      ])
-    );
   }
   if (e.also_solvable_with?.length) {
     box.append(el("p", { class: "hint", text:
