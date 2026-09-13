@@ -91,6 +91,7 @@ def test_log_endpoint_stores_and_enriches(client, monkeypatch):
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["title"] == "Two Sum"
+    assert body["counted_as_review"] is True
     assert body["enrichment"]["status"] == "ok"
     assert body["enrichment"]["main_patterns"] == ["hashmap"]
     assert body["enrichment"]["off_pattern"] is False
@@ -567,6 +568,18 @@ def test_log_endpoint_says_when_a_solve_completes_approach_practice(client, monk
 
     assert (body["practice"]["correction"], body["practice"]["completed"]) == (None, True)
     assert body["practice"]["next_practice"] == body["practice"]["review_due"]
+
+
+def test_log_endpoint_says_when_a_solve_did_not_count_as_a_review(client, monkeypatch):
+    """Two days after the first solve its review is still five days off, so a clean solve
+    leaves it there - and says so, or the unmoved date would read as a bug."""
+    log_off_pattern_days_ago(monkeypatch, 2)
+    enriched(monkeypatch, main_patterns=["dp-1d"], intended_pattern="dp-1d")
+
+    body = client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE}).json()
+
+    assert body["counted_as_review"] is False
+    assert body["practice"]["review_due"] == (date.today() + timedelta(days=5)).isoformat()
 
 
 def test_solution_history_endpoint_carries_the_same_practice_dates(client, monkeypatch):

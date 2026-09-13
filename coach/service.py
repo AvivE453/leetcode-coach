@@ -45,6 +45,7 @@ class LogResult:
     attempt_id: int
     solution_id: int
     next_due: date
+    counted_as_review: bool  # False when the schedule stayed as it was: early, or a day already counted
 
 
 @dataclass(frozen=True)
@@ -275,6 +276,23 @@ def rebuild_review_states(conn: sqlite3.Connection) -> int:
     return len(rows)
 
 
+def stored_review_state(conn: sqlite3.Connection, number: int) -> scheduler.ReviewState | None:
+    """The schedule update_review_state() last stored for a problem; None before any attempt."""
+    row = conn.execute(
+        "SELECT ease, interval_days, next_due, reps, lapses FROM review_state WHERE problem_number = ?",
+        (number,),
+    ).fetchone()
+    if row is None:
+        return None
+    return scheduler.ReviewState(
+        ease=row["ease"],
+        interval_days=row["interval_days"],
+        next_due=date.fromisoformat(row["next_due"]),
+        reps=row["reps"],
+        lapses=row["lapses"],
+    )
+
+
 def log_solve(
     conn: sqlite3.Connection,
     number: int,
@@ -284,7 +302,12 @@ def log_solve(
     note: str | None = None,
     today: date | None = None,
 ) -> LogResult:
-    """Store an attempt + solution and reschedule its review."""
+    """Store an attempt + solution and reschedule its review.
+
+    Whether the solve counted as a review is read off the schedule itself: every day that
+    counts moves reps or lapses, so a replay that leaves the stored state as it was is a
+    solve the schedule did not count - early, or on a day already counted.
+    """
     problem = get_problem(conn, number)
     if problem is None:
         raise ProblemNotFound(number)
@@ -293,6 +316,7 @@ def log_solve(
         raise EmptySolution(number)
 
     today = today or date.today()
+    before = stored_review_state(conn, number)
     attempt_id = conn.execute(
         "INSERT INTO attempts (problem_number, date, outcome, minutes, note) VALUES (?, ?, ?, ?, ?)",
         (number, today.isoformat(), outcome, minutes, note),
@@ -312,6 +336,7 @@ def log_solve(
         attempt_id=attempt_id,
         solution_id=solution_id,
         next_due=state.next_due,
+        counted_as_review=state != before,
     )
 
 
@@ -324,10 +349,8 @@ def practice_dates(
     same history judged without that attempt still owed it, and judged with it owes nothing.
     One load judged twice in memory, so there is no before-and-after snapshot to keep in step.
     """
-    row = conn.execute(
-        "SELECT next_due FROM review_state WHERE problem_number = ?", (number,)
-    ).fetchone()
-    review_due = date.fromisoformat(row["next_due"]) if row else None
+    stored = stored_review_state(conn, number)
+    review_due = stored.next_due if stored else None
     histories = corrections.load(conn, number)
     if not histories:
         return PracticeDates(review_due, correction=None)
@@ -461,14 +484,12 @@ def review_solution_now(
         return ReviewResult(skipped=str(exc))
 
     number = problem["number"]
-    before = conn.execute(
-        "SELECT next_due FROM review_state WHERE problem_number = ?", (number,)
-    ).fetchone()["next_due"]
+    before = stored_review_state(conn, number)
     with conn:
         review_llm.save(conn, solution_id, r)
         after = update_review_state(conn, number)
     return ReviewResult(
-        review=r, effect=review_effect(conn, solution_id, r, date.fromisoformat(before), after.next_due)
+        review=r, effect=review_effect(conn, solution_id, r, before.next_due, after.next_due)
     )
 
 

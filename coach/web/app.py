@@ -123,6 +123,7 @@ def api_log(body: LogRequest) -> dict:
         "title": result.title,
         "difficulty": problem["difficulty"],
         "outcome": result.outcome,
+        "counted_as_review": result.counted_as_review,
         "practice": practice_payload(practice),
         "enrichment": {
             "status": "skipped" if e.skipped else "ok",

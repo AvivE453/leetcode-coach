@@ -63,13 +63,14 @@ def test_second_log_advances_the_schedule(tmp_path, monkeypatch):
     """log_solve reschedules from every attempt logged before, so a clean solve a
     week later steps up to the second interval rather than restarting at the first."""
     conn = seed_db(tmp_path, monkeypatch)
-    service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+    first = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
 
     result = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 8))
 
     state = conn.execute("SELECT reps, interval_days FROM review_state").fetchone()
     assert (state["reps"], state["interval_days"]) == (2, 14.0)
     assert result.next_due == date(2026, 9, 22)
+    assert (first.counted_as_review, result.counted_as_review) == (True, True)
 
 
 def test_relogging_a_problem_the_same_day_keeps_its_review_date(tmp_path, monkeypatch):
@@ -80,6 +81,7 @@ def test_relogging_a_problem_the_same_day_keeps_its_review_date(tmp_path, monkey
     results = [service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1)) for _ in range(3)]
 
     assert [r.next_due for r in results] == [date(2026, 9, 8)] * 3
+    assert [r.counted_as_review for r in results] == [True, False, False]
     state = conn.execute("SELECT reps, interval_days FROM review_state").fetchone()
     assert (state["reps"], state["interval_days"]) == (1, 7.0)
     # every attempt is still kept - only the schedule counts the day once
@@ -113,7 +115,10 @@ def test_a_clean_solve_before_the_review_is_due_keeps_its_date(tmp_path, monkeyp
         for day in (date(2026, 9, 1), date(2026, 9, 3))
     ]
 
-    assert [r.next_due for r in results] == [date(2026, 9, 8)] * 2
+    assert [(r.next_due, r.counted_as_review) for r in results] == [
+        (date(2026, 9, 8), True),
+        (date(2026, 9, 8), False),
+    ]
     assert stored_schedule(conn) == (date(2026, 9, 8), 1, 0)
 
 
@@ -123,7 +128,7 @@ def test_a_failed_solve_before_the_review_is_due_resets_it(tmp_path, monkeypatch
 
     result = service.log_solve(conn, 1, "failed", CODE, today=date(2026, 9, 3))
 
-    assert result.next_due == date(2026, 9, 6)
+    assert result.counted_as_review
     assert stored_schedule(conn) == (date(2026, 9, 6), 0, 1)
 
 
@@ -768,7 +773,7 @@ def test_approach_practice_completes_without_advancing_the_review(tmp_path, monk
     dates = service.practice_dates(conn, 1, logged.attempt_id)
 
     assert (dates.correction, dates.completed) == (None, True)
-    assert dates.review_due == date(2026, 9, 19)
+    assert (dates.review_due, logged.counted_as_review) == (date(2026, 9, 19), False)
 
 
 def test_practice_dates_owe_nothing_before_any_attempt(tmp_path, monkeypatch):

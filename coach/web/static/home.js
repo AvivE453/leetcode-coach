@@ -156,6 +156,10 @@ function renderLogResult(data) {
 
   box.append(el("h3", { text: `Logged (${data.number}) ${data.title} (${data.outcome})` }));
   box.append(el("p", { text: `Next review: ${data.practice.review_due}` }));
+  if (!data.counted_as_review) {
+    box.append(el("p", { class: "hint", text:
+      "Not counted as a review, so that date did not move: solved before it was due, or again on a day already counted." }));
+  }
   const note = approachPracticeNote(data);
   if (note) box.append(note);
 
