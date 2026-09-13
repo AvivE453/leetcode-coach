@@ -366,32 +366,35 @@ def practice_dates(
     )
 
 
-def neighbor_details(conn: sqlite3.Connection, neighbors: list[tuple[int, float]]) -> list[Neighbor]:
-    """Attach titles and the latest main patterns/trick to raw (number, score) hits."""
-    out = []
-    for number, score in neighbors:
-        p = conn.execute(
-            "SELECT title, difficulty FROM problems WHERE number = ?", (number,)
-        ).fetchone()
-        en = conn.execute(
+def neighbor_details(conn: sqlite3.Connection, hits: list[embed.Hit]) -> list[Neighbor]:
+    """Attach each hit's title, and the main patterns and trick of the solve that matched.
+
+    Not the problem's latest solve: a problem solved two ways is found through either
+    one, and describing it by the other showed an approach the match was not about.
+    """
+    neighbors = []
+    for hit in hits:
+        row = conn.execute(
             """
-            SELECT en.main_patterns, en.key_trick
-            FROM solutions s JOIN enrichments en ON en.solution_id = s.id
-            WHERE s.problem_number = ? ORDER BY s.id DESC LIMIT 1
+            SELECT p.title, p.difficulty, en.main_patterns, en.key_trick
+            FROM solutions s
+            JOIN problems p ON p.number = s.problem_number
+            JOIN enrichments en ON en.solution_id = s.id
+            WHERE s.id = ?
             """,
-            (number,),
+            (hit.solution_id,),
         ).fetchone()
-        out.append(
+        neighbors.append(
             Neighbor(
-                number=number,
-                title=p["title"] if p else f"#{number}",
-                difficulty=p["difficulty"] if p else "",
-                score=score,
-                main_patterns=json_list(en["main_patterns"]) if en else [],
-                key_trick=en["key_trick"] if en else None,
+                number=hit.number,
+                title=row["title"],
+                difficulty=row["difficulty"],
+                score=hit.score,
+                main_patterns=json_list(row["main_patterns"]),
+                key_trick=row["key_trick"],
             )
         )
-    return out
+    return neighbors
 
 
 def tag_solution_now(
@@ -444,14 +447,14 @@ def enrich_solution_now(
 
     card = embed.card_text(problem["title"], tagged.main_patterns, tagged.key_trick, code)
     try:
-        vector = embed.encode([card])[0]
+        vectors = embed.encode([card])
     except embed.EmbeddingsUnavailable as exc:
         return replace(tagged, embed_skipped=str(exc))
 
-    embed.store(conn, solution_id, vector)
+    embed.store(conn, solution_id, vectors[0])
     conn.commit()
     hits = embed.search(
-        conn, vector, top_k=3, exclude_problem=problem["number"], patterns=tagged.main_patterns
+        conn, vectors, top_k=3, exclude_problem=problem["number"], patterns=tagged.main_patterns
     )
     return replace(tagged, neighbors=neighbor_details(conn, hits))
 

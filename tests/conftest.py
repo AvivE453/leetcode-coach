@@ -51,7 +51,7 @@ def seed_db(tmp_path, monkeypatch, problems=None) -> sqlite3.Connection:
     return conn
 
 
-def tag_solution(conn, solution_id, *main_patterns, secondary=()) -> None:
+def tag_solution(conn, solution_id, *main_patterns, secondary=(), key_trick=None) -> None:
     """Store a solve's tags directly, as enrichment would, without calling the model.
 
     The one copy of the enrichments insert for every suite that builds history by
@@ -59,8 +59,9 @@ def tag_solution(conn, solution_id, *main_patterns, secondary=()) -> None:
     """
     conn.execute(
         """
-        INSERT INTO enrichments (solution_id, main_patterns, secondary_patterns, data_structures)
-        VALUES (?, ?, ?, '[]')
+        INSERT INTO enrichments
+            (solution_id, main_patterns, secondary_patterns, data_structures, key_trick)
+        VALUES (?, ?, ?, '[]', ?)
         """,
-        (solution_id, json.dumps(list(main_patterns)), json.dumps(list(secondary))),
+        (solution_id, json.dumps(list(main_patterns)), json.dumps(list(secondary)), key_trick),
     )

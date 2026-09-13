@@ -202,13 +202,8 @@ def test_similar_by_number(tmp_path, monkeypatch):
             }
         ],
     )
-    for number, vector in [(1, [1.0, 0.0]), (15, [0.8, 0.6])]:
-        solution_id = conn.execute(
-            "INSERT INTO solutions (problem_number, code, created_at) VALUES (?, 'c', '2026-01-01')",
-            (number,),
-        ).lastrowid
-        tag_solution(conn, solution_id, "hashmap")
-        embed.store(conn, solution_id, np.array(vector, dtype=np.float32))
+    store_embedded_solve(conn, 1, [1.0, 0.0])
+    store_embedded_solve(conn, 15, [0.8, 0.6])
     conn.commit()
     conn.close()
 
@@ -216,6 +211,56 @@ def test_similar_by_number(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "#15 3Sum" in result.output
     assert "#1 Two Sum" not in result.output  # the query problem itself is excluded
+
+
+def store_embedded_solve(conn, number, vector, pattern="hashmap"):
+    """A tagged, embedded solve stored directly - `similar` by number needs no model to read it."""
+    solution_id = conn.execute(
+        "INSERT INTO solutions (problem_number, code, created_at) VALUES (?, 'c', '2026-01-01')",
+        (number,),
+    ).lastrowid
+    tag_solution(conn, solution_id, pattern)
+    embed.store(conn, solution_id, np.array(vector, dtype=np.float32))
+
+
+def test_similar_by_number_searches_through_every_solve_of_the_problem(tmp_path, monkeypatch):
+    """A problem solved two ways is similar to the relatives of both approaches: querying
+    with its latest solve alone scored a relative of the earlier approach as unrelated."""
+    setup_env(tmp_path, monkeypatch)
+    conn = db.connect()
+    db.upsert_problems(
+        conn,
+        [
+            {
+                "number": 15,
+                "slug": "3sum",
+                "title": "3Sum",
+                "difficulty": "Medium",
+                "official_tags": "[]",
+                "paid_only": 0,
+            },
+            {
+                "number": 217,
+                "slug": "contains-duplicate",
+                "title": "Contains Duplicate",
+                "difficulty": "Easy",
+                "official_tags": "[]",
+                "paid_only": 0,
+            },
+        ],
+    )
+    store_embedded_solve(conn, 1, [1.0, 0.0], "hashmap")
+    store_embedded_solve(conn, 1, [0.0, 1.0], "two-pointers")  # the latest solve
+    store_embedded_solve(conn, 217, [1.0, 0.0], "hashmap")
+    store_embedded_solve(conn, 15, [0.0, 1.0], "two-pointers")
+    conn.commit()
+    conn.close()
+
+    result = runner.invoke(app, ["similar", "1"])
+
+    assert result.exit_code == 0, result.output
+    assert "#15 3Sum [Medium]  1.00" in result.output
+    assert "#217 Contains Duplicate [Easy]  1.00" in result.output
 
 
 @pytest.mark.parametrize(

@@ -397,6 +397,46 @@ def test_enrich_solution_now_reports_embedding_degradation(tmp_path, monkeypatch
     assert conn.execute("SELECT COUNT(*) FROM enrichments").fetchone()[0] == 1
 
 
+BEST_TIME = {
+    "number": 121,
+    "slug": "best-time-to-buy-and-sell-stock",
+    "title": "Best Time to Buy and Sell Stock",
+    "difficulty": "Easy",
+    "official_tags": '["array", "dynamic-programming"]',
+    "paid_only": 0,
+}
+
+
+def store_embedded_solve(conn, number, vector, pattern, key_trick):
+    """A tagged, embedded solve stored directly, as logging and `coach enrich` leave one."""
+    solution_id = conn.execute(
+        "INSERT INTO solutions (problem_number, code, created_at) VALUES (?, 'c', '2026-09-01')",
+        (number,),
+    ).lastrowid
+    tag_solution(conn, solution_id, pattern, key_trick=key_trick)
+    embed.store(conn, solution_id, np.array(vector, dtype=np.float32))
+
+
+def test_a_neighbor_is_described_by_the_solve_that_matched(tmp_path, monkeypatch):
+    """A problem keeps a vector per solve so it can be found through every approach it was
+    solved with, so it must be shown through that approach too: describing a hit by its
+    problem's latest solve labelled a match found through the DP solve as greedy."""
+    conn = seed_db(tmp_path, monkeypatch, [*TWO_SUM, BEST_TIME])
+    store_embedded_solve(conn, 121, [1.0, 0.0, 0.0], "dp-1d", "Best profit ending at each day.")
+    store_embedded_solve(conn, 121, [0.0, 1.0, 0.0], "greedy", "Track the running minimum price.")
+    conn.commit()
+    dp = ENRICHMENT.model_copy(update={"main_patterns": ["dp-1d"]})
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: dp)
+    monkeypatch.setattr("coach.embed.encode", fake_encode)
+    result = service.log_solve(conn, 1, "clean", CODE)
+
+    e = service.enrich_solution_now(conn, result.solution_id, service.get_problem(conn, 1), CODE)
+
+    assert [(n.number, n.main_patterns, n.key_trick) for n in e.neighbors] == [
+        (121, ["dp-1d"], "Best profit ending at each day.")
+    ]
+
+
 def test_enrich_solution_now_flags_off_pattern(tmp_path, monkeypatch):
     conn = seed_db(tmp_path, monkeypatch)
     off = ENRICHMENT.model_copy(

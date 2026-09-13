@@ -184,7 +184,11 @@ Buy and Sell Stock as `greedy`, then again as `dp-1d` — embeds a new card for 
 and leaves the old solve's vector untouched, so the problem now has two vectors and can be
 retrieved through either approach. Search filters solve by solve and keeps each problem's
 best score, so a `greedy` query reaches it through the greedy solve and a `dp-1d` query
-through the DP one. Keeping a single vector per problem — the latest solve's, or an average
+through the DP one. The hit names the solve that matched, and is shown with that solve's
+patterns and key trick: describing it by the problem's latest solve labelled a match found
+through the DP solve as greedy. The asking side works the same way — `coach similar
+<number>` queries with every solve of the problem, so a problem solved both ways finds the
+relatives of both approaches instead of only the latest one's. Keeping a single vector per problem — the latest solve's, or an average
 of all of them — would leave it findable through one approach at most, which throws away
 exactly the variety that re-solving a problem a new way is meant to build. A stored vector
 changes only when its own solve is re-embedded: `coach enrich --retag` is the one path that

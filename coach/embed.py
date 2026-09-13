@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from typing import NamedTuple
 
 import numpy as np
 
@@ -37,14 +38,28 @@ def store(conn: sqlite3.Connection, solution_id: int, vector: np.ndarray) -> Non
     )
 
 
+class Hit(NamedTuple):
+    """One solved problem's best match: the solve whose vector scored highest, and its score."""
+
+    number: int
+    solution_id: int
+    score: float
+
+
 def search(
     conn: sqlite3.Connection,
-    query: np.ndarray,
+    queries: np.ndarray,
     top_k: int = 5,
     exclude_problem: int | None = None,
     patterns: list[str] | None = None,
-) -> list[tuple[int, float]]:
-    """Best cosine score per solved problem, descending. Vectors are unit-norm.
+) -> list[Hit]:
+    """Each solved problem's best-matching solve, best score first. Vectors are unit-norm.
+
+    `queries` holds one vector per row, and a stored solve scores its best cosine against
+    any of them: a problem solved two ways asks through both solves, so the relatives of
+    each approach are found. A problem is represented by its best-scoring solve - the
+    latest on a tie - and the hit names that solve, so it is described by the approach
+    that matched rather than by whichever solve came last.
 
     With `patterns` set, only solutions sharing at least one of those main patterns
     are considered - the embedding then ranks *within* them instead of across every
@@ -52,14 +67,15 @@ def search(
     """
     rows = conn.execute(
         """
-        SELECT e.vector, s.problem_number, en.main_patterns
+        SELECT e.solution_id, e.vector, s.problem_number, en.main_patterns
         FROM embeddings e
         JOIN solutions s ON s.id = e.solution_id
         JOIN enrichments en ON en.solution_id = s.id
+        ORDER BY e.solution_id
         """
     ).fetchall()
 
-    best: dict[int, float] = {}
+    best: dict[int, Hit] = {}
     for row in rows:
         number = row["problem_number"]
         if number == exclude_problem:
@@ -67,9 +83,8 @@ def search(
         if patterns is not None and set(patterns).isdisjoint(json.loads(row["main_patterns"])):
             continue
         vector = np.frombuffer(row["vector"], dtype=np.float32)
-        score = float(np.dot(vector, query))
-        if score > best.get(number, -2.0):
-            best[number] = score
+        score = float(np.max(queries @ vector))
+        if number not in best or score >= best[number].score:
+            best[number] = Hit(number, row["solution_id"], score)
 
-    ranked = sorted(best.items(), key=lambda item: item[1], reverse=True)
-    return ranked[:top_k]
+    return sorted(best.values(), key=lambda hit: hit.score, reverse=True)[:top_k]

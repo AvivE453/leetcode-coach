@@ -79,17 +79,18 @@ def similar(
 
     conn = db.connect()
     if number is not None:
-        row = conn.execute(
+        # Every solve asks, not just the latest: solved two ways, it has relatives through both.
+        rows = conn.execute(
             """
             SELECT e.vector FROM solutions s JOIN embeddings e ON e.solution_id = s.id
-            WHERE s.problem_number = ? ORDER BY s.id DESC LIMIT 1
+            WHERE s.problem_number = ?
             """,
             (number,),
-        ).fetchone()
-        if row is None:
+        ).fetchall()
+        if not rows:
             typer.echo(f"No embedded solution for #{number} - log it, or run `coach enrich`.")
             raise typer.Exit(1)
-        query = np.frombuffer(row["vector"], dtype=np.float32)
+        queries = np.stack([np.frombuffer(row["vector"], dtype=np.float32) for row in rows])
     else:
         if sys.stdin.isatty():
             typer.echo("Paste the problem statement, then press Ctrl+D:")
@@ -104,13 +105,13 @@ def similar(
         except llm.LLMUnavailable as exc:
             typer.echo(f"Pattern prediction skipped ({exc}) - matching on the raw statement.")
             text = statement
-        query = embed.encode([text])[0]
+        queries = embed.encode([text])
 
-    neighbors = embed.search(conn, query, top_k=top, exclude_problem=number)
-    if not neighbors:
+    hits = embed.search(conn, queries, top_k=top, exclude_problem=number)
+    if not hits:
         typer.echo("No embedded solutions to compare against yet.")
         return
-    echo_neighbors(service.neighbor_details(conn, neighbors))
+    echo_neighbors(service.neighbor_details(conn, hits))
 
 
 @app.command("enrich")
