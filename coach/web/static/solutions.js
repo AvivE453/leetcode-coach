@@ -273,10 +273,27 @@ async function load(query = "") {
   }
 }
 
+/* Home's "Go to review" lands here as /solutions?number=N. Opening the problem and
+   scrolling to a review box is free; the review itself still waits for a click, so a
+   refresh, a back button or a bookmark never pays for an API call. */
+async function openLinked(number) {
+  document.getElementById("solutions-search").value = String(number);
+  await load(String(number));
+  // A number search is a prefix match - "1" also lists 10 and 100 - so find the exact row.
+  const button = document.querySelector(`.solve-toggle[aria-controls="solves-${number}"]`);
+  if (!button) return;
+  const panel = button.closest("li").querySelector(".solve-panel");
+  await toggle(button, panel, number);
+  // Solves arrive newest first, so the first review box is the latest solve's.
+  panel.querySelector(".review")?.scrollIntoView({ block: "start" });
+}
+
 let typing;
 document.getElementById("solutions-search").addEventListener("input", (e) => {
   clearTimeout(typing);
   typing = setTimeout(() => load(e.target.value), 150);
 });
 
-load();
+const linked = Number(new URLSearchParams(location.search).get("number"));
+if (Number.isInteger(linked) && linked > 0) openLinked(linked);
+else load();

@@ -17,6 +17,8 @@ from playwright.sync_api import Page, expect
 PAGES = {
     "/": "Loading your numbers",
     "/solutions": "Loading your solutions",
+    # Home's "Go to review" link, which takes a different path through solutions.js.
+    "/solutions?number=1": "Loading your solutions",
     "/plan": "Loading the plan",
     "/weekly": "Loading this week",
 }

@@ -162,6 +162,9 @@ function renderLogResult(data) {
   }
   const note = approachPracticeNote(data);
   if (note) box.append(note);
+  box.append(el("p", {}, [
+    el("a", { class: "btn ghost", href: `/solutions?number=${data.number}`, text: "Go to review" }),
+  ]));
 
   const e = data.enrichment;
   if (e.status === "skipped") {

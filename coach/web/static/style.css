@@ -182,6 +182,8 @@ h2 { font-size: 1.08rem; margin: 0; letter-spacing: -0.01em; }
   font-weight: 500;
 }
 .btn.ghost:hover { color: var(--text); border-color: #35486e; }
+/* A link that navigates, drawn as a button: without these it is underlined and its padding overlaps the lines around it. */
+a.btn { display: inline-block; text-decoration: none; }
 
 table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
