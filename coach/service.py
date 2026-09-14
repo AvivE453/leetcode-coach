@@ -176,14 +176,14 @@ class WeeklyReview:
 
 @dataclass(frozen=True)
 class DailyPlan:
-    """Today's ranked list, plus the analysis that ranked it.
+    """Today's three headings, plus the analysis that filled them.
 
     The two travel together because the horizon that produced them is a property
-    of the pair: reading `items` against a differently-analyzed `analysis` is the
+    of the pair: reading `sections` against a differently-analyzed `analysis` is the
     bug this replaced.
     """
 
-    items: list[weekly_plan.PlanItem]
+    sections: weekly_plan.PlanSections
     analysis: dict
 
 
@@ -727,20 +727,19 @@ def solution_history(conn: sqlite3.Connection, number: int) -> dict:
     }
 
 
-def daily_plan(conn: sqlite3.Connection, today: date, target: int) -> DailyPlan:
-    """What to solve today, ranked by the same rules as the weekly plan.
+def daily_plan(conn: sqlite3.Connection, today: date, limit: int) -> DailyPlan:
+    """What to solve today, under build_plan's three headings of at most `limit` each.
 
-    The only difference is the horizon: `lookahead_days=0` counts a review as due
-    today rather than any time this week, so a short list is not filled with
-    reviews that are not owed yet. Recomputed on every call and stored nowhere -
-    a solved problem simply stops appearing.
+    `lookahead_days=0` counts a review as due today rather than any time this week,
+    so the headings are not filled with reviews that are not owed yet. Recomputed on
+    every call and stored nowhere - a solved problem simply stops appearing.
 
-    Returns the analysis alongside the list because /api/plan needs both, and
+    Returns the analysis alongside the sections because /api/plan needs both, and
     composing them itself is how it ended up with its own copy of the horizon -
     which then had to be fixed twice on the day the daily plan landed.
     """
     analysis = weekly_analyze.analyze(conn, today, lookahead_days=0)
-    return DailyPlan(items=weekly_plan.build_plan(conn, analysis, target), analysis=analysis)
+    return DailyPlan(sections=weekly_plan.build_plan(conn, analysis, limit), analysis=analysis)
 
 
 # Worst first: the patterns needing work are what the week is read for, and

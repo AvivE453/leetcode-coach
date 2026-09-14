@@ -7,14 +7,14 @@ from coach import assessment, config, corrections, curriculum
 
 # Our fine-grained vocabulary -> official catalog tag, used to find NEW problems
 # practicing a weak pattern (design decision #1: official tags pick problems,
-# our tags diagnose weaknesses). Patterns without a usable official tag fall
-# through to plain curriculum progression.
+# our tags diagnose weaknesses). Patterns without a usable official tag get no
+# weak-pattern picks.
 #
 # Deliberately a subset of enrich.PATTERNS, not a copy of it: `intervals` is
 # absent because LeetCode has no matching topic tag to search on (those problems
-# are tagged array/sorting), so a weak `intervals` gets no targeted picks and
-# falls through. A test keeps the keys a subset, so a typo here cannot silently
-# stop targeting a pattern the way a missing entry deliberately does.
+# are tagged array/sorting), so a weak `intervals` gets no targeted picks. A test
+# keeps the keys a subset, so a typo here cannot silently stop targeting a
+# pattern the way a missing entry deliberately does.
 PATTERN_TO_TAG = {
     "two-pointers": "two-pointers",
     "sliding-window": "sliding-window",
@@ -43,6 +43,7 @@ PATTERN_TO_TAG = {
     "hashmap": "hash-table",
 }
 
+# So the weakest pattern cannot take every slot under Weak patterns from the others.
 MAX_PER_WEAK_PATTERN = 3
 
 # What a due review says when its last practice day holds a reported failure. It stays
@@ -54,8 +55,8 @@ FINDING_REASON: dict[assessment.Correctness, str] = {
 }
 
 
-# Which of build_plan's four rules gave a reason: a due review, approach practice that is
-# due ("re-solve"), a weak-pattern pick, or curriculum progression. It doubles as the chip
+# Which rule gave a reason: a due review, approach practice that is due ("re-solve"), a
+# weak-pattern pick, or curriculum progression topping up Due. It doubles as the chip
 # class the web UI styles, so it is set where the rule fires and travels with the reason.
 # It used to be recovered afterwards by matching the prefix of the sentence - which meant
 # rewording a sentence meant for a human silently reclassified the item, with nothing to fail.
@@ -70,10 +71,10 @@ class Reason:
 
 @dataclass(frozen=True)
 class PlanItem:
-    """One problem on the list, with every reason that applies to it today.
+    """One problem on the plan, with every reason that applies to it today.
 
-    Usually one. A problem owed both a review and approach practice is one item in one
-    slot carrying both - deduplicating used to keep the review's sentence and silently
+    Usually one. A problem owed both a review and approach practice is one item under
+    Due carrying both - deduplicating used to keep the review's sentence and silently
     drop the approach to practise.
     """
 
@@ -84,8 +85,29 @@ class PlanItem:
     reasons: tuple[Reason, ...]
 
 
-def hard_cap(target: int) -> int:
-    return max(1, target // 5)
+@dataclass(frozen=True)
+class PlanSections:
+    """Today's plan under its three headings, each holding at most `limit` problems.
+
+    Each heading has its own budget: with one shared list of slots, a heavy review day
+    pushed approach practice and weak-pattern picks off the page.
+    """
+
+    due: list[PlanItem]  # reviews due, most overdue first, then curriculum progression
+    approach: list[PlanItem]  # approach practice that is due, with no review due alongside
+    weak: list[PlanItem]  # unsolved problems picked for weak patterns
+    reviews_owed: int  # every review due today, listed or not
+    practice_owed: int  # due approach practice that is not already under a due review
+
+
+def hard_cap(limit: int) -> int:
+    return max(1, limit // 5)
+
+
+def plan_item(problem, reasons: list[Reason]) -> PlanItem:
+    return PlanItem(
+        problem["number"], problem["slug"], problem["title"], problem["difficulty"], tuple(reasons)
+    )
 
 
 def review_reason(row: sqlite3.Row, findings: dict[int, assessment.Correctness]) -> Reason:
@@ -97,45 +119,10 @@ def practice_reason(correction: corrections.Correction) -> Reason:
     return Reason("re-solve", f"practice an accepted approach: {' or '.join(correction.accepted)}")
 
 
-def build_plan(conn: sqlite3.Connection, analysis: dict, target: int) -> list[PlanItem]:
-    """Fill ~target slots: due reviews (worded by a reported failure when there is
-    one) -> approach practice that is due -> weak-pattern picks from the unsolved
-    curriculum -> curriculum progression. Hard problems are capped for new picks
-    (mandatory reviews and approach practice are exempt)."""
-    items: list[PlanItem] = []
-    seen: set[int] = set()
-    hards = 0
-
-    def add(problem, reasons: list[Reason], mandatory: bool = False) -> None:
-        nonlocal hards
-        if problem["number"] in seen or len(items) >= target:
-            return
-        if not mandatory and problem["difficulty"] == "Hard" and hards >= hard_cap(target):
-            return
-        if problem["difficulty"] == "Hard":
-            hards += 1
-        seen.add(problem["number"])
-        items.append(
-            PlanItem(
-                problem["number"],
-                problem["slug"],
-                problem["title"],
-                problem["difficulty"],
-                tuple(reasons),
-            )
-        )
-
-    practice_due = {c.problem["number"]: c for c in analysis["corrections_due"]}
-    for row in analysis["due"]:
-        reasons = [review_reason(row, analysis["findings"])]
-        if row["number"] in practice_due:
-            reasons.append(practice_reason(practice_due[row["number"]]))
-        add(row, reasons, mandatory=True)
-    for correction in analysis["corrections_due"]:
-        add(correction.problem, [practice_reason(correction)], mandatory=True)
-
+def unsolved_curriculum(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Free curriculum problems never attempted, in the curriculum's own order."""
     order = {slug: i for i, slug in enumerate(curriculum.load(config.CURRICULUM))}
-    unsolved = conn.execute(
+    rows = conn.execute(
         f"""
         SELECT p.number, p.slug, p.title, p.difficulty, p.official_tags
         FROM problems p
@@ -144,22 +131,75 @@ def build_plan(conn: sqlite3.Connection, analysis: dict, target: int) -> list[Pl
           AND NOT EXISTS (SELECT 1 FROM attempts a WHERE a.problem_number = p.number)
         """
     ).fetchall()
-    unsolved = sorted(unsolved, key=lambda r: order.get(r["slug"], len(order)))
+    return sorted(rows, key=lambda r: order.get(r["slug"], len(order)))
 
+
+def add_new_picks(
+    heading: list[PlanItem],
+    candidates: list[sqlite3.Row],
+    limit: int,
+    claimed: set[int],
+    reason: Reason,
+    most: int | None = None,
+) -> None:
+    """Add unclaimed candidates to one heading until it holds `limit`, or `most` were added.
+
+    New problems are optional, so each heading caps its Hard ones at hard_cap(limit),
+    counting a Hard review already under it. Owed work never meets the cap: build_plan
+    adds it without this function.
+    """
+    added = 0
+    for row in candidates:
+        if len(heading) >= limit or (most is not None and added >= most):
+            return
+        hards = sum(item.difficulty == "Hard" for item in heading)
+        if row["number"] in claimed or (row["difficulty"] == "Hard" and hards >= hard_cap(limit)):
+            continue
+        claimed.add(row["number"])
+        heading.append(plan_item(row, [reason]))
+        added += 1
+
+
+def build_plan(conn: sqlite3.Connection, analysis: dict, limit: int) -> PlanSections:
+    """Fill three headings of at most `limit` problems each, owed work first:
+
+    1. Due: reviews due, worded by a reported failure when there is one. A problem that
+       also owes approach practice stays here, as one item carrying both reasons.
+    2. Approach practice that is due.
+    3. Weak patterns: unsolved curriculum problems carrying a weak pattern's official
+       tag, weakest pattern first and at most MAX_PER_WEAK_PATTERN each.
+    4. Curriculum progression tops Due up to `limit`. It goes last, so it never takes a
+       problem a weak pattern would have picked.
+
+    Due claims every review due, listed or not. One that does not fit stays overdue and
+    comes first tomorrow, instead of turning up under Approach practice without its review.
+    """
+    practice_due = {c.problem["number"]: c for c in analysis["corrections_due"]}
+    due = []
+    for row in analysis["due"][:limit]:
+        reasons = [review_reason(row, analysis["findings"])]
+        if row["number"] in practice_due:
+            reasons.append(practice_reason(practice_due[row["number"]]))
+        due.append(plan_item(row, reasons))
+    claimed = {row["number"] for row in analysis["due"]}
+
+    practice = [c for c in analysis["corrections_due"] if c.problem["number"] not in claimed]
+    approach = [plan_item(c.problem, [practice_reason(c)]) for c in practice[:limit]]
+    claimed.update(c.problem["number"] for c in practice)
+
+    unsolved = unsolved_curriculum(conn)
+    weak: list[PlanItem] = []
     for pattern in analysis["weak_patterns"]:
         tag = PATTERN_TO_TAG.get(pattern)
         if tag is None:
             continue
-        picked = 0
-        for row in unsolved:
-            if picked >= MAX_PER_WEAK_PATTERN or len(items) >= target:
-                break
-            if row["number"] not in seen and tag in json.loads(row["official_tags"]):
-                before = len(items)
-                add(row, [Reason("weak-pattern", f"weak pattern: {pattern}")])
-                picked += len(items) - before
+        tagged = [row for row in unsolved if tag in json.loads(row["official_tags"])]
+        reason = Reason("weak-pattern", f"weak pattern: {pattern}")
+        add_new_picks(weak, tagged, limit, claimed, reason, most=MAX_PER_WEAK_PATTERN)
 
-    for row in unsolved:
-        add(row, [Reason("curriculum", f"{config.CURRICULUM} progression")])
+    progression = Reason("curriculum", f"{config.CURRICULUM} progression")
+    add_new_picks(due, unsolved, limit, claimed, progression)
 
-    return items
+    return PlanSections(
+        due, approach, weak, reviews_owed=len(analysis["due"]), practice_owed=len(practice)
+    )

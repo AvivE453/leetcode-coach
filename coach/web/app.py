@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from coach import config, corrections, db, mastery, service
 from coach.weekly import analyze as weekly_analyze
+from coach.weekly import plan as weekly_plan
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -231,37 +232,44 @@ def api_review(number: int, body: ReviewRequest) -> dict:
     }
 
 
+def plan_item_payload(item: weekly_plan.PlanItem) -> dict:
+    """One problem under a Daily Plan heading, with a chip per reason."""
+    return {
+        "number": item.number,
+        "slug": item.slug,
+        "title": item.title,
+        "difficulty": item.difficulty,
+        "reasons": [{"kind": r.kind, "text": r.text} for r in item.reasons],
+    }
+
+
 @app.get("/api/plan")
-def api_plan(target: int = config.DAILY_TARGET) -> dict:
+def api_plan() -> dict:
     """Recompute today's plan live. Read-only, and stored nowhere."""
     today = date.today()
     with open_db() as conn:
-        plan = service.daily_plan(conn, today, target)
-    items, analysis = plan.items, plan.analysis
+        plan = service.daily_plan(conn, today, config.SECTION_LIMIT)
+    sections, analysis = plan.sections, plan.analysis
 
     return {
         "generated_for": today.isoformat(),
-        "target": target,
-        "items": [
-            {
-                "number": i.number,
-                "slug": i.slug,
-                "title": i.title,
-                "difficulty": i.difficulty,
-                "reasons": [{"kind": r.kind, "text": r.text} for r in i.reasons],
-            }
-            for i in items
-        ],
+        "limit": config.SECTION_LIMIT,
+        "sections": {
+            "due": [plan_item_payload(i) for i in sections.due],
+            "approach": [plan_item_payload(i) for i in sections.approach],
+            "weak": [plan_item_payload(i) for i in sections.weak],
+        },
+        # Everything owed today, listed or not, so a full heading can say what it left out.
+        "reviews_owed": sections.reviews_owed,
+        "practice_owed": sections.practice_owed,
+        # Approach practice that is due is its own heading, so only what waits is a topic.
         "topics": {
             "weak": analysis["weak_patterns"],
             "stale": analysis["stale_patterns"],
-            "corrections_due": [correction_payload(c) for c in analysis["corrections_due"]],
             "corrections_upcoming": [
                 correction_payload(c) for c in analysis["corrections_upcoming"]
             ],
         },
-        # SM-2 reviews only: approach practice is counted by its own topics, never added in.
-        "due_count": len(analysis["due"]),
         "curriculum": analysis["curriculum"],
         "thresholds": thresholds(),
     }

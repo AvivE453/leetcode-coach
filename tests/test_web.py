@@ -152,10 +152,10 @@ def test_log_endpoint_agrees_with_the_stored_canonical_set_and_the_plan(client, 
 
     enrichment = body["enrichment"]
     stored = client.get("/api/solutions/1").json()["intended_secondary_patterns"]
-    topics = client.get("/api/plan").json()["topics"]
+    plan = client.get("/api/plan").json()
     assert enrichment["off_pattern"] is False
     assert enrichment["intended_secondary_patterns"] == stored == ["two-pointers"]
-    assert (topics["corrections_due"], topics["corrections_upcoming"]) == ([], [])
+    assert (plan["sections"]["approach"], plan["topics"]["corrections_upcoming"]) == ([], [])
 
 
 def test_solution_history_endpoint_carries_the_canonical_note(client, monkeypatch):
@@ -307,17 +307,14 @@ def test_plan_endpoint_ranks_problems_and_stays_read_only(client, monkeypatch, t
 
     plan = client.get("/api/plan").json()
 
-    # the due review outranks curriculum progression
-    assert [(i["number"], [r["kind"] for r in i["reasons"]]) for i in plan["items"]] == [
+    # the due review leads Due, and curriculum progression tops it up
+    assert [(i["number"], [r["kind"] for r in i["reasons"]]) for i in plan["sections"]["due"]] == [
         (1, ["review"]),
         (15, ["curriculum"]),
     ]
-    assert plan["topics"] == {
-        "weak": [],
-        "stale": [],
-        "corrections_due": [],
-        "corrections_upcoming": [],
-    }
+    assert (plan["sections"]["approach"], plan["sections"]["weak"]) == ([], [])
+    assert (plan["reviews_owed"], plan["practice_owed"]) == (1, 0)
+    assert plan["topics"] == {"weak": [], "stale": [], "corrections_upcoming": []}
     assert not (tmp_path / "reports").exists()
 
 
@@ -335,10 +332,12 @@ def test_plan_endpoint_labels_a_weak_pattern_pick(client, monkeypatch):
     plan = client.get("/api/plan").json()
 
     assert plan["topics"]["weak"] == ["two-pointers"]
-    # #15 is unsolved, on the curriculum, and officially tagged two-pointers.
-    assert [(i["number"], i["reasons"]) for i in plan["items"]] == [
+    # #15 is unsolved, on the curriculum, and officially tagged two-pointers, so the weak
+    # pattern claims it before curriculum progression could top Due up with it.
+    assert [(i["number"], i["reasons"]) for i in plan["sections"]["weak"]] == [
         (15, [{"kind": "weak-pattern", "text": "weak pattern: two-pointers"}])
     ]
+    assert plan["sections"]["due"] == []
 
 
 def test_plan_endpoint_only_counts_reviews_due_today(client, monkeypatch):
@@ -356,12 +355,12 @@ def test_plan_endpoint_only_counts_reviews_due_today(client, monkeypatch):
 
     plan = client.get("/api/plan").json()
 
-    assert plan["due_count"] == 0
-    assert 1 not in [i["number"] for i in plan["items"]]
+    assert plan["reviews_owed"] == 0
+    assert 1 not in [i["number"] for i in plan["sections"]["due"]]
 
 
-def test_plan_endpoint_defaults_to_the_daily_target(client, monkeypatch):
-    assert client.get("/api/plan").json()["target"] == config.DAILY_TARGET
+def test_plan_endpoint_serves_the_section_limit(client):
+    assert client.get("/api/plan").json()["limit"] == config.SECTION_LIMIT
 
 
 def test_plan_endpoint_serves_the_thresholds_the_page_quotes(client):
@@ -384,7 +383,7 @@ def test_plan_endpoint_lists_approach_practice_as_upcoming_until_it_is_due(clien
 
     plan = client.get("/api/plan").json()
 
-    assert plan["topics"]["corrections_due"] == []
+    assert plan["sections"]["approach"] == []
     assert plan["topics"]["corrections_upcoming"] == [
         {
             "number": 1,
@@ -395,10 +394,10 @@ def test_plan_endpoint_lists_approach_practice_as_upcoming_until_it_is_due(clien
             "reason": "wrong-approach",
         }
     ]
-    assert 1 not in [i["number"] for i in plan["items"]]
+    assert 1 not in [i["number"] for heading in plan["sections"].values() for i in heading]
 
 
-def test_plan_endpoint_puts_approach_practice_on_the_list_once_it_is_due(client, monkeypatch):
+def test_plan_endpoint_puts_approach_practice_under_its_heading_once_it_is_due(client, monkeypatch):
     enriched(monkeypatch, main_patterns=["prefix-sum"], intended_pattern="dp-1d")
     conn = db.connect()
     logged = service.log_solve(conn, 1, "clean", CODE, today=date.today() - timedelta(days=3))
@@ -407,8 +406,8 @@ def test_plan_endpoint_puts_approach_practice_on_the_list_once_it_is_due(client,
 
     plan = client.get("/api/plan").json()
 
-    assert [c["number"] for c in plan["topics"]["corrections_due"]] == [1]
-    assert plan["items"][0] == {
+    assert plan["practice_owed"] == 1
+    assert plan["sections"]["approach"][0] == {
         "number": 1,
         "slug": "two-sum",
         "title": "Two Sum",
@@ -626,10 +625,10 @@ def test_plan_endpoint_says_why_a_reviewed_problem_came_back(client, monkeypatch
 
     plan = client.get("/api/plan").json()
 
-    assert [(i["number"], i["reasons"]) for i in plan["items"] if i["number"] == 1] == [
+    assert [(i["number"], i["reasons"]) for i in plan["sections"]["due"] if i["number"] == 1] == [
         (1, [{"kind": "review", "text": "re-solve: review reported a bug"}])
     ]
-    assert plan["due_count"] == 1
+    assert plan["reviews_owed"] == 1
 
 
 def test_review_endpoint_degrades_without_an_api_key(client):

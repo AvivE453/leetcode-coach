@@ -37,15 +37,40 @@
       </div>
     </section>
 
-    <section aria-labelledby="problems-heading">
+    <section aria-labelledby="due-heading">
       <div class="section-head">
         <div>
-          <h2 id="problems-heading">Problems, most important first</h2>
-          <p class="hint">Reviews due today, then approach practice that is due, then weak-pattern picks, then curriculum progression.</p>
+          <h2 id="due-heading">Due</h2>
+          <p class="hint">Reviews due today, most overdue first. When few are due, curriculum progression fills the rest.</p>
         </div>
+        <p class="hint" id="due-meta"></p>
       </div>
-      <ol class="plan" id="plan-list"></ol>
-      <p class="hint" id="plan-empty" hidden></p>
+      <ol class="plan" id="due-list"></ol>
+      <p class="hint" id="due-empty" hidden></p>
+    </section>
+
+    <section aria-labelledby="approach-heading">
+      <div class="section-head">
+        <div>
+          <h2 id="approach-heading">Approach practice</h2>
+          <p class="hint">Problems you solved without an accepted approach, owed until you solve one that way.</p>
+        </div>
+        <p class="hint" id="approach-meta"></p>
+      </div>
+      <ol class="plan" id="approach-list"></ol>
+      <p class="hint" id="approach-empty" hidden></p>
+    </section>
+
+    <section aria-labelledby="weak-heading">
+      <div class="section-head">
+        <div>
+          <h2 id="weak-heading">Weak patterns</h2>
+          <p class="hint">New problems for the patterns your mastery scores say need work.</p>
+        </div>
+        <p class="hint" id="weak-meta"></p>
+      </div>
+      <ol class="plan" id="weak-list"></ol>
+      <p class="hint" id="weak-empty" hidden></p>
     </section>
   </main>
 </div>

@@ -35,7 +35,8 @@ MODEL = "claude-sonnet-5"
 EVAL_MODEL = "claude-sonnet-5"
 
 EMBED_MODEL = "all-MiniLM-L6-v2"
-DAILY_TARGET = 15
+# The most problems each Daily Plan heading lists: Due, Approach practice, Weak patterns.
+SECTION_LIMIT = 10
 # How many problems /solutions lists before you search; a search shows every match.
 RECENT_SOLUTIONS = 10
 CURRICULUM = "blind75"

@@ -356,12 +356,13 @@ def test_a_late_bug_review_puts_the_problem_on_the_plan_with_its_reason(tmp_path
     conn = seed_db(tmp_path, monkeypatch)
     logged = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
     plan_day = date(2026, 9, 6)
-    assert service.daily_plan(conn, plan_day, config.DAILY_TARGET).items == []
+    before = service.daily_plan(conn, plan_day, config.SECTION_LIMIT).sections
+    assert (before.due, before.approach, before.weak) == ([], [], [])
 
     review_with(conn, monkeypatch, logged.solution_id, FEEDBACK)
 
-    items = service.daily_plan(conn, plan_day, config.DAILY_TARGET).items
-    assert [(i.number, [(r.kind, r.text) for r in i.reasons]) for i in items] == [
+    due = service.daily_plan(conn, plan_day, config.SECTION_LIMIT).sections.due
+    assert [(i.number, [(r.kind, r.text) for r in i.reasons]) for i in due] == [
         (1, [("review", "re-solve: review reported a bug")])
     ]
 
@@ -751,7 +752,7 @@ def test_saved_evidence_is_read_without_any_rebuild(tmp_path, monkeypatch):
     reviewed = pytest.approx(4.2)  # four clean solves, then the bug-capped 1 folded in
     assert service.pattern_table(conn)[0]["score"] == reviewed
     assert service.pattern_standings(conn, ["hashmap"], today)[0].score == reviewed
-    plan = service.daily_plan(conn, today, config.DAILY_TARGET)
+    plan = service.daily_plan(conn, today, config.SECTION_LIMIT)
     assert plan.analysis["patterns"][0]["score"] == reviewed
     assert service.weekly_review(conn, today).patterns[0].score == reviewed
 
@@ -770,7 +771,7 @@ def test_mastery_readers_write_nothing_and_call_no_model(tmp_path, monkeypatch):
 
     service.pattern_table(conn)
     service.pattern_standings(conn, ["hashmap"], today)
-    assert service.daily_plan(conn, today, config.DAILY_TARGET).analysis["corrections_upcoming"]
+    assert service.daily_plan(conn, today, config.SECTION_LIMIT).analysis["corrections_upcoming"]
     service.weekly_review(conn, today)
     service.solution_history(conn, 1)
     assert service.practice_dates(conn, 1).correction is not None
@@ -1195,9 +1196,9 @@ def test_daily_plan_only_counts_reviews_due_today(tmp_path, monkeypatch):
             (number, due.isoformat()),
         )
 
-    items = service.daily_plan(conn, today, target=4).items
+    due = service.daily_plan(conn, today, limit=4).sections.due
 
-    assert [(i.number, [(r.kind, r.text) for r in i.reasons]) for i in items] == [
+    assert [(i.number, [(r.kind, r.text) for r in i.reasons]) for i in due] == [
         (1, [("review", f"review due {today.isoformat()}")])
     ]
 
@@ -1216,8 +1217,8 @@ def test_approach_practice_waits_three_days_after_the_solve_that_opened_it(tmp_p
     service.enrich_solution_now(conn, logged.solution_id, service.get_problem(conn, 1), CODE)
 
     def planned(offset):
-        items = service.daily_plan(conn, day + timedelta(days=offset), config.DAILY_TARGET).items
-        return [(i.number, [r.kind for r in i.reasons]) for i in items]
+        s = service.daily_plan(conn, day + timedelta(days=offset), config.SECTION_LIMIT).sections
+        return [(i.number, [r.kind for r in i.reasons]) for i in [*s.due, *s.approach, *s.weak]]
 
     assert [planned(offset) for offset in range(3)] == [[], [], []]
     assert planned(3) == [(1, ["re-solve"])]

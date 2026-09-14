@@ -4,7 +4,7 @@ from datetime import date, timedelta
 import pytest
 from conftest import tag_solution
 
-from coach import corrections, db
+from coach import config, corrections, db
 from coach.weekly import analyze as weekly_analyze
 from coach.weekly import collect as weekly_collect
 from coach.weekly import plan as weekly_plan
@@ -176,77 +176,127 @@ def test_analyze_splits_approach_practice_at_the_lookahead_horizon(tmp_path):
     assert split(weekly_analyze.PLAN_LOOKAHEAD_DAYS) == ([2, 3], [])
 
 
-def test_plan_orders_reviews_then_approach_practice_then_weak(tmp_path):
+def listed(items):
+    """A heading's items as (number, reasons) pairs, in the order the plan gave them."""
+    return [(i.number, reasons(i)) for i in items]
+
+
+def test_plan_puts_each_rule_under_its_own_heading(tmp_path):
+    """Each heading holds what its rule gave. `kind` - what the web UI styles - is set
+    where the rule fires, so no wording change to a reason's text can move it."""
     conn = make_db(tmp_path)
     add_problem(conn, 1, "two-sum", "Two Sum", tags=["hash-table"])
     add_problem(conn, 2, "maximum-subarray", "Maximum Subarray", tags=["dynamic-programming"],
                 intended="dp-1d")
     add_problem(conn, 3, "coin-change", "Coin Change", tags=["dynamic-programming"])
     add_problem(conn, 4, "house-robber", "House Robber", tags=["dynamic-programming"])
+    add_problem(conn, 5, "valid-anagram", "Valid Anagram", tags=["string"])
     add_attempt(conn, 1, TODAY - timedelta(days=1), pattern="hashmap")
     add_attempt(conn, 2, PRACTICE_DUE_TODAY, outcome="struggled", pattern="prefix-sum")
     set_due(conn, 1, TODAY)
 
     analysis = weekly_analyze.analyze(conn, TODAY)
     analysis["weak_patterns"] = ["dp-1d"]
-    items = weekly_plan.build_plan(conn, analysis, target=10)
+    plan = weekly_plan.build_plan(conn, analysis, limit=10)
 
-    assert (items[0].number, reasons(items[0])) == (1, [("review", f"review due {TODAY.isoformat()}")])
-    assert (items[1].number, reasons(items[1])) == (
-        2,
-        [("re-solve", "practice an accepted approach: dp-1d")],
-    )
-    weak = [i for i in items if reasons(i) == [("weak-pattern", "weak pattern: dp-1d")]]
-    assert {i.number for i in weak} == {3, 4}
+    # #3 and #4 carry the dynamic-programming tag, so the weak dp-1d pattern claims them
+    # before curriculum progression runs; only #5 is left to top up Due.
+    assert listed(plan.due) == [
+        (1, [("review", f"review due {TODAY.isoformat()}")]),
+        (5, [("curriculum", f"{config.CURRICULUM} progression")]),
+    ]
+    assert listed(plan.approach) == [(2, [("re-solve", "practice an accepted approach: dp-1d")])]
+    assert {i.number for i in plan.weak} == {3, 4}
+    assert all(reasons(i) == [("weak-pattern", "weak pattern: dp-1d")] for i in plan.weak)
+    assert (plan.reviews_owed, plan.practice_owed) == (1, 1)
 
 
-def test_plan_labels_every_reason_with_the_rule_that_gave_it(tmp_path):
-    """`kind` is what the web UI styles, and it is set where the rule fires.
-
-    All four rules in one plan: the chip a reader sees must say which one put the
-    problem there, and no wording change to a reason's text can move it between them.
-    """
+def test_plan_holds_each_heading_to_the_limit_and_lists_a_problem_once(tmp_path):
     conn = make_db(tmp_path)
-    add_problem(conn, 1, "two-sum", "Two Sum", tags=["hash-table"])
-    add_problem(conn, 2, "maximum-subarray", "Maximum Subarray", tags=["dynamic-programming"],
-                intended="dp-1d")
-    add_problem(conn, 3, "coin-change", "Coin Change", tags=["dynamic-programming"])
-    add_problem(conn, 4, "valid-anagram", "Valid Anagram", tags=["string"])
-    add_attempt(conn, 1, TODAY - timedelta(days=1), pattern="hashmap")
-    add_attempt(conn, 2, PRACTICE_DUE_TODAY, outcome="struggled", pattern="prefix-sum")
-    set_due(conn, 1, TODAY)
-
-    analysis = weekly_analyze.analyze(conn, TODAY)
-    analysis["weak_patterns"] = ["dp-1d"]
-    kinds = {i.number: [r.kind for r in i.reasons] for i in weekly_plan.build_plan(conn, analysis, target=10)}
-
-    # #3 carries the dynamic-programming tag, so the weak dp-1d pattern claims it;
-    # #4 has no weak tag and falls through to plain curriculum progression.
-    assert kinds == {1: ["review"], 2: ["re-solve"], 3: ["weak-pattern"], 4: ["curriculum"]}
-
-
-def test_plan_respects_target_and_dedupes(tmp_path):
-    conn = make_db(tmp_path)
-    for n in range(1, 8):
+    for n in range(1, 10):
         add_problem(conn, n, f"p{n}", f"Problem {n}", tags=["hash-table"])
     set_due(conn, 1, TODAY)
 
     analysis = weekly_analyze.analyze(conn, TODAY)
-    items = weekly_plan.build_plan(conn, analysis, target=3)
-    assert len(items) == 3
-    assert len({i.number for i in items}) == 3
+    analysis["weak_patterns"] = ["hashmap"]
+    plan = weekly_plan.build_plan(conn, analysis, limit=3)
+
+    headings = [plan.due, plan.approach, plan.weak]
+    numbers = [i.number for heading in headings for i in heading]
+    assert [len(heading) for heading in headings] == [3, 0, 3]
+    assert len(set(numbers)) == len(numbers)
 
 
-def test_plan_caps_hard_problems_for_new_picks(tmp_path):
+@pytest.mark.parametrize("limit, progression", [(6, 2), (4, 0)])
+def test_curriculum_tops_due_up_only_to_the_limit(tmp_path, limit, progression):
+    """Progression is Due's filler: it takes the slots reviews leave, and none once
+    reviews fill the heading."""
+    conn = make_db(tmp_path)
+    for n in range(1, 5):
+        add_problem(conn, n, f"due-{n}", f"Due {n}")
+        set_due(conn, n, TODAY)
+    for n in range(10, 14):
+        add_problem(conn, n, f"new-{n}", f"New {n}")
+
+    plan = weekly_plan.build_plan(conn, weekly_analyze.analyze(conn, TODAY), limit=limit)
+
+    assert [[r.kind for r in i.reasons] for i in plan.due] == (
+        [["review"]] * 4 + [["curriculum"]] * progression
+    )
+
+
+def test_reviews_beyond_the_limit_stay_owed_and_off_every_heading(tmp_path):
+    """Due claims every review due. One that does not fit waits for tomorrow, still among
+    the most overdue - it never turns up under Approach practice without its review."""
+    conn = make_db(tmp_path)
+    for number, due in ((2, TODAY - timedelta(days=2)), (3, TODAY - timedelta(days=1)), (4, TODAY)):
+        add_problem(conn, number, f"p{number}", f"Problem {number}", intended="dp-1d")
+        add_attempt(conn, number, PRACTICE_DUE_TODAY, outcome="failed", pattern="prefix-sum")
+        set_due(conn, number, due)
+    add_problem(conn, 9, "coin-change", "Coin Change")  # unsolved: curriculum, if a slot were left
+
+    analysis = weekly_analyze.analyze(conn, TODAY, lookahead_days=0)
+    plan = weekly_plan.build_plan(conn, analysis, limit=2)
+
+    assert [(i.number, [r.kind for r in i.reasons]) for i in plan.due] == [
+        (2, ["review", "re-solve"]),
+        (3, ["review", "re-solve"]),
+    ]
+    assert plan.approach == []
+    assert (plan.reviews_owed, plan.practice_owed) == (3, 0)
+
+
+@pytest.mark.parametrize("limit, per_pattern", [(10, [3, 3]), (4, [3, 1])])
+def test_weak_patterns_share_their_heading_weakest_first(tmp_path, limit, per_pattern):
+    """At most MAX_PER_WEAK_PATTERN each, so the weakest pattern cannot crowd out the rest."""
+    conn = make_db(tmp_path)
+    for n in range(1, 6):
+        add_problem(conn, n, f"dp-{n}", f"DP {n}", tags=["dynamic-programming"])
+        add_problem(conn, 10 + n, f"greedy-{n}", f"Greedy {n}", tags=["greedy"])
+
+    analysis = weekly_analyze.analyze(conn, TODAY)
+    analysis["weak_patterns"] = ["dp-1d", "greedy"]  # weakest first, as analyze() orders them
+    weak = weekly_plan.build_plan(conn, analysis, limit=limit).weak
+
+    picked = [sum(reasons(i) == [("weak-pattern", f"weak pattern: {p}")] for i in weak) for p in ("dp-1d", "greedy")]
+    assert picked == per_pattern
+
+
+def test_each_heading_caps_its_own_hard_new_picks(tmp_path):
+    """New picks are optional, so each heading keeps to hard_cap(limit) Hard problems,
+    counted apart: Hard weak picks never use up the curriculum fill's allowance."""
     conn = make_db(tmp_path)
     for n in range(1, 11):
-        add_problem(conn, n, f"h{n}", f"Hard {n}", difficulty="Hard")
+        add_problem(conn, n, f"h{n}", f"Hard {n}", difficulty="Hard", tags=["dynamic-programming"])
     add_problem(conn, 20, "easy-one", "Easy One", difficulty="Easy")
 
     analysis = weekly_analyze.analyze(conn, TODAY)
-    items = weekly_plan.build_plan(conn, analysis, target=10)
-    hard = [i for i in items if i.difficulty == "Hard"]
-    assert len(hard) == weekly_plan.hard_cap(10) == 2
+    analysis["weak_patterns"] = ["dp-1d"]
+    plan = weekly_plan.build_plan(conn, analysis, limit=10)
+
+    assert weekly_plan.hard_cap(10) == 2
+    assert [i.difficulty for i in plan.weak] == ["Hard", "Hard"]
+    assert sorted(i.difficulty for i in plan.due) == ["Easy", "Hard", "Hard"]
 
 
 def test_plan_keeps_due_reviews_even_when_hard(tmp_path):
@@ -256,9 +306,9 @@ def test_plan_keeps_due_reviews_even_when_hard(tmp_path):
         set_due(conn, n, TODAY)
 
     analysis = weekly_analyze.analyze(conn, TODAY)
-    items = weekly_plan.build_plan(conn, analysis, target=10)
-    assert len(items) == 5
-    assert all(reasons(i) == [("review", f"review due {TODAY.isoformat()}")] for i in items)
+    due = weekly_plan.build_plan(conn, analysis, limit=10).due
+    assert len(due) == 5
+    assert all(reasons(i) == [("review", f"review due {TODAY.isoformat()}")] for i in due)
 
 
 def add_review(conn, solution_id, verdict, *categories):
@@ -283,15 +333,15 @@ def test_plan_words_a_due_review_by_the_failure_its_review_reported(tmp_path):
     set_due(conn, 1, TODAY)
     set_due(conn, 2, TODAY)
 
-    items = weekly_plan.build_plan(conn, weekly_analyze.analyze(conn, TODAY), target=10)
+    plan = weekly_plan.build_plan(conn, weekly_analyze.analyze(conn, TODAY), limit=10)
 
-    assert {i.number: reasons(i) for i in items} == {
+    assert {i.number: reasons(i) for i in plan.due} == {
         1: [("review", "re-solve: review reported an edge-case failure")],
         2: [("review", f"review due {TODAY.isoformat()}")],
     }
 
 
-def test_a_problem_owing_a_review_and_approach_practice_is_one_item_with_both_reasons(tmp_path):
+def test_a_problem_owing_a_review_and_approach_practice_is_one_item_under_due(tmp_path):
     """The old dedupe kept the review's sentence and silently dropped the approach to use."""
     conn = make_db(tmp_path)
     add_problem(conn, 2, "maximum-subarray", "Maximum Subarray", intended="dp-1d")
@@ -300,10 +350,10 @@ def test_a_problem_owing_a_review_and_approach_practice_is_one_item_with_both_re
     set_due(conn, 2, TODAY)
 
     analysis = weekly_analyze.analyze(conn, TODAY, lookahead_days=0)
-    items = weekly_plan.build_plan(conn, analysis, target=10)
+    plan = weekly_plan.build_plan(conn, analysis, limit=10)
 
     assert [c.problem["number"] for c in analysis["corrections_due"]] == [2]  # due by both rules
-    assert [(i.number, reasons(i)) for i in items] == [
+    assert listed(plan.due) == [
         (
             2,
             [
@@ -312,6 +362,7 @@ def test_a_problem_owing_a_review_and_approach_practice_is_one_item_with_both_re
             ],
         )
     ]
+    assert (plan.approach, plan.practice_owed) == ([], 0)
 
 
 @pytest.mark.parametrize("days_ago, planned, upcoming", [(2, [], [2]), (3, [2], [])])
@@ -326,7 +377,7 @@ def test_approach_practice_joins_the_plan_on_its_due_date_and_not_before(
 
     analysis = weekly_analyze.analyze(conn, TODAY, lookahead_days=0)
 
-    assert [i.number for i in weekly_plan.build_plan(conn, analysis, target=10)] == planned
+    assert [i.number for i in weekly_plan.build_plan(conn, analysis, limit=10).approach] == planned
     assert [c.problem["number"] for c in analysis["corrections_upcoming"]] == upcoming
 
 
@@ -342,13 +393,14 @@ def test_a_review_due_before_its_approach_practice_carries_only_its_own_reason(t
     set_due(conn, 2, TODAY)  # where the replay leaves it: yesterday's clean solve was early
 
     analysis = weekly_analyze.analyze(conn, TODAY, lookahead_days=0)
-    items = weekly_plan.build_plan(conn, analysis, target=10)
+    plan = weekly_plan.build_plan(conn, analysis, limit=10)
 
-    assert [(i.number, reasons(i)) for i in items] == [(2, [("review", f"review due {TODAY.isoformat()}")])]
+    assert listed(plan.due) == [(2, [("review", f"review due {TODAY.isoformat()}")])]
+    assert plan.approach == []
     assert [c.due for c in analysis["corrections_upcoming"]] == [TODAY + timedelta(days=2)]
 
 
-def test_approach_practice_alone_is_ordered_by_due_date_then_number(tmp_path):
+def test_approach_practice_is_ordered_by_due_date_and_held_to_the_limit(tmp_path):
     conn = make_db(tmp_path)
     for number in (5, 6, 7):
         add_problem(conn, number, f"p{number}", f"Problem {number}", intended="dp-1d")
@@ -358,22 +410,6 @@ def test_approach_practice_alone_is_ordered_by_due_date_then_number(tmp_path):
 
     analysis = weekly_analyze.analyze(conn, TODAY, lookahead_days=0)
 
-    assert [i.number for i in weekly_plan.build_plan(conn, analysis, target=10)] == [7, 5, 6]
-
-
-def test_a_problem_due_for_both_takes_one_slot_of_the_target(tmp_path):
-    conn = make_db(tmp_path)
-    add_problem(conn, 2, "maximum-subarray", "Maximum Subarray", intended="dp-1d")
-    add_problem(conn, 3, "house-robber", "House Robber", intended="dp-1d")
-    add_problem(conn, 4, "coin-change", "Coin Change")  # unsolved: curriculum, if a slot is left
-    for number, due in ((2, TODAY - timedelta(days=1)), (3, TODAY)):
-        add_attempt(conn, number, PRACTICE_DUE_TODAY, outcome="failed", pattern="prefix-sum")
-        set_due(conn, number, due)
-
-    analysis = weekly_analyze.analyze(conn, TODAY, lookahead_days=0)
-    items = weekly_plan.build_plan(conn, analysis, target=2)
-
-    assert [(i.number, [r.kind for r in i.reasons]) for i in items] == [
-        (2, ["review", "re-solve"]),
-        (3, ["review", "re-solve"]),
-    ]
+    assert [i.number for i in weekly_plan.build_plan(conn, analysis, limit=10).approach] == [7, 5, 6]
+    held = weekly_plan.build_plan(conn, analysis, limit=2)
+    assert ([i.number for i in held.approach], held.practice_owed) == ([7, 5], 3)
