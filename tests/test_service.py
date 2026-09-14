@@ -617,12 +617,19 @@ def test_pattern_table_counts_a_problem_under_each_of_its_main_patterns(tmp_path
     ]
 
 
-def log_and_enrich(conn, monkeypatch, outcome, pattern="hashmap"):
+# Enough problems for one pattern to span mastery.WEAK_MIN_PROBLEMS of them and be judged.
+ENOUGH_PROBLEMS = TWO_SUM + [
+    {**TWO_SUM[0], "number": n, "slug": f"problem-{n}", "title": f"Problem {n}"}
+    for n in range(2, mastery.WEAK_MIN_PROBLEMS + 1)
+]
+
+
+def log_and_enrich(conn, monkeypatch, outcome, pattern="hashmap", number=1):
     e = ENRICHMENT.model_copy(update={"main_patterns": [pattern], "intended_pattern": pattern})
     monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, _e=e, **kw: _e)
     monkeypatch.setattr("coach.embed.encode", fake_encode)
-    r = service.log_solve(conn, 1, outcome, CODE)
-    return service.enrich_solution_now(conn, r.solution_id, service.get_problem(conn, 1), CODE)
+    r = service.log_solve(conn, number, outcome, CODE)
+    return service.enrich_solution_now(conn, r.solution_id, service.get_problem(conn, number), CODE)
 
 
 def test_pattern_standings_are_empty_with_nothing_to_stand_on(tmp_path, monkeypatch):
@@ -639,33 +646,49 @@ def test_pattern_standings_withhold_a_verdict_on_a_first_attempt(tmp_path, monke
 
     assert service.pattern_standings(conn, ["hashmap"]) == [
         service.PatternStanding(
-            pattern="hashmap", attempts=1, struggle_rate=1.0, score=1.0,
+            pattern="hashmap", solved=1, attempts=1, struggle_rate=1.0, score=1.0,
+            weak=False, enough_data=False,
+        )
+    ]
+
+
+def test_pattern_standings_withhold_a_verdict_over_many_attempts_on_few_problems(
+    tmp_path, monkeypatch
+):
+    """Seven failures would have been judged weak by attempts; four problems are too few."""
+    conn = seed_db(tmp_path, monkeypatch, ENOUGH_PROBLEMS)
+    for number in (1, 1, 1, 2, 2, 3, 4):
+        log_and_enrich(conn, monkeypatch, "failed", number=number)
+
+    assert service.pattern_standings(conn, ["hashmap"]) == [
+        service.PatternStanding(
+            pattern="hashmap", solved=4, attempts=7, struggle_rate=1.0, score=1.0,
             weak=False, enough_data=False,
         )
     ]
 
 
 def test_pattern_standings_call_a_pattern_weak_once_there_is_data(tmp_path, monkeypatch):
-    conn = seed_db(tmp_path, monkeypatch)
-    for _ in range(5):
-        log_and_enrich(conn, monkeypatch, "failed")
+    conn = seed_db(tmp_path, monkeypatch, ENOUGH_PROBLEMS)
+    for number in range(1, 6):
+        log_and_enrich(conn, monkeypatch, "failed", number=number)
 
     assert service.pattern_standings(conn, ["hashmap"]) == [
         service.PatternStanding(
-            pattern="hashmap", attempts=5, struggle_rate=1.0, score=1.0,
+            pattern="hashmap", solved=5, attempts=5, struggle_rate=1.0, score=1.0,
             weak=True, enough_data=True,
         )
     ]
 
 
 def test_pattern_standings_stay_clear_of_weak_on_clean_solves(tmp_path, monkeypatch):
-    conn = seed_db(tmp_path, monkeypatch)
-    for _ in range(5):
-        log_and_enrich(conn, monkeypatch, "clean")
+    conn = seed_db(tmp_path, monkeypatch, ENOUGH_PROBLEMS)
+    for number in range(1, 6):
+        log_and_enrich(conn, monkeypatch, "clean", number=number)
 
     assert service.pattern_standings(conn, ["hashmap"]) == [
         service.PatternStanding(
-            pattern="hashmap", attempts=5, struggle_rate=0.0, score=5.0,
+            pattern="hashmap", solved=5, attempts=5, struggle_rate=0.0, score=5.0,
             weak=False, enough_data=True,
         )
     ]
@@ -673,9 +696,9 @@ def test_pattern_standings_stay_clear_of_weak_on_clean_solves(tmp_path, monkeypa
 
 def test_pattern_standings_separate_struggling_from_failing(tmp_path, monkeypatch):
     """Same 100% struggle rate as the weak case above, a very different score."""
-    conn = seed_db(tmp_path, monkeypatch)
-    for _ in range(5):
-        log_and_enrich(conn, monkeypatch, "struggled")
+    conn = seed_db(tmp_path, monkeypatch, ENOUGH_PROBLEMS)
+    for number in range(1, 6):
+        log_and_enrich(conn, monkeypatch, "struggled", number=number)
 
     [standing] = service.pattern_standings(conn, ["hashmap"])
     assert standing.struggle_rate == 1.0
@@ -1063,23 +1086,25 @@ def test_weekly_review_lists_every_main_pattern_of_a_solve(tmp_path, monkeypatch
     ]
 
 
-def test_weekly_review_says_too_early_below_the_attempt_floor(tmp_path, monkeypatch):
-    conn = seed_db(tmp_path, monkeypatch)
-    for day in range(4):
-        scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "failed")
+def test_weekly_review_says_too_early_below_the_problem_floor(tmp_path, monkeypatch):
+    """Six attempts, but on four problems: the floor counts problems, not attempts."""
+    conn = seed_db(tmp_path, monkeypatch, ENOUGH_PROBLEMS)
+    for day, number in enumerate((1, 1, 2, 2, 3, 4)):
+        scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "failed", number=number)
 
     p = service.weekly_review(conn, WEEK_TODAY).patterns[0]
 
-    assert p.attempts_total == 4 < mastery.WEAK_MIN_ATTEMPTS
+    assert (p.attempts_total, p.solved_total) == (6, 4)
+    assert p.solved_total < mastery.WEAK_MIN_PROBLEMS
     assert p.standing == "too-early"
 
 
 def test_weekly_review_standing_tracks_the_analysis_verdict(tmp_path, monkeypatch):
     """weak is only ever membership in analysis["weak_patterns"] - never a
     threshold re-derived here, which is how the two definitions drift apart."""
-    conn = seed_db(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch, ENOUGH_PROBLEMS)
     for day in range(5):
-        scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "failed")
+        scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "failed", number=day + 1)
 
     review = service.weekly_review(conn, WEEK_TODAY)
     analysis = weekly_analyze.analyze(conn, WEEK_TODAY)
@@ -1118,10 +1143,11 @@ def test_weekly_review_has_no_delta_for_a_pattern_first_seen_this_week(tmp_path,
 
 
 def test_weekly_review_orders_the_worst_patterns_first(tmp_path, monkeypatch):
-    conn = seed_db(tmp_path, monkeypatch)
+    conn = seed_db(tmp_path, monkeypatch, ENOUGH_PROBLEMS)
     for day in range(5):
-        scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "failed", pattern="dp-1d")
-        scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "clean", pattern="hashmap")
+        day_before = WEEK_TODAY - timedelta(days=day)
+        scored_attempt(conn, day_before, "failed", pattern="dp-1d", number=day + 1)
+        scored_attempt(conn, day_before, "clean", pattern="hashmap", number=day + 1)
     scored_attempt(conn, WEEK_TODAY, "clean", pattern="graphs")
 
     review = service.weekly_review(conn, WEEK_TODAY)

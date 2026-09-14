@@ -35,24 +35,36 @@ OUTCOME_WEIGHT = 0.7
 REVIEW_WEIGHT = 0.3
 EMA_ALPHA = 0.2
 WEAK_SCORE = 2.5
-WEAK_MIN_ATTEMPTS = 5
+WEAK_MIN_PROBLEMS = 5
 
 VERDICT_MASTERY = {"optimal": 5, "acceptable": 4}
 
 
-def is_weak(score: float, attempts: int) -> bool:
-    """Whether one pattern's aggregates read as weak.
+def enough_history(stats: dict) -> bool:
+    """Whether one pattern_stats() row has enough practice behind it to be judged at all.
+
+    Counted in distinct problems (`solved`, which includes problems only ever failed),
+    never in attempts: SM-2 re-queues a failed problem every few days, so one hard
+    problem could rack up the attempts on its own - and that says something about the
+    problem, which SM-2 already handles, not about the pattern.
+
+    Takes the whole row so which count gates the verdict is decided here and nowhere else.
+    """
+    return stats["solved"] >= WEAK_MIN_PROBLEMS
+
+
+def is_weak(stats: dict) -> bool:
+    """Whether one pattern_stats() row reads as weak.
 
     Both halves of the rule live here because both are about what a mastery score
     means: how low it has to be, and how much practice it takes before the number
-    is worth believing. They were split across two modules, so four files had to
-    import from both to state one rule.
+    is worth believing.
 
-    This is a predicate on numbers, not the answer for a pattern - analyze() stays
+    This is a predicate on one row, not the answer for a pattern - analyze() stays
     the only thing that produces `weak_patterns`, and callers still read weak as
     `pattern in analysis["weak_patterns"]` rather than calling this themselves.
     """
-    return attempts >= WEAK_MIN_ATTEMPTS and score < WEAK_SCORE
+    return enough_history(stats) and stats["score"] < WEAK_SCORE
 
 
 def issue_ceiling(count: int) -> int:

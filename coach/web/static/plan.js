@@ -19,7 +19,7 @@ function renderTopics(data) {
   host.append(
     topicCard(
       "Weak patterns",
-      `Nothing weak yet — a pattern needs ${th.weak_min_attempts} attempts and a mastery score below ${th.weak_score} to count.`,
+      `Nothing weak yet — a pattern needs ${th.weak_min_problems} distinct problems and a mastery score below ${th.weak_score} to count.`,
       t.weak,
       (p) => el("li", { text: p })
     )

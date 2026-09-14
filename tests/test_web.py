@@ -76,6 +76,23 @@ def enriched(monkeypatch, **overrides):
     monkeypatch.setattr("coach.embed.encode", fake_encode)
 
 
+def add_filler_problems(count) -> list[int]:
+    """Untagged, off-curriculum problems, so a pattern can span enough problems to be
+    judged without giving the plan anything new to rank. Returns their numbers."""
+    numbers = [1000 + n for n in range(count)]
+    conn = db.connect()
+    db.upsert_problems(
+        conn,
+        [
+            {"number": n, "slug": f"filler-{n}", "title": f"Filler {n}", "difficulty": "Easy",
+             "official_tags": "[]", "paid_only": 0}
+            for n in numbers
+        ],
+    )
+    conn.close()
+    return numbers
+
+
 def test_stats_endpoint(client):
     s = client.get("/api/stats").json()
     assert s["catalog"] == 2
@@ -175,6 +192,7 @@ def test_log_endpoint_withholds_a_standing_on_a_first_solve(client, monkeypatch)
     assert body["pattern_standings"] == [
         {
             "pattern": "hashmap",
+            "solved": 1,
             "attempts": 1,
             "struggle_rate": 1.0,
             "score": 1.0,
@@ -186,14 +204,16 @@ def test_log_endpoint_withholds_a_standing_on_a_first_solve(client, monkeypatch)
 
 def test_log_endpoint_reports_a_weak_pattern(client, monkeypatch):
     enriched(monkeypatch)
-    for number in (1, 15, 1, 15):
+    *earlier, last = [1, 15, *add_filler_problems(3)]
+    for number in earlier:
         client.post("/api/log", json={"number": number, "outcome": "failed", "code": CODE})
 
-    body = client.post("/api/log", json={"number": 1, "outcome": "failed", "code": CODE}).json()
+    body = client.post("/api/log", json={"number": last, "outcome": "failed", "code": CODE}).json()
 
     assert body["pattern_standings"] == [
         {
             "pattern": "hashmap",
+            "solved": 5,
             "attempts": 5,
             "struggle_rate": 1.0,
             "score": 1.0,
@@ -309,8 +329,8 @@ def test_plan_endpoint_labels_a_weak_pattern_pick(client, monkeypatch):
     it went uncovered while the kind was recovered by parsing the reason sentence.
     """
     enriched(monkeypatch, main_patterns=["two-pointers"])
-    for _ in range(mastery.WEAK_MIN_ATTEMPTS):
-        client.post("/api/log", json={"number": 1, "outcome": "failed", "code": CODE})
+    for number in [1, *add_filler_problems(mastery.WEAK_MIN_PROBLEMS - 1)]:
+        client.post("/api/log", json={"number": number, "outcome": "failed", "code": CODE})
 
     plan = client.get("/api/plan").json()
 
@@ -350,7 +370,7 @@ def test_plan_endpoint_serves_the_thresholds_the_page_quotes(client):
 
     assert thresholds == {
         "weak_score": mastery.WEAK_SCORE,
-        "weak_min_attempts": mastery.WEAK_MIN_ATTEMPTS,
+        "weak_min_problems": mastery.WEAK_MIN_PROBLEMS,
         "stale_days": weekly_analyze.STALE_DAYS,
     }
 
@@ -681,10 +701,11 @@ def test_weekly_endpoint_recomputes_from_the_logged_solves(client, monkeypatch):
             "pattern": "hashmap",
             "attempts_week": 1,
             "attempts_total": 1,
+            "solved_total": 1,
             "score": 3.0,
             "score_before": None,
             "delta": None,
-            # One attempt is below WEAK_MIN_ATTEMPTS, so nothing is claimed yet.
+            # One problem is below WEAK_MIN_PROBLEMS, so nothing is claimed yet.
             "standing": "too-early",
         }
     ]
@@ -709,7 +730,7 @@ def test_weekly_endpoint_serves_the_thresholds_the_page_quotes(client):
     week = client.get("/api/weekly").json()
 
     assert week["thresholds"]["weak_score"] == mastery.WEAK_SCORE
-    assert week["thresholds"]["weak_min_attempts"] == mastery.WEAK_MIN_ATTEMPTS
+    assert week["thresholds"]["weak_min_problems"] == mastery.WEAK_MIN_PROBLEMS
 
 
 def test_pages_are_served(client):

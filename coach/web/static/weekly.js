@@ -59,7 +59,7 @@ function patternsTable(patterns) {
     el(
       "thead",
       {},
-      ["Pattern", "This week", "All-time", "Mastery", "Change", "Standing"].map((h) => el("th", { text: h }))
+      ["Pattern", "This week", "All-time", "Problems", "Mastery", "Change", "Standing"].map((h) => el("th", { text: h }))
     ),
     el(
       "tbody",
@@ -69,6 +69,7 @@ function patternsTable(patterns) {
           el("td", { text: p.pattern }),
           el("td", { text: String(p.attempts_week) }),
           el("td", { text: String(p.attempts_total) }),
+          el("td", { text: String(p.solved_total) }),
           el("td", { text: score(p.score) }),
           el("td", { text: trend(p.delta) }),
           el("td", {}, [el("span", { class: `standing ${p.standing}`, text: STANDING_LABEL[p.standing] })]),
@@ -105,7 +106,7 @@ function renderWeek(data) {
 
 function renderPatterns(data) {
   const th = data.thresholds || {};
-  const judged = `A pattern is judged once it has ${th.weak_min_attempts} attempts all-time; below ${th.weak_score}/5 it needs work.`;
+  const judged = `A pattern is judged once it spans ${th.weak_min_problems} distinct problems all-time; below ${th.weak_score}/5 it needs work.`;
   document.getElementById("patterns-hint").textContent =
     `Mastery is all-time, so a week of practice moves it rather than defining it. ${judged}`;
 

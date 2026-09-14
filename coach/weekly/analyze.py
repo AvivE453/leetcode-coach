@@ -26,11 +26,7 @@ def analyze(
     # Weak is the mastery score, not the raw struggle rate: five shaky-but-solved
     # attempts and five failures are the same rate and very different problems.
     # struggle_rate stays as the honest raw number the reports show.
-    weak = [
-        p["pattern"]
-        for p in sorted(patterns, key=lambda p: p["score"])
-        if mastery.is_weak(p["score"], p["attempts"])
-    ]
+    weak = [p["pattern"] for p in sorted(patterns, key=lambda p: p["score"]) if mastery.is_weak(p)]
     stale = [
         p["pattern"] for p in patterns if p["last_date"] < today - timedelta(days=STALE_DAYS)
     ]

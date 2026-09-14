@@ -145,6 +145,7 @@ class WeekPattern:
     pattern: str
     attempts_week: int
     attempts_total: int
+    solved_total: int
     score: float
     score_before: float | None
     standing: str
@@ -191,6 +192,7 @@ class PatternStanding:
     """Where a pattern currently stands, per the existing weekly analyze() aggregates."""
 
     pattern: str
+    solved: int
     attempts: int
     struggle_rate: float
     score: float
@@ -522,19 +524,20 @@ def review_effect(
     )
 
 
-def standing_of(analysis: dict, pattern: str, attempts: int) -> str:
+def standing_of(analysis: dict, stats: dict) -> str:
     """One pattern's verdict as a word: too-early, weak, or on-track.
 
     The single owner of that reading, shared by the standing note shown after logging
-    a solve and by the weekly review. `weak` is only ever membership in analysis["weak_patterns"] -
-    the threshold itself lives in mastery.is_weak() and is applied once, by analyze().
+    a solve and by the weekly review. `stats` is the pattern's row of analysis["patterns"].
+    `weak` is only ever membership in analysis["weak_patterns"] - the threshold itself
+    lives in mastery.is_weak() and is applied once, by analyze().
 
-    Too small a sample to call weak is also too small to call solid, so below
-    WEAK_MIN_ATTEMPTS the honest answer is "too-early" rather than a guess.
+    Too small a sample to call weak is also too small to call solid, so without
+    mastery.enough_history() the honest answer is "too-early" rather than a guess.
     """
-    if attempts < mastery.WEAK_MIN_ATTEMPTS:
+    if not mastery.enough_history(stats):
         return "too-early"
-    return "weak" if pattern in analysis["weak_patterns"] else "on-track"
+    return "weak" if stats["pattern"] in analysis["weak_patterns"] else "on-track"
 
 
 def pattern_standings(
@@ -556,10 +559,11 @@ def pattern_standings(
         row = rows.get(pattern)
         if row is None:
             continue
-        standing = standing_of(analysis, pattern, row["attempts"])
+        standing = standing_of(analysis, row)
         standings.append(
             PatternStanding(
                 pattern=pattern,
+                solved=row["solved"],
                 attempts=row["attempts"],
                 struggle_rate=row["struggle_rate"],
                 score=row["score"],
@@ -740,7 +744,7 @@ def daily_plan(conn: sqlite3.Connection, today: date, target: int) -> DailyPlan:
 
 
 # Worst first: the patterns needing work are what the week is read for, and
-# nothing can be said yet about the ones still under WEAK_MIN_ATTEMPTS.
+# nothing can be said yet about the ones still under WEAK_MIN_PROBLEMS.
 STANDING_ORDER = {"weak": 0, "on-track": 1, "too-early": 2}
 
 
@@ -773,9 +777,10 @@ def weekly_review(conn: sqlite3.Connection, today: date | None = None) -> Weekly
             pattern=name,
             attempts_week=count,
             attempts_total=all_time[name]["attempts"],
+            solved_total=all_time[name]["solved"],
             score=all_time[name]["score"],
             score_before=score_before.get(name),
-            standing=standing_of(analysis, name, all_time[name]["attempts"]),
+            standing=standing_of(analysis, all_time[name]),
         )
         for name, count in used.items()
     ]

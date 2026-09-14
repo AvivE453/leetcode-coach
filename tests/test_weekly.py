@@ -83,15 +83,15 @@ def test_collect_empty_week(tmp_path):
 def test_analyze_flags_weak_and_stale_patterns(tmp_path):
     conn = make_db(tmp_path)
     add_problem(conn, 1, "two-sum", "Two Sum")
-    add_problem(conn, 2, "coin-change", "Coin Change")
     add_problem(conn, 3, "lru-cache", "LRU Cache")
-    add_problem(conn, 4, "3sum", "3Sum")
-    # weak: five failures, so mastery bottoms out at 1.0
-    for _ in range(5):
-        add_attempt(conn, 2, TODAY - timedelta(days=1), outcome="failed", pattern="dp-1d")
-    # NOT weak: the same 100% struggle rate, but solved every time - mastery 3.0
-    for _ in range(5):
-        add_attempt(conn, 4, TODAY - timedelta(days=1), outcome="struggled", pattern="two-pointers")
+    # weak: failures across five problems, so mastery bottoms out at 1.0
+    for number in range(10, 15):
+        add_problem(conn, number, f"dp-{number}", f"DP {number}")
+        add_attempt(conn, number, TODAY - timedelta(days=1), outcome="failed", pattern="dp-1d")
+    # NOT weak: the same 100% struggle rate over five problems, but solved every time - mastery 3.0
+    for number in range(20, 25):
+        add_problem(conn, number, f"two-pointers-{number}", f"Two Pointers {number}")
+        add_attempt(conn, number, TODAY - timedelta(days=1), outcome="struggled", pattern="two-pointers")
     # strong: single clean attempt
     add_attempt(conn, 1, TODAY - timedelta(days=1), outcome="clean", pattern="hashmap")
     # stale: clean but 60 days ago
@@ -108,16 +108,22 @@ def test_analyze_flags_weak_and_stale_patterns(tmp_path):
     assert scores == pytest.approx({"dp-1d": 1.0, "two-pointers": 3.0, "hashmap": 5.0, "design": 5.0})
 
 
-def test_analyze_needs_five_attempts_before_calling_a_pattern_weak(tmp_path):
+def test_analyze_needs_five_distinct_problems_before_calling_a_pattern_weak(tmp_path):
+    """Attempts alone never judge a pattern. SM-2 re-queues a failed problem every few
+    days, so one hard problem racks up attempts on its own - that is the problem's
+    trouble, and SM-2's to handle, not a verdict on the pattern."""
     conn = make_db(tmp_path)
-    add_problem(conn, 1, "coin-change", "Coin Change")
-    for _ in range(4):
-        add_attempt(conn, 1, TODAY - timedelta(days=1), outcome="failed", pattern="dp-1d")
+    for number in range(1, 6):
+        add_problem(conn, number, f"problem-{number}", f"Problem {number}")
+    for requeue in range(10):
+        add_attempt(conn, 1, TODAY - timedelta(days=3 * requeue), outcome="failed", pattern="dp-1d")
+    assert weekly_analyze.analyze(conn, TODAY)["weak_patterns"] == []
 
-    analysis = weekly_analyze.analyze(conn, TODAY)
-    assert analysis["weak_patterns"] == []
+    for number in (2, 3, 4):
+        add_attempt(conn, number, TODAY, outcome="failed", pattern="dp-1d")
+    assert weekly_analyze.analyze(conn, TODAY)["weak_patterns"] == []
 
-    add_attempt(conn, 1, TODAY, outcome="failed", pattern="dp-1d")
+    add_attempt(conn, 5, TODAY, outcome="failed", pattern="dp-1d")
     assert weekly_analyze.analyze(conn, TODAY)["weak_patterns"] == ["dp-1d"]
 
 

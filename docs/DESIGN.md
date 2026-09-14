@@ -117,7 +117,10 @@ is then listed on its own date.
 **One mastery score per pattern, not a struggle rate.**
 "Weak" used to mean *at least half the attempts were not clean* — a binary that read five
 shaky-but-solved sweeps exactly like five failures. It now means a mastery score below
-2.5/5 over at least five attempts. Each solve scores `0.7 · outcome + 0.3 · review`, on the
+2.5/5 across at least five distinct problems. The floor counts problems, not attempts: SM-2
+re-queues a failed problem every three days, so one hard problem could pile up five attempts
+on its own, and that says something about the problem, which SM-2 already handles, not about
+the pattern. Each solve scores `0.7 · outcome + 0.3 · review`, on the
 same 1–5 scale SM-2 already uses for scheduling: the outcome is self-report (how it felt),
 the review is the external judgement on the code (a bug scores 1, a missed boundary 2, and
 extra findings can only pull it down). They disagree often enough to be worth both — a solve

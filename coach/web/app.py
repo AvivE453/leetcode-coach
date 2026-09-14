@@ -47,7 +47,7 @@ def thresholds() -> dict:
     """
     return {
         "weak_score": mastery.WEAK_SCORE,
-        "weak_min_attempts": mastery.WEAK_MIN_ATTEMPTS,
+        "weak_min_problems": mastery.WEAK_MIN_PROBLEMS,
         "stale_days": weekly_analyze.STALE_DAYS,
     }
 
@@ -151,6 +151,7 @@ def api_log(body: LogRequest) -> dict:
         "pattern_standings": [
             {
                 "pattern": s.pattern,
+                "solved": s.solved,
                 "attempts": s.attempts,
                 "struggle_rate": round(s.struggle_rate, 3),
                 "score": round(s.score, 2),
@@ -297,6 +298,7 @@ def api_weekly() -> dict:
                 "pattern": p.pattern,
                 "attempts_week": p.attempts_week,
                 "attempts_total": p.attempts_total,
+                "solved_total": p.solved_total,
                 "score": p.score,
                 "score_before": p.score_before,
                 "delta": p.delta,

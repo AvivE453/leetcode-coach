@@ -98,10 +98,12 @@ function renderStanding(box, standing) {
   /* The weekly analysis for one of the solve's main patterns, shown a week early. Chip
      classes are the Plan page's, so a weak pattern reads the same red in both places. */
   const mastery = `mastery ${standing.score.toFixed(1)}/5`;
+  const count = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+  const practice = `${count(standing.attempts, "attempt")} across`;
   if (!standing.enough_data) {
-    const plural = standing.attempts === 1 ? "" : "s";
     box.append(el("p", { class: "hint", text:
-      `${standing.pattern}: ${mastery} over only ${standing.attempts} attempt${plural} — not enough data to call it yet.` }));
+      `${standing.pattern}: ${mastery} over ${practice} only ${count(standing.solved, "problem")}` +
+      ` — not enough data to call it yet.` }));
     return;
   }
   box.append(
@@ -112,7 +114,7 @@ function renderStanding(box, standing) {
       }),
       el("span", { text:
         ` ${standing.pattern}: ${mastery}, ${Math.round(standing.struggle_rate * 100)}% struggle rate` +
-        ` over ${standing.attempts} attempts` }),
+        ` over ${practice} ${count(standing.solved, "problem")}` }),
     ])
   );
 }
