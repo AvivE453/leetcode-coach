@@ -28,7 +28,7 @@ Day-to-day use happens in the browser, on four pages over the same data:
 
 | Page | What it gives you |
 |---|---|
-| **Daily Plan** | **Start here.** Today's problems under three headings of up to ten each: **Due** (reviews due by spaced repetition, most overdue first, topped up with curriculum progression when few are due), **Approach practice** (a problem you solved with the wrong approach, three days after you last tried it), and **Weak patterns** (new problems for the patterns your mastery scores say need work) |
+| **Daily Plan** | **Start here.** Today's problems under three headings of up to ten each: **Time to revisit** (reviews due by spaced repetition, most overdue first, topped up with curriculum progression when few are due), **Approach practice** (a problem you solved with the wrong approach, three days after you last tried it), and **Weak patterns** (new problems for the patterns your mastery scores say need work) |
 | **Home** | Progress, every pattern you have practised with its mastery score, and **I solved a question** — paste a solution and it is stored, tagged by pattern, embedded, scheduled for review, compared with similar past solves, and flagged if you used the wrong approach |
 | **Solutions** | Every solve with its code, searchable by number or name, and structured feedback on any of them: what it got right, complexity, bugs, edge cases, a better approach. Stored after the first run, so looking again is free |
 | **Weekly Review** | The last seven days: every solve, and whether each pattern you used is going well, needs work, or has too little history to call |

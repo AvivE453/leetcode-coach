@@ -155,7 +155,8 @@ def test_log_endpoint_agrees_with_the_stored_canonical_set_and_the_plan(client, 
     plan = client.get("/api/plan").json()
     assert enrichment["off_pattern"] is False
     assert enrichment["intended_secondary_patterns"] == stored == ["two-pointers"]
-    assert (plan["sections"]["approach"], plan["topics"]["corrections_upcoming"]) == ([], [])
+    assert plan["sections"]["approach"] == []
+    assert client.get("/api/solutions/1").json()["practice"]["correction"] is None
 
 
 def test_solution_history_endpoint_carries_the_canonical_note(client, monkeypatch):
@@ -314,7 +315,7 @@ def test_plan_endpoint_ranks_problems_and_stays_read_only(client, monkeypatch, t
     ]
     assert (plan["sections"]["approach"], plan["sections"]["weak"]) == ([], [])
     assert (plan["reviews_owed"], plan["practice_owed"]) == (1, 0)
-    assert plan["topics"] == {"weak": [], "stale": [], "corrections_upcoming": []}
+    assert plan["topics"] == {"weak": [], "stale": []}
     assert not (tmp_path / "reports").exists()
 
 
@@ -374,27 +375,24 @@ def test_plan_endpoint_serves_the_thresholds_the_page_quotes(client):
     }
 
 
-def test_plan_endpoint_lists_approach_practice_as_upcoming_until_it_is_due(client, monkeypatch):
-    """Solved off-pattern today: owed, but not for three days. It is listed with its date
-    and kept out of today's items, so the solve just logged does not come straight back."""
+def test_plan_endpoint_keeps_approach_practice_off_the_plan_until_it_is_due(client, monkeypatch):
+    """Solved off-pattern today: owed, but not for three days. It stays out of today's items,
+    so the solve just logged does not come straight back, while the problem still owes it."""
     enriched(monkeypatch, main_patterns=["prefix-sum"], intended_pattern="dp-1d")
     client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
     today = date.today()
 
     plan = client.get("/api/plan").json()
 
-    assert plan["sections"]["approach"] == []
-    assert plan["topics"]["corrections_upcoming"] == [
-        {
-            "number": 1,
-            "title": "Two Sum",
-            "accepted": ["dp-1d", "two-pointers"],
-            "latest_attempt": today.isoformat(),
-            "due": (today + timedelta(days=3)).isoformat(),
-            "reason": "wrong-approach",
-        }
-    ]
     assert 1 not in [i["number"] for heading in plan["sections"].values() for i in heading]
+    assert client.get("/api/solutions/1").json()["practice"]["correction"] == {
+        "number": 1,
+        "title": "Two Sum",
+        "accepted": ["dp-1d", "two-pointers"],
+        "latest_attempt": today.isoformat(),
+        "due": (today + timedelta(days=3)).isoformat(),
+        "reason": "wrong-approach",
+    }
 
 
 def test_plan_endpoint_puts_approach_practice_under_its_heading_once_it_is_due(client, monkeypatch):

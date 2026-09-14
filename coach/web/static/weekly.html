@@ -17,36 +17,31 @@
     </div>
     <nav class="pills" aria-label="Sections">
       <a href="/">Home</a>
-      <a href="/solutions">Solutions</a>
+      <a href="/solutions">Problems Solved</a>
       <a href="/plan">Daily Plan</a>
       <a href="/weekly" aria-current="page">Weekly Review</a>
     </nav>
   </header>
 
   <main>
-    <section aria-labelledby="week-heading" style="margin-top:0">
-      <div class="section-head">
-        <div>
-          <h2 id="week-heading">The last seven days</h2>
-          <p class="hint">Recomputed every time you open this page — log a solve and it shows up here.</p>
-        </div>
-        <p class="hint" id="week-meta"></p>
-      </div>
-      <div class="grid" id="counts"></div>
+    <div class="grid" id="counts" style="margin-top:0"></div>
+
+    <section class="card tone-hotpink" aria-labelledby="week-heading">
+      <h2 class="k section-title" id="week-heading">All solutions from last seven days</h2>
+      <p class="hint" id="week-meta"></p>
       <div id="week-table">
         <p class="loading">Loading this week…</p>
       </div>
     </section>
 
-    <section aria-labelledby="patterns-heading">
-      <div class="section-head">
-        <div>
-          <h2 id="patterns-heading">Patterns you used this week</h2>
-          <p class="hint" id="patterns-hint">Mastery is all-time, so a week of practice moves it rather than defining it.</p>
-        </div>
-      </div>
-      <div class="topics" id="verdicts"></div>
+    <section class="card tone-teal" aria-labelledby="week-patterns-heading">
+      <h2 class="k section-title" id="week-patterns-heading">Patterns you used this week</h2>
+      <p class="hint" id="patterns-hint">Mastery is all-time, so a week of practice moves it rather than defining it.</p>
       <div id="patterns-table"></div>
+    </section>
+
+    <section>
+      <div class="topics" id="verdicts"></div>
     </section>
   </main>
 </div>

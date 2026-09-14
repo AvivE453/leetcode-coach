@@ -574,8 +574,11 @@ def pattern_standings(
     return standings
 
 
+DIFFICULTIES = ("Easy", "Medium", "Hard")
+
+
 def stats_summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
-    """The home page's progress numbers: counts, reviews due, outcomes, curriculum.
+    """The home page's progress numbers: counts, reviews due, difficulty split, curriculum.
 
     Per-pattern practice is not here - the pattern table reads it from pattern_table().
     """
@@ -594,12 +597,20 @@ def stats_summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
         "SELECT COUNT(*) FROM review_state WHERE next_due <= ?", (today.isoformat(),)
     ).fetchone()[0]
 
-    outcomes = [
-        {"outcome": r["outcome"], "count": r["n"]}
-        for r in conn.execute(
-            "SELECT outcome, COUNT(*) AS n FROM attempts GROUP BY outcome ORDER BY n DESC"
-        )
-    ]
+    # The same distinct set `solved` counts, split by difficulty - so the two always add up.
+    by_difficulty = dict.fromkeys(DIFFICULTIES, 0)
+    by_difficulty.update(
+        {
+            r["difficulty"]: r["n"]
+            for r in conn.execute(
+                """
+                SELECT p.difficulty, COUNT(DISTINCT a.problem_number) AS n
+                FROM attempts a JOIN problems p ON p.number = a.problem_number
+                GROUP BY p.difficulty
+                """
+            )
+        }
+    )
 
     return {
         "catalog": total,
@@ -607,7 +618,7 @@ def stats_summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
         "attempts": attempts,
         "last_7_days": week,
         "due_today": due_count,
-        "outcomes": outcomes,
+        "by_difficulty": by_difficulty,
         "curriculum": curriculum.progress(conn),
     }
 

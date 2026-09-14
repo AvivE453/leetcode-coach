@@ -2,6 +2,17 @@
    Contrast: body text 14.8:1, muted text 7.4:1, white on the button gradient
    5.2:1 at its lightest stop (WCAG AA at every size). */
 
+/* Permanent Marker (Apache License 2.0, fonts/PermanentMarker-LICENSE.txt), served from
+   here rather than Google Fonts so the coach renders the same offline. It has one weight,
+   so bold is never synthesised: a smeared faux-bold marker reads worse than none. */
+@font-face {
+  font-family: "Permanent Marker";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/PermanentMarker-Regular.woff2") format("woff2");
+}
+
 :root {
   --bg: #0b1220;
   --surface: #131c2e;
@@ -18,6 +29,12 @@
   --danger: #fca5a5;
   --radius: 14px;
   --shadow: 0 10px 30px rgba(3, 8, 20, 0.45);
+  /* The card palette, taken from the neon reference the cards were restyled after. */
+  --tone-orange: #f6a93b;
+  --tone-blue: #38bdf8;
+  --tone-pink: #fb7185;
+  --tone-teal: #2dd4bf;
+  --tone-hotpink: #ff6ec7;
 }
 
 * { box-sizing: border-box; }
@@ -26,7 +43,8 @@ body {
   margin: 0;
   background: radial-gradient(1200px 600px at 20% -10%, #14213c 0%, var(--bg) 55%) fixed;
   color: var(--text);
-  font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 16px/1.55 "Permanent Marker", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-synthesis: none;
   min-height: 100vh;
 }
 
@@ -51,9 +69,10 @@ a { color: var(--accent); }
   margin-bottom: 26px;
 }
 
-.brand { display: flex; align-items: baseline; gap: 10px; }
-.brand h1 { font-size: 2rem; margin: 0; letter-spacing: -0.01em; }
-.brand .sub { color: var(--muted); font-size: 0.85rem; }
+/* The subtitle sits under the title: beside a title this size, the two no longer fit on one row with the nav. */
+.brand { display: flex; flex-direction: column; gap: 2px; }
+.brand h1 { font-size: 3rem; margin: 0; letter-spacing: -0.01em; }
+.brand .sub { color: var(--text); font-size: 0.85rem; }
 /* The Solutions search: its own full-width row under the title (masthead wraps). */
 .masthead .search { flex-basis: 100%; }
 
@@ -73,6 +92,7 @@ a { color: var(--accent); }
   text-decoration: none;
   font-size: 0.92rem;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .pills a:hover { color: var(--text); }
@@ -81,6 +101,14 @@ a { color: var(--accent); }
   background: var(--grad);
   color: #fff;
   box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+}
+
+/* The marker font is wide: on a phone the nav ran off the screen, so the links wrap onto a
+   second row, and the title steps down a size so it still fits on one line. */
+@media (max-width: 640px) {
+  .brand h1 { font-size: 2.75rem; }
+  .pills { flex-wrap: wrap; justify-content: center; border-radius: var(--radius); }
+  .pills a { padding: 6px 12px; }
 }
 
 /* ---------- cards ---------- */
@@ -100,13 +128,17 @@ a { color: var(--accent); }
 .hero .label {
   text-transform: uppercase;
   letter-spacing: 0.09em;
-  font-size: 0.72rem;
-  color: var(--muted);
-  margin: 0 0 2px;
+  color: var(--tone);
+  margin: 0 0 8px;
 }
 
-.hero .big { font-size: 3.2rem; font-weight: 700; line-height: 1; margin: 0; color: var(--text); }
-.hero .note { margin: 6px 0 0; color: var(--muted); font-size: 0.92rem; }
+.hero .big { font-size: 4rem; font-weight: 700; line-height: 1; margin: 0; color: var(--text); }
+.hero .note { margin: 10px 0 0; color: var(--text); font-size: 1.1rem; }
+.hero-diff { margin: 10px 0 0; }
+/* At the cards' 0.07em, "Due for review" is a pixel wider than its card and breaks in two. */
+#stat-cards .k { letter-spacing: 0.03em; }
+.hero-diff .diff { font-size: inherit; }
+.hero .btn { font-size: 1.1rem; }
 
 .grid {
   display: grid;
@@ -122,16 +154,44 @@ a { color: var(--accent); }
   padding: 16px 18px;
 }
 
+/* Each card has one tone: its label is written in it, and it glows in it on hover. A card
+   in a row takes the next tone, so neighbours never match; a card on its own names its tone
+   with a tone-* class, and anything unnamed is blue. A problem row takes its card's tone. */
+.hero, .card { --tone: var(--tone-blue); }
+.hero, .card, .problems > li { transition: border-color 0.15s ease, box-shadow 0.15s ease; }
+.hero:hover, .card:hover, .problems > li:hover {
+  border-color: var(--tone);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tone) 45%, transparent),
+              0 0 22px color-mix(in srgb, var(--tone) 35%, transparent);
+}
+:is(.grid > .card, .topics > .card):nth-child(5n + 1) { --tone: var(--tone-orange); }
+:is(.grid > .card, .topics > .card):nth-child(5n + 2) { --tone: var(--tone-blue); }
+:is(.grid > .card, .topics > .card):nth-child(5n + 3) { --tone: var(--tone-pink); }
+:is(.grid > .card, .topics > .card):nth-child(5n + 4) { --tone: var(--tone-teal); }
+:is(.grid > .card, .topics > .card):nth-child(5n + 5) { --tone: var(--tone-hotpink); }
+.tone-orange { --tone: var(--tone-orange); }
+.tone-blue { --tone: var(--tone-blue); }
+.tone-pink { --tone: var(--tone-pink); }
+.tone-teal { --tone: var(--tone-teal); }
+.tone-hotpink { --tone: var(--tone-hotpink); }
+
+.card th { color: var(--tone); }
+
 .card .k {
-  color: var(--muted);
-  font-size: 0.78rem;
+  color: var(--tone);
+  font-size: 1.05rem;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  margin: 0 0 6px;
+  margin: 0 0 8px;
 }
 
+/* The titles of cards that head a whole section, and the difficulty split, share one size so
+   they never drift. It sits after .card .k and matches its weight, or .card .k would win. */
+.hero .label, .hero-diff, #stat-cards .k, .card .section-title { font-size: 1.3rem; }
+.section-title + .hint { margin-bottom: 16px; }
+
 .card .v { font-size: 1.8rem; font-weight: 650; margin: 0; line-height: 1.15; }
-.card .v small { display: block; font-size: 0.86rem; font-weight: 400; color: var(--muted); }
+.card .v small { display: block; font-size: 0.86rem; font-weight: 400; color: var(--text); }
 
 .bar {
   height: 6px;
@@ -154,7 +214,8 @@ section { margin-top: 34px; }
 }
 
 h2 { font-size: 1.08rem; margin: 0; letter-spacing: -0.01em; }
-.hint { color: var(--muted); font-size: 0.86rem; margin: 0; }
+/* Notes are written in the same white as the text they explain; size alone keeps them secondary. */
+.hint { color: var(--text); font-size: 0.86rem; margin: 0; }
 
 /* ---------- buttons ---------- */
 
@@ -194,9 +255,10 @@ th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: u
 .form-card { margin-top: 14px; }
 
 .field { margin-bottom: 16px; }
-.field label, .fieldset-label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 6px; }
+/* Each field of the log form names its tone: its label is written in it, its box framed in it. */
+.field label, .fieldset-label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 6px; color: var(--tone); }
 
-input[type="number"], input[type="search"], input[type="text"], textarea {
+input[type="search"], input[type="text"], textarea {
   width: 100%;
   font: inherit;
   color: var(--text);
@@ -206,8 +268,10 @@ input[type="number"], input[type="search"], input[type="text"], textarea {
   padding: 10px 12px;
 }
 textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.86rem; min-height: 220px; resize: vertical; }
-input[type="number"] { max-width: 180px; }
+input[inputmode="numeric"] { max-width: 180px; }
 input:focus, textarea:focus { border-color: var(--accent); }
+.form-card :is(input[type="text"], textarea) { border-color: color-mix(in srgb, var(--tone) 60%, var(--border)); }
+.form-card :is(input[type="text"], textarea):focus { border-color: var(--tone); }
 
 fieldset { border: 0; padding: 0; margin: 0 0 16px; }
 
@@ -217,14 +281,14 @@ fieldset { border: 0; padding: 0; margin: 0 0 16px; }
   align-items: center;
   gap: 8px;
   padding: 8px 14px;
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--tone) 60%, var(--border));
   border-radius: 999px;
   background: var(--surface-2);
   font-weight: 500;
   cursor: pointer;
 }
-.radios label:has(input:checked) { border-color: var(--accent); background: var(--grad-soft); }
-.radios input { accent-color: #60a5fa; }
+.radios label:has(input:checked) { border-color: var(--tone); background: color-mix(in srgb, var(--tone) 18%, transparent); }
+.radios input { accent-color: var(--tone); }
 
 .error {
   color: var(--danger);
@@ -234,7 +298,7 @@ fieldset { border: 0; padding: 0; margin: 0 0 16px; }
   padding-left: 10px;
 }
 
-.result { border-left: 3px solid var(--accent); }
+.result { border-left: 3px solid var(--tone); }
 .result h3 { margin: 0 0 8px; font-size: 1rem; }
 .result p { margin: 4px 0; }
 
@@ -256,47 +320,11 @@ fieldset { border: 0; padding: 0; margin: 0 0 16px; }
 .topics { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
 .topics ul { margin: 0; padding-left: 18px; }
 .topics li { margin: 4px 0; }
-.topics .empty { color: var(--muted); font-size: 0.9rem; margin: 0; }
-
-ol.plan { list-style: none; margin: 0; padding: 0; counter-reset: rank; }
-
-ol.plan li {
-  counter-increment: rank;
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  padding: 12px 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  margin-bottom: 8px;
-}
-
-ol.plan li::before {
-  content: counter(rank);
-  flex: none;
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--surface-2);
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 700;
-}
-ol.plan li:nth-child(-n + 3)::before { background: var(--grad); color: #fff; }
-
-.plan .title { flex: 1 1 240px; }
-.plan .title a { text-decoration: none; font-weight: 600; }
-.plan .title a:hover { text-decoration: underline; }
-.plan .num { color: var(--muted); font-variant-numeric: tabular-nums; }
-
-/* On a phone the reason chip would squeeze the title to one word per line. */
-@media (max-width: 640px) {
-  ol.plan li { flex-wrap: wrap; row-gap: 8px; }
-  .plan .title { flex: 1 1 100%; }
-}
+.topics .empty { color: var(--text); font-size: 0.9rem; margin: 0; }
+/* The Daily Plan's and Weekly Review's card titles, larger than Home's. */
+#topics .k, :is(#due-heading, #approach-heading, #weak-heading, #week-heading, #week-patterns-heading) { font-size: 1.6rem; }
+/* Stale patterns is teal. By id, because the in-a-row tone cycle would otherwise outrank it. */
+#topics > .card { --tone: var(--tone-teal); }
 
 .diff { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.04em; }
 .diff.Easy { color: var(--easy); }
@@ -316,20 +344,37 @@ ol.plan li:nth-child(-n + 3)::before { background: var(--grad); color: #fff; }
 .chip.re-solve { color: #fcd34d; border-color: #78591a; background: #2a2412; }
 .chip.weak-pattern { color: #fca5a5; border-color: #7f3232; background: #2c1717; }
 .chip.curriculum { color: var(--muted); }
-/* A problem can be on the list for two reasons at once: a chip each, wrapping together. */
-.plan .reasons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 
 /* ---------- solutions page ---------- */
 
-ul.solutions { list-style: none; margin: 0; padding: 0; }
+/* ---------- problem rows: Solutions and the Daily Plan draw a problem the same way ---------- */
 
-ul.solutions > li {
+.problems { list-style: none; margin: 0; padding: 0; }
+
+.problems > li {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
   margin-bottom: 8px;
   padding: 4px 16px 6px;
 }
+/* Inside a card the rows step one shade lighter, or they would vanish into it. */
+.card .problems > li { background: var(--surface-2); }
+.card > .problems { margin-top: 10px; }
+
+.problem-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: baseline;
+  padding: 12px 0 4px;
+}
+.problem-head .title { flex: 1 1 240px; font-weight: 600; }
+.problem-head .num { color: var(--muted); font-variant-numeric: tabular-nums; }
+.problems > li:hover .problem-head .title { color: var(--tone); }
+/* A problem can be on the plan for two reasons at once: a chip each, wrapping together. */
+.problem-head .reasons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.problem-link { margin: 0 0 8px; font-size: 0.82rem; }
 
 .solve-toggle {
   font: inherit;
@@ -337,23 +382,13 @@ ul.solutions > li {
   background: none;
   border: 0;
   width: 100%;
-  padding: 12px 0 4px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  align-items: baseline;
   text-align: left;
   cursor: pointer;
 }
-.solve-toggle .title { flex: 1 1 240px; font-weight: 600; }
-.solve-toggle .num { color: var(--muted); font-variant-numeric: tabular-nums; }
-.solve-toggle:hover .title { color: var(--accent); }
-
-.solve-link { margin: 0 0 8px; font-size: 0.82rem; }
 
 .solve { border-top: 1px solid var(--border); padding-top: 12px; margin-bottom: 8px; }
 .solve p { margin: 4px 0; }
-.solve-meta { color: var(--muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.solve-meta { color: var(--text); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
 
 /* Scoped to a solve: a bare `.review` also matched the Daily Plan's `chip review`, pushing
    that chip down with a dashed border and stretching any chip beside it. */
@@ -390,16 +425,19 @@ pre {
 }
 pre code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.84rem; line-height: 1.5; }
 
-.loading { color: var(--muted); }
+.loading { color: var(--text); }
 
 /* Weekly Review: same palette as the verdicts, so a standing reads at a glance. */
 .standing { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
 .standing.weak { color: var(--hard); }
 .standing.on-track { color: var(--easy); }
 .standing.too-early { color: var(--muted); }
-#counts { margin-bottom: 14px; }
-#verdicts { margin-bottom: 8px; }
-#week-table .empty, #verdicts .empty { color: var(--muted); margin: 0; }
+#counts .k, #verdicts .k { font-size: 1.3rem; }
+/* The verdict cards take the standings' colours, red needs work and green is going well. By id,
+   because the in-a-row tone cycle would otherwise outrank them. */
+#verdicts > .verdict-weak { --tone: var(--hard); }
+#verdicts > .verdict-on-track { --tone: var(--easy); }
+#week-table .empty, #verdicts .empty { color: var(--text); margin: 0; }
 
 .sr-only {
   position: absolute;

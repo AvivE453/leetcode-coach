@@ -262,14 +262,7 @@ def api_plan() -> dict:
         # Everything owed today, listed or not, so a full heading can say what it left out.
         "reviews_owed": sections.reviews_owed,
         "practice_owed": sections.practice_owed,
-        # Approach practice that is due is its own heading, so only what waits is a topic.
-        "topics": {
-            "weak": analysis["weak_patterns"],
-            "stale": analysis["stale_patterns"],
-            "corrections_upcoming": [
-                correction_payload(c) for c in analysis["corrections_upcoming"]
-            ],
-        },
+        "topics": {"weak": analysis["weak_patterns"], "stale": analysis["stale_patterns"]},
         "curriculum": analysis["curriculum"],
         "thresholds": thresholds(),
     }

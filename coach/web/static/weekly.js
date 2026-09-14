@@ -87,21 +87,18 @@ function renderWeek(data) {
   document.getElementById("week-meta").textContent = `${data.start} to ${data.end}`;
 
   document.getElementById("counts").replaceChildren(
-    countCard("Attempts", data.attempts.length),
+    countCard("Solutions submitted", data.attempts.length),
     countCard("Distinct problems", data.distinct_problems),
     countCard("Patterns used", data.patterns.length)
   );
 
   const host = document.getElementById("week-table");
   if (!data.attempts.length) {
-    host.replaceChildren(
-      el("div", { class: "card" }, [
-        el("p", { class: "empty", text: "Nothing logged in the last seven days." }),
-      ])
-    );
+    host.replaceChildren(el("p", { class: "empty", text: "Nothing logged in the last seven days." }));
     return;
   }
-  host.replaceChildren(weekTable(data.attempts));
+  // The API lists the week oldest first; the table reads newest first, the last solve on top.
+  host.replaceChildren(weekTable([...data.attempts].reverse()));
 }
 
 function renderPatterns(data) {
@@ -134,20 +131,21 @@ function renderPatterns(data) {
   const anyJudged = data.patterns.some((p) => p.standing !== "too-early");
   const tooEarly = "Not enough history yet.";
 
-  verdicts.replaceChildren(
-    topicCard(
-      "Needs more work",
-      anyJudged ? "Nothing you practiced this week needs work." : tooEarly,
-      data.patterns.filter((p) => p.standing === "weak"),
-      verdictItem
-    ),
-    topicCard(
-      "Going well",
-      anyJudged ? "Nothing you practiced this week is there yet." : tooEarly,
-      data.patterns.filter((p) => p.standing === "on-track"),
-      verdictItem
-    )
+  const needsWork = topicCard(
+    "Needs more work",
+    anyJudged ? "Nothing you practiced this week needs work." : tooEarly,
+    data.patterns.filter((p) => p.standing === "weak"),
+    verdictItem
   );
+  const goingWell = topicCard(
+    "Going well",
+    anyJudged ? "Nothing you practiced this week is there yet." : tooEarly,
+    data.patterns.filter((p) => p.standing === "on-track"),
+    verdictItem
+  );
+  needsWork.classList.add("verdict-weak");
+  goingWell.classList.add("verdict-on-track");
+  verdicts.replaceChildren(needsWork, goingWell);
   table.replaceChildren(patternsTable(data.patterns));
 }
 

@@ -17,60 +17,42 @@
     </div>
     <nav class="pills" aria-label="Sections">
       <a href="/">Home</a>
-      <a href="/solutions">Solutions</a>
+      <a href="/solutions">Problems Solved</a>
       <a href="/plan" aria-current="page">Daily Plan</a>
       <a href="/weekly">Weekly Review</a>
     </nav>
   </header>
 
   <main>
-    <section aria-labelledby="topics-heading" style="margin-top:0">
-      <div class="section-head">
-        <div>
-          <h2 id="topics-heading">Focus topics</h2>
-          <p class="hint">What to get better at, from your own solve history.</p>
-        </div>
-        <p class="hint" id="plan-meta"></p>
-      </div>
-      <div class="topics" id="topics">
-        <p class="loading">Loading the plan…</p>
-      </div>
-    </section>
+    <p class="hint">Today's practice, built from your own solve history: problems to revisit, approaches to fix, and new problems for your weak patterns.</p>
+    <p class="hint" id="plan-meta">Loading the plan…</p>
 
-    <section aria-labelledby="due-heading">
-      <div class="section-head">
-        <div>
-          <h2 id="due-heading">Due</h2>
-          <p class="hint">Reviews due today, most overdue first. When few are due, curriculum progression fills the rest.</p>
-        </div>
-        <p class="hint" id="due-meta"></p>
-      </div>
-      <ol class="plan" id="due-list"></ol>
+    <section class="card tone-blue" aria-labelledby="due-heading" style="margin-top:12px">
+      <h2 class="k section-title" id="due-heading">Time to revisit</h2>
+      <p class="hint">Reviews due today, most overdue first. When few are due, curriculum progression fills the rest.</p>
+      <p class="hint" id="due-meta"></p>
+      <ol class="problems" id="due-list"></ol>
       <p class="hint" id="due-empty" hidden></p>
     </section>
 
-    <section aria-labelledby="approach-heading">
-      <div class="section-head">
-        <div>
-          <h2 id="approach-heading">Approach practice</h2>
-          <p class="hint">Problems you solved without an accepted approach, owed until you solve one that way.</p>
-        </div>
-        <p class="hint" id="approach-meta"></p>
-      </div>
-      <ol class="plan" id="approach-list"></ol>
+    <section class="card tone-orange" aria-labelledby="approach-heading">
+      <h2 class="k section-title" id="approach-heading">Approach practice</h2>
+      <p class="hint">Problems you solved without an accepted approach, owed until you solve one that way.</p>
+      <p class="hint" id="approach-meta"></p>
+      <ol class="problems" id="approach-list"></ol>
       <p class="hint" id="approach-empty" hidden></p>
     </section>
 
-    <section aria-labelledby="weak-heading">
-      <div class="section-head">
-        <div>
-          <h2 id="weak-heading">Weak patterns</h2>
-          <p class="hint">New problems for the patterns your mastery scores say need work.</p>
-        </div>
-        <p class="hint" id="weak-meta"></p>
-      </div>
-      <ol class="plan" id="weak-list"></ol>
+    <section class="card tone-pink" aria-labelledby="weak-heading">
+      <h2 class="k section-title" id="weak-heading">Weak patterns</h2>
+      <p class="hint">New problems for the patterns your mastery scores say need work.</p>
+      <p class="hint" id="weak-meta"></p>
+      <ol class="problems" id="weak-list"></ol>
       <p class="hint" id="weak-empty" hidden></p>
+    </section>
+
+    <section>
+      <div class="topics" id="topics"></div>
     </section>
   </main>
 </div>

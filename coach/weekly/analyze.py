@@ -33,14 +33,12 @@ def analyze(
     # Approach practice keeps the reviews' horizon: what is owed by it goes on the list, and
     # the rest waits for its date rather than coming back early for being unresolved.
     horizon = today + timedelta(days=lookahead_days)
-    owed = corrections.outstanding(conn)
 
     return {
         "patterns": patterns,
         "weak_patterns": weak,
         "stale_patterns": stale,
-        "corrections_due": [c for c in owed if c.due <= horizon],
-        "corrections_upcoming": [c for c in owed if c.due > horizon],
+        "corrections_due": [c for c in corrections.outstanding(conn) if c.due <= horizon],
         "due": scheduler.due_reviews(conn, today, lookahead_days),
         # Why a due problem came back, when its last practice day holds a reported failure.
         "findings": assessment.open_findings(conn),

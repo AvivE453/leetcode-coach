@@ -1,31 +1,38 @@
 /* Home page: progress numbers, the pattern table, and the log form.
-   el()/getJSON()/patternBadges()/APPROACH_REASON come from dom.js, loaded before this script. */
+   el()/getJSON()/patternBadges()/animateDots()/APPROACH_REASON come from dom.js, loaded before this script. */
 
 /* ---------- stats ---------- */
+
+/* The curriculum lists as people write them; the API keys them by file name. */
+const CURRICULUM_LABEL = { blind75: "Blind 75", neetcode150: "NeetCode 150" };
 
 function renderStats(s) {
   document.getElementById("hero-solved").textContent = s.solved;
   document.getElementById("hero-note").textContent =
-    `${s.attempts} attempt${s.attempts === 1 ? "" : "s"} logged · ` +
+    `${s.attempts} solution${s.attempts === 1 ? "" : "s"} submitted · ` +
     `${s.last_7_days} in the last 7 days · ${s.catalog} problems in the catalog`;
+
+  // Same difficulty colors as the diff badges on Solutions and the Daily Plan.
+  document.getElementById("hero-diff").replaceChildren(
+    ...["Easy", "Medium", "Hard"].flatMap((d, i) => [
+      ...(i ? [" · "] : []),
+      el("span", { class: `diff ${d}`, text: `${d} ${s.by_difficulty[d]}` }),
+    ])
+  );
 
   const cards = document.getElementById("stat-cards");
   cards.replaceChildren();
 
   cards.append(statCard("Due for review", String(s.due_today), s.due_today ? "waiting on you today" : "nothing due"));
-  cards.append(statCard("Last 7 days", String(s.last_7_days), "attempts"));
-
-  const clean = (s.outcomes.find((o) => o.outcome === "clean") || { count: 0 }).count;
-  const rate = s.attempts ? Math.round((clean / s.attempts) * 100) : 0;
-  const breakdown = s.outcomes.map((o) => `${o.outcome} ${o.count}`).join(" · ");
-  cards.append(statCard("Clean solves", `${rate}%`, breakdown || "no attempts yet"));
+  cards.append(statCard("Last 7 days", String(s.last_7_days), "solutions submitted"));
 
   for (const [name, p] of Object.entries(s.curriculum)) {
-    const card = statCard(name, String(p.done), `of ${p.total}`);
+    const label = CURRICULUM_LABEL[name] || name;
+    const card = statCard(label, String(p.done), `of ${p.total}`);
     const pct = p.total ? (p.done / p.total) * 100 : 0;
     const bar = el("div", { class: "bar" }, [el("span", { style: `width:${pct}%` })]);
     bar.setAttribute("role", "img");
-    bar.setAttribute("aria-label", `${name}: ${p.done} of ${p.total} solved`);
+    bar.setAttribute("aria-label", `${label}: ${p.done} of ${p.total} solved`);
     card.append(bar);
     cards.append(card);
   }
@@ -44,7 +51,7 @@ const PATTERN_COLUMNS = [
   ["Pattern", (p) => p.pattern],
   ["Problems solved", (p) => String(p.solved)],
   ["Mastery (1–5)", (p) => p.score.toFixed(1)],
-  ["Attempts", (p) => String(p.attempts)],
+  ["Solutions submitted", (p) => String(p.attempts)],
   ["Not clean", (p) => String(p.rough)],
 ];
 
@@ -76,14 +83,15 @@ function outcomeValue() {
   return document.querySelector('input[name="outcome"]:checked').value;
 }
 
-/* Minutes and note are optional: blank means "not recorded" and is sent as null.
-   badInput catches text a number field shows but reports as an empty value. */
+/* The number fields are plain text inputs - a number input's spinner, scroll wheel and
+   arrow keys changed the value by accident - so the browser no longer rejects non-digits. */
+const WHOLE_NUMBER = /^\d+$/;
+
+/* Minutes and note are optional: blank means "not recorded" and is sent as null. */
 function optionalFields() {
-  const minutesInput = document.getElementById("minutes");
-  const raw = minutesInput.value.trim();
+  const raw = document.getElementById("minutes").value.trim();
   const minutes = raw === "" ? null : Number(raw);
-  const valid = !minutesInput.validity.badInput &&
-    (minutes === null || (Number.isInteger(minutes) && minutes >= 0));
+  const valid = raw === "" || WHOLE_NUMBER.test(raw);
   const note = document.getElementById("note").value.trim() || null;
   return { valid, minutes, note };
 }
@@ -99,7 +107,7 @@ function renderStanding(box, standing) {
      classes are the Plan page's, so a weak pattern reads the same red in both places. */
   const mastery = `mastery ${standing.score.toFixed(1)}/5`;
   const count = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
-  const practice = `${count(standing.attempts, "attempt")} across`;
+  const practice = `${count(standing.attempts, "solution")} submitted across`;
   if (!standing.enough_data) {
     box.append(el("p", { class: "hint", text:
       `${standing.pattern}: ${mastery} over ${practice} only ${count(standing.solved, "problem")}` +
@@ -213,10 +221,11 @@ async function submitLog(event) {
   const errorBox = document.getElementById("form-error");
   errorBox.hidden = true;
 
-  const number = Number(document.getElementById("number").value);
+  const rawNumber = document.getElementById("number").value.trim();
+  const number = Number(rawNumber);
   const code = document.getElementById("code").value;
   const { valid, minutes, note } = optionalFields();
-  if (!Number.isInteger(number) || number < 1) {
+  if (!WHOLE_NUMBER.test(rawNumber) || number < 1) {
     showError("Enter the LeetCode problem number.");
     document.getElementById("number").focus();
     return;
@@ -233,7 +242,7 @@ async function submitLog(event) {
   }
 
   button.disabled = true;
-  button.textContent = "Logging…";
+  const stopDots = animateDots(button, "Logging");
   try {
     const res = await fetch("/api/log", {
       method: "POST",
@@ -254,6 +263,7 @@ async function submitLog(event) {
   } catch (err) {
     showError(`Could not reach the coach: ${err.message}`);
   } finally {
+    stopDots();
     button.disabled = false;
     button.textContent = "Log this solve";
   }

@@ -31,6 +31,18 @@ function topicCard(title, hint, items, render) {
   return card;
 }
 
+/* The link under a problem's name, on Solutions and the Daily Plan alike. */
+function leetcodeLink(slug) {
+  return el("p", { class: "problem-link" }, [
+    el("a", {
+      href: `https://leetcode.com/problems/${slug}/`,
+      target: "_blank",
+      rel: "noreferrer",
+      text: "Open on leetcode.com",
+    }),
+  ]);
+}
+
 /* One badge per main pattern of a solve, space-separated. Main patterns are equal,
    so none is drawn as the lead - Home's log result and Solutions show the same. */
 function patternBadges(patterns) {
@@ -40,8 +52,23 @@ function patternBadges(patterns) {
   ]);
 }
 
+const DOTS = [".", "..", "...", ""];
+
+/* Logging a solve and reviewing one are each a model call with nothing to show until
+   it ends, so the button keeps counting to say the request is still alive. Returns the
+   stop; the caller restores the label. */
+function animateDots(button, word) {
+  const dots = el("span", { class: "dots", "aria-hidden": "true" });
+  button.replaceChildren(`${word} `, dots);
+  let step = 0;
+  const tick = () => { dots.textContent = DOTS[step++ % DOTS.length]; };
+  tick();
+  const timer = setInterval(tick, 400);
+  return () => clearInterval(timer);
+}
+
 /* Why a problem still owes approach practice, keyed by the reason codes coach/corrections.py
-   sends. Home, Solutions and the Daily Plan word the same codes, so they share this copy. */
+   sends. Home and Solutions word the same codes, so they share this copy. */
 const APPROACH_REASON = {
   "wrong-approach": "your last practice used none of the accepted approaches",
   failed: "your last practice day included a failed attempt",

@@ -17,7 +17,7 @@
     </div>
     <nav class="pills" aria-label="Sections">
       <a href="/" aria-current="page">Home</a>
-      <a href="/solutions">Solutions</a>
+      <a href="/solutions">Problems Solved</a>
       <a href="/plan">Daily Plan</a>
       <a href="/weekly">Weekly Review</a>
     </nav>
@@ -26,11 +26,12 @@
   <main>
     <h2 class="sr-only">Progress</h2>
 
-    <div class="hero">
+    <div class="hero tone-hotpink">
       <div>
         <p class="label">Problems solved</p>
         <p class="big" id="hero-solved">–</p>
         <p class="note" id="hero-note">Loading your numbers…</p>
+        <p class="hero-diff" id="hero-diff"></p>
       </div>
       <button class="btn" id="log-toggle" aria-expanded="false" aria-controls="log-panel">
         I solved a question
@@ -40,20 +41,17 @@
     <div class="grid" id="stat-cards"></div>
 
     <section id="log-panel" hidden>
-      <div class="section-head">
-        <h2 id="log-heading">Log a solve</h2>
+      <form class="card form-card tone-blue" id="log-form" aria-labelledby="log-heading" novalidate>
+        <h2 class="k section-title" id="log-heading">Log a solve</h2>
         <p class="hint">Stores the attempt and your code, tags the pattern, and reschedules the review.</p>
-      </div>
 
-      <form class="card form-card" id="log-form" aria-labelledby="log-heading" novalidate>
-        <div class="field">
+        <div class="field tone-orange">
           <label for="number">LeetCode problem number</label>
-          <input type="number" id="number" name="number" min="1" step="1" required
-                 inputmode="numeric" aria-describedby="number-help form-error">
-          <p class="hint" id="number-help">The number from the problem URL, e.g. 1 for Two Sum.</p>
+          <input type="text" id="number" name="number" required autocomplete="off"
+                 inputmode="numeric" aria-describedby="form-error">
         </div>
 
-        <fieldset>
+        <fieldset class="tone-pink">
           <legend class="fieldset-label">How did it go?</legend>
           <div class="radios">
             <label><input type="radio" name="outcome" value="clean" checked> Clean</label>
@@ -63,19 +61,18 @@
           </div>
         </fieldset>
 
-        <div class="field">
+        <div class="field tone-teal">
           <label for="minutes">Minutes spent (optional)</label>
-          <input type="number" id="minutes" name="minutes" min="0" step="1"
+          <input type="text" id="minutes" name="minutes" autocomplete="off"
                  inputmode="numeric" aria-describedby="form-error">
         </div>
 
-        <div class="field">
+        <div class="field tone-hotpink">
           <label for="note">Note (optional)</label>
-          <input type="text" id="note" name="note" autocomplete="off" aria-describedby="note-help">
-          <p class="hint" id="note-help">Anything worth remembering next time, e.g. forgot the empty-array case.</p>
+          <input type="text" id="note" name="note" autocomplete="off">
         </div>
 
-        <div class="field">
+        <div class="field tone-blue">
           <label for="code">Your solution</label>
           <textarea id="code" name="code" required spellcheck="false"
                     aria-describedby="code-help form-error"
@@ -87,18 +84,14 @@
         <p class="error" id="form-error" role="alert" hidden></p>
       </form>
 
-      <div class="card result" id="log-result" hidden aria-live="polite"></div>
+      <div class="card result tone-orange" id="log-result" hidden aria-live="polite"></div>
     </section>
 
-    <section>
-      <div class="section-head">
-        <div>
-          <h2 id="patterns-heading">Patterns you have practiced</h2>
-          <p class="hint">One row per main pattern of your solves. Problems solved, mastery, attempts and not-clean all count the solves it was a main pattern of.</p>
-        </div>
+    <section aria-labelledby="patterns-heading">
+      <div class="card tone-teal">
+        <h2 class="k section-title" id="patterns-heading">Patterns you have practiced</h2>
+        <div id="pattern-table"></div>
       </div>
-
-      <div class="card" id="pattern-table" aria-describedby="patterns-heading"></div>
     </section>
   </main>
 </div>

@@ -1,5 +1,5 @@
 /* Solutions page: every solved problem, expanding to the code you wrote.
-   el()/getJSON()/patternBadges()/APPROACH_REASON come from dom.js, loaded before this script. */
+   el()/getJSON()/patternBadges()/animateDots()/leetcodeLink()/APPROACH_REASON come from dom.js, loaded before this script. */
 
 function summaryLine(p) {
   const parts = [`${p.solves} solve${p.solves === 1 ? "" : "s"}`, `last ${p.last_solved} · ${p.last_outcome}`];
@@ -94,20 +94,6 @@ function effectNote(effect) {
   return el("p", { class: "hint", text: parts.join(" ") });
 }
 
-const DOTS = [".", "..", "...", ""];
-
-/* A review is one model call with nothing to show until it ends (~25s), so the
-   button keeps counting to say the request is still alive. Returns the stop. */
-function animateDots(button, word) {
-  const dots = el("span", { class: "dots", "aria-hidden": "true" });
-  button.replaceChildren(`${word} `, dots);
-  let step = 0;
-  const tick = () => { dots.textContent = DOTS[step++ % DOTS.length]; };
-  tick();
-  const timer = setInterval(tick, 400);
-  return () => clearInterval(timer);
-}
-
 async function requestReview(box, number, solutionId, button, refresh) {
   const label = button.textContent;
   button.disabled = true;
@@ -199,7 +185,7 @@ async function toggle(button, panel, number) {
 function renderProblem(p) {
   const panel = el("div", { class: "solve-panel", id: `solves-${p.number}`, hidden: "" });
   const button = el("button", {
-    class: "solve-toggle",
+    class: "solve-toggle problem-head",
     type: "button",
     "aria-expanded": "false",
     "aria-controls": `solves-${p.number}`,
@@ -213,18 +199,7 @@ function renderProblem(p) {
   ]);
   button.addEventListener("click", () => toggle(button, panel, p.number));
 
-  return el("li", {}, [
-    button,
-    el("p", { class: "solve-link" }, [
-      el("a", {
-        href: `https://leetcode.com/problems/${p.slug}/`,
-        target: "_blank",
-        rel: "noreferrer",
-        text: "Open on leetcode.com",
-      }),
-    ]),
-    panel,
-  ]);
+  return el("li", {}, [button, leetcodeLink(p.slug), panel]);
 }
 
 /* The server owns both rules - the last-N default and what a query matches
@@ -246,7 +221,10 @@ function renderListing(data) {
   if (!problems.length) empty.textContent = `No solved problem matches "${query}".`;
 
   if (query) {
-    meta.textContent = `${problems.length} match${problems.length === 1 ? "" : "es"} for "${query}"`;
+    // With no match the line below already says so; "0 matches" above it only repeated it.
+    meta.textContent = problems.length
+      ? `${problems.length} match${problems.length === 1 ? "" : "es"} for "${query}"`
+      : "";
   } else {
     // Totals count everything, so a capped list can say how much it left out.
     const of = problems.length < total ? `${problems.length} most recent of ` : "";

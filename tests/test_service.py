@@ -526,7 +526,7 @@ def test_enrich_solution_now_judges_against_the_stored_set_not_the_latest_answer
         service.get_problem(conn, 1)
     )
     analysis = weekly_analyze.analyze(conn, date.today())
-    assert (analysis["corrections_due"], analysis["corrections_upcoming"]) == ([], [])
+    assert (analysis["corrections_due"], corrections.outstanding(conn)) == ([], [])
 
 
 def test_enrich_solution_now_keeps_a_demoted_central_pattern_canonical(tmp_path, monkeypatch):
@@ -771,7 +771,7 @@ def test_mastery_readers_write_nothing_and_call_no_model(tmp_path, monkeypatch):
 
     service.pattern_table(conn)
     service.pattern_standings(conn, ["hashmap"], today)
-    assert service.daily_plan(conn, today, config.SECTION_LIMIT).analysis["corrections_upcoming"]
+    service.daily_plan(conn, today, config.SECTION_LIMIT)
     service.weekly_review(conn, today)
     service.solution_history(conn, 1)
     assert service.practice_dates(conn, 1).correction is not None
@@ -890,7 +890,7 @@ def test_stats_summary_counts_distinct_problems_and_curriculum(tmp_path, monkeyp
         "attempts": 3,
         "last_7_days": 3,
         "due_today": 0,
-        "outcomes": [{"outcome": "clean", "count": 2}, {"outcome": "struggled", "count": 1}],
+        "by_difficulty": {"Easy": 1, "Medium": 1, "Hard": 0},
         "curriculum": {"blind75": {"done": 2, "total": 2}, "neetcode150": {"done": 0, "total": 0}},
     }
 

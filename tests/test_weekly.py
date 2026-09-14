@@ -158,22 +158,19 @@ def test_analyze_lookahead_narrows_due_to_today(tmp_path):
     ] == [1]
 
 
-def test_analyze_splits_approach_practice_at_the_lookahead_horizon(tmp_path):
+def test_analyze_keeps_approach_practice_due_by_the_lookahead_horizon(tmp_path):
     conn = make_db(tmp_path)
     add_problem(conn, 2, "maximum-subarray", "Maximum Subarray", intended="dp-1d")
     add_problem(conn, 3, "house-robber", "House Robber", intended="dp-1d")
     add_attempt(conn, 2, PRACTICE_DUE_TODAY, pattern="prefix-sum")
     add_attempt(conn, 3, TODAY, pattern="prefix-sum")  # due three days from now
 
-    def split(lookahead_days):
+    def due_by(lookahead_days):
         analysis = weekly_analyze.analyze(conn, TODAY, lookahead_days=lookahead_days)
-        return (
-            [c.problem["number"] for c in analysis["corrections_due"]],
-            [c.problem["number"] for c in analysis["corrections_upcoming"]],
-        )
+        return [c.problem["number"] for c in analysis["corrections_due"]]
 
-    assert split(0) == ([2], [3])
-    assert split(weekly_analyze.PLAN_LOOKAHEAD_DAYS) == ([2, 3], [])
+    assert due_by(0) == [2]
+    assert due_by(weekly_analyze.PLAN_LOOKAHEAD_DAYS) == [2, 3]
 
 
 def listed(items):
@@ -365,9 +362,9 @@ def test_a_problem_owing_a_review_and_approach_practice_is_one_item_under_due(tm
     assert (plan.approach, plan.practice_owed) == ([], 0)
 
 
-@pytest.mark.parametrize("days_ago, planned, upcoming", [(2, [], [2]), (3, [2], [])])
+@pytest.mark.parametrize("days_ago, planned", [(2, []), (3, [2])])
 def test_approach_practice_joins_the_plan_on_its_due_date_and_not_before(
-    tmp_path, days_ago, planned, upcoming
+    tmp_path, days_ago, planned
 ):
     """Practising a problem, however it went, must not bring it straight back: approach
     practice waits CORRECTION_INTERVAL_DAYS, and is owed from exactly that day."""
@@ -378,7 +375,8 @@ def test_approach_practice_joins_the_plan_on_its_due_date_and_not_before(
     analysis = weekly_analyze.analyze(conn, TODAY, lookahead_days=0)
 
     assert [i.number for i in weekly_plan.build_plan(conn, analysis, limit=10).approach] == planned
-    assert [c.problem["number"] for c in analysis["corrections_upcoming"]] == upcoming
+    # Kept off the plan while it waits, never dropped: the problem owes it either way.
+    assert [c.problem["number"] for c in corrections.outstanding(conn)] == [2]
 
 
 def test_a_review_due_before_its_approach_practice_carries_only_its_own_reason(tmp_path):
@@ -397,7 +395,7 @@ def test_a_review_due_before_its_approach_practice_carries_only_its_own_reason(t
 
     assert listed(plan.due) == [(2, [("review", f"review due {TODAY.isoformat()}")])]
     assert plan.approach == []
-    assert [c.due for c in analysis["corrections_upcoming"]] == [TODAY + timedelta(days=2)]
+    assert [c.due for c in corrections.outstanding(conn)] == [TODAY + timedelta(days=2)]
 
 
 def test_approach_practice_is_ordered_by_due_date_and_held_to_the_limit(tmp_path):
