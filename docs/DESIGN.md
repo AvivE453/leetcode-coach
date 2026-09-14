@@ -23,7 +23,7 @@ flowchart TB
 
     subgraph todayp ["Daily Plan — free, every day"]
         direction LR
-        ta["analyze<br/>due today only"] --> tp["plan<br/>fill the day's slots"]
+        ta["analyze<br/>due today only"] --> tp["plan<br/>fill three headings"]
     end
 
     subgraph weeklyp ["Weekly Review — free, recomputed on every read"]
@@ -109,8 +109,8 @@ practice it judges — usually already past — not three days after you read it
 attempt closes it for good: brute-forcing the problem again later is an experiment, and
 forgetting the approach is SM-2's job. An untagged solve is neither evidence nor success
 until `coach enrich` tags it, though it still moves the date, because it was practice. On
-the Daily Plan a problem owed both a review and approach practice is one item carrying both
-reasons. Completing approach practice never advances the review: a success before the review
+the Daily Plan a problem owed both a review and approach practice is one item under Due
+carrying both reasons. Completing approach practice never advances the review: a success before the review
 is due leaves its date where it was (below), so the review can also come due first, and each
 is then listed on its own date.
 
@@ -168,6 +168,19 @@ logged in between still counts after it. An optimal review never upgrades a fail
 On the Daily Plan that problem reads "re-solve: review reported a bug" rather than a bare
 date, judged by its last practice day, so a clean retry the same afternoon hides the reason
 no more than it undoes the lapse.
+
+**The Daily Plan is three headings of ten, not one list of fifteen.**
+It used to be one ranked list sharing fifteen slots: due reviews, then due approach practice,
+then weak-pattern picks, then curriculum progression. A heavy review day pushed everything
+after it off the page, and nothing said so. Now each kind of work has its own heading and its
+own budget of `SECTION_LIMIT` (10): **Due**, **Approach practice** and **Weak patterns**,
+filled in that order. Approach practice fills before weak picks because it is owed on a
+problem already solved the wrong way, while a weak pick is a new, optional problem, so only
+new picks meet the one-in-five Hard cap, counted per heading. Curriculum progression is not a
+heading of its own: it tops Due up when fewer than ten reviews are due, and it runs last, so it
+never takes a problem a weak pattern would have picked. Due claims every review due, even one
+that does not fit. That review stays overdue, comes first tomorrow, and the heading says how
+many it left out, instead of letting it resurface under Approach practice without its review.
 
 **A controlled vocabulary of 26 patterns, enforced as a type.**
 The model picks from an enum, so tags can never fragment into `dp`/`DP`/`dynamic
