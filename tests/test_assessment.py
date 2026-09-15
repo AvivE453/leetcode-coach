@@ -1,8 +1,9 @@
 import json
+from datetime import date
 
 import pytest
 
-from coach import assessment, db
+from coach import assessment, db, enrich, history
 
 
 def issues(*categories):
@@ -135,3 +136,49 @@ def test_problems_without_a_finding_are_left_out(tmp_path):
     add_solve(conn, "2026-09-01", ("acceptable", ("complexity",)), problem=15)
 
     assert assessment.open_findings(conn) == {}
+
+
+def attempt(number, day, review=None):
+    """One loaded attempt, as history.load() would have returned it."""
+    verdict, found = review or (None, ())
+    return history.Attempt(
+        id=0,
+        problem=history.Problem(
+            number=number,
+            slug=f"p{number}",
+            title=f"Problem {number}",
+            difficulty="Easy",
+            canonical=enrich.Canonical(None, []),
+        ),
+        day=date.fromisoformat(day),
+        outcome="clean",
+        minutes=None,
+        main_patterns=None,
+        secondary_patterns=(),
+        verdict=verdict,
+        issues=tuple(issues(*found)),
+    )
+
+
+def test_findings_is_pure_over_a_loaded_history():
+    """No connection: the join is history.load()'s, and this only reads what it returned."""
+    assert assessment.findings(
+        [
+            attempt(1, "2026-09-01", BUG),
+            attempt(1, "2026-09-01"),  # a same-day retry does not clear it
+            attempt(15, "2026-09-01", EDGE),
+            attempt(15, "2026-09-08"),  # a later day moves past it
+        ]
+    ) == {1: "bug"}
+
+
+def test_findings_reads_the_last_day_from_the_attempts_not_their_order():
+    """history.load() is oldest first, but the rule is about days, so nothing may turn on
+    where an attempt sits in the list."""
+    newest_first = [attempt(1, "2026-09-08"), attempt(1, "2026-09-01", BUG)]
+
+    assert assessment.findings(newest_first) == {}
+
+
+def test_findings_of_an_empty_history_is_empty():
+    assert assessment.findings([]) == {}

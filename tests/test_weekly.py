@@ -4,7 +4,7 @@ from datetime import date, timedelta
 import pytest
 from conftest import tag_solution
 
-from coach import config, corrections, db
+from coach import config, corrections, db, enrich, history
 from coach.weekly import analyze as weekly_analyze
 from coach.weekly import collect as weekly_collect
 from coach.weekly import plan as weekly_plan
@@ -78,6 +78,65 @@ def test_collect_empty_week(tmp_path):
     week = weekly_collect.collect(conn, TODAY)
     assert week["attempts"] == []
     assert week["distinct_problems"] == 0
+
+
+def loaded_attempt(number, day, main_patterns=None, outcome="clean", minutes=None):
+    """One loaded attempt, as history.load() would have returned it."""
+    return history.Attempt(
+        id=number,
+        problem=history.Problem(
+            number=number,
+            slug=f"p{number}",
+            title=f"Problem {number}",
+            difficulty="Easy",
+            canonical=enrich.Canonical(None, []),
+        ),
+        day=day,
+        outcome=outcome,
+        minutes=minutes,
+        main_patterns=main_patterns,
+        secondary_patterns=(),
+        verdict=None,
+        issues=(),
+    )
+
+
+def test_window_rows_carry_exactly_the_keys_the_weekly_table_reads():
+    """/api/weekly hands these rows to weekly.js untouched, so a renamed key is a silent
+    null in the browser with nothing here to fail. `date` is the ISO string, not a date."""
+    week = weekly_collect.window([loaded_attempt(1, TODAY, ("hashmap",), minutes=25)], TODAY)
+
+    assert week["attempts"] == [
+        {
+            "date": TODAY.isoformat(),
+            "problem_number": 1,
+            "title": "Problem 1",
+            "difficulty": "Easy",
+            "outcome": "clean",
+            "minutes": 25,
+            "main_patterns": ["hashmap"],
+        }
+    ]
+    assert (week["start"], week["end"]) == (TODAY - timedelta(days=6), TODAY)
+
+
+def test_window_reports_an_untagged_solve_with_no_patterns():
+    """Still a solve, just one with nothing to attribute it to - and a list either way,
+    because the table joins it."""
+    [row] = weekly_collect.window([loaded_attempt(1, TODAY)], TODAY)["attempts"]
+
+    assert row["main_patterns"] == []
+
+
+def test_window_keeps_the_first_day_of_the_window_and_drops_the_day_before():
+    attempts = [
+        loaded_attempt(1, TODAY - timedelta(days=7)),
+        loaded_attempt(2, TODAY - timedelta(days=6)),
+    ]
+
+    week = weekly_collect.window(attempts, TODAY)
+    assert [r["problem_number"] for r in week["attempts"]] == [2]
+    assert week["distinct_problems"] == 1
 
 
 def test_analyze_flags_weak_and_stale_patterns(tmp_path):

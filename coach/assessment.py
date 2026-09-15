@@ -11,12 +11,15 @@ reported bug holds an attempt down, but an "optimal" review never turns a solve 
 needed hints into evidence of independent mastery.
 """
 
-import json
 import sqlite3
 from collections.abc import Sequence
-from typing import Literal
+from datetime import date
+from typing import TYPE_CHECKING, Literal
 
 from coach.scheduler import QUALITY
+
+if TYPE_CHECKING:
+    from coach import history
 
 Correctness = Literal["bug", "edge-case", "unspecified"]
 
@@ -55,26 +58,34 @@ def effective_quality(outcome: str, verdict: str | None = None, issues: Sequence
     return min(QUALITY[outcome], CORRECTNESS_CEILING[finding])
 
 
-def open_findings(conn: sqlite3.Connection) -> dict[int, Correctness]:
+def findings(attempts: Sequence["history.Attempt"]) -> dict[int, Correctness]:
     """Each problem's worst finding on the last day it was practiced.
 
     The last day, not the last attempt, because the schedule grades a day by its worst
     attempt: a clean retry typed in minutes after a bug was found leaves the problem
     lapsed, so it must not clear the reason either. Practice on any later day moves past
     the finding - an unreviewed solve is trusted as logged.
+
+    Pure over a loaded history, and over it in any order: the last day is taken from the
+    attempts themselves rather than from where they sit in the list.
     """
-    rows = conn.execute(
-        """
-        SELECT a.problem_number, rv.verdict, rv.issues
-        FROM attempts a
-        JOIN solutions s ON s.attempt_id = a.id
-        JOIN reviews rv ON rv.solution_id = s.id
-        WHERE a.date = (SELECT MAX(b.date) FROM attempts b WHERE b.problem_number = a.problem_number)
-        """
-    )
+    last_day: dict[int, date] = {}
+    for attempt in attempts:
+        number = attempt.problem.number
+        last_day[number] = max(attempt.day, last_day.get(number, attempt.day))
+
     found: dict[int, list[Correctness]] = {}
-    for r in rows:
-        finding = correctness_finding(r["verdict"], json.loads(r["issues"]))
-        if finding is not None:
-            found.setdefault(r["problem_number"], []).append(finding)
-    return {number: min(findings, key=SEVERITY.index) for number, findings in found.items()}
+    for attempt in attempts:
+        number = attempt.problem.number
+        if attempt.finding is not None and attempt.day == last_day[number]:
+            found.setdefault(number, []).append(attempt.finding)
+    return {number: min(worst, key=SEVERITY.index) for number, worst in found.items()}
+
+
+def open_findings(conn: sqlite3.Connection) -> dict[int, Correctness]:
+    """findings() over the whole practice history."""
+    # Imported here, not at the top: history.py derives an attempt's grade and finding
+    # through this module, so the layer below must not import the layer above to start with.
+    from coach import history
+
+    return findings(history.load(conn))
