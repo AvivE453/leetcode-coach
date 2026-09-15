@@ -1,17 +1,18 @@
 """Approach practice: what a problem still owes after a solve that used the wrong approach.
 
-The pure tests build attempts by hand and grade them through assessment.effective_quality,
-the same call corrections.load() makes for a stored row. The database tests go through the
-real joins, so a loader reading the wrong column cannot hide behind the pure half.
+The pure tests build history.Attempts by hand, with the outcome and the review that grade
+them, exactly as history.load() builds one from a stored row. The database tests go through
+that loader, so a read of the wrong column cannot hide behind the pure half.
 """
 
 import json
+from dataclasses import replace
 from datetime import date, timedelta
 
 import pytest
 from conftest import tag_solution
 
-from coach import assessment, corrections, db, enrich
+from coach import corrections, db, enrich, history
 
 D1 = date(2026, 9, 12)
 D2 = date(2026, 9, 15)
@@ -37,21 +38,30 @@ def issues(*categories):
     return [{"category": c, "description": "..."} for c in categories]
 
 
+def problem_record(canonical=CANONICAL):
+    return history.Problem(**PROBLEM, canonical=canonical)
+
+
 def attempt(attempt_id, day, outcome="clean", main=None, secondary=(), review=None):
     """One attempt as the loader builds it. `main=None` is a solve not tagged yet."""
     verdict, found = review or (None, ())
-    return corrections.Attempt(
+    return history.Attempt(
         id=attempt_id,
+        problem=problem_record(),
         day=day,
         outcome=outcome,
-        grade=assessment.effective_quality(outcome, verdict, issues(*found)),
+        minutes=None,
         main_patterns=None if main is None else tuple(main),
         secondary_patterns=tuple(secondary),
+        verdict=verdict,
+        issues=tuple(issues(*found)),
     )
 
 
 def evaluate(*attempts, canonical=CANONICAL):
-    return corrections.evaluate(PROBLEM, canonical, list(attempts))
+    """Judge one problem's attempts, each carrying `canonical` as the loader hands it over."""
+    carried = [replace(a, problem=problem_record(canonical)) for a in attempts]
+    return corrections.evaluate(PROBLEM, canonical, carried)
 
 
 def reason(result):
@@ -235,13 +245,13 @@ def test_load_reads_each_attempt_with_its_tags_and_review_oldest_first(tmp_path)
     later, _ = solve(conn, 121, D2, main=DP, secondary=["greedy"], review=BUG)
     earlier, _ = solve(conn, 121, D1, "struggled")
 
-    [history] = corrections.load(conn)
+    [loaded] = corrections.load(conn)
 
-    assert history.problem["title"] == "Best Time to Buy and Sell Stock"
-    assert history.canonical == ("dp-1d", ["greedy"])
-    assert history.attempts == [
-        corrections.Attempt(earlier, D1, "struggled", 3, None, ()),
-        corrections.Attempt(later, D2, "clean", 1, ("dp-1d",), ("greedy",)),
+    assert loaded.problem["title"] == "Best Time to Buy and Sell Stock"
+    assert loaded.canonical == ("dp-1d", ["greedy"])
+    assert loaded.attempts == [
+        attempt(earlier, D1, "struggled"),
+        attempt(later, D2, main=DP, secondary=["greedy"], review=BUG),
     ]
     assert corrections.load(conn, 70) == []
 
@@ -340,6 +350,19 @@ def test_a_late_tag_judges_the_attempt_on_the_day_it_was_logged(tmp_path, tags, 
     tag_solution(conn, pending, *tags)
 
     assert owed(conn) == expected
+
+
+def test_owed_judges_each_problem_on_its_own_attempts():
+    """The pure half of outstanding(): one flat history in, the problems still owing out,
+    soonest due first - not in the order their attempts happened to be read."""
+    stairs = replace(problem_record(), number=70, slug="climbing-stairs", title="Climbing Stairs")
+    practised_later = replace(attempt(1, D2, main=BRUTE), problem=stairs)
+    practised_earlier = attempt(2, D1, main=BRUTE)
+
+    owed = corrections.owed([practised_later, practised_earlier])
+
+    assert [(c.problem["number"], c.due) for c in owed] == [(121, D1 + INTERVAL), (70, D2 + INTERVAL)]
+    assert corrections.owed([]) == []
 
 
 def test_outstanding_lists_the_soonest_due_first_then_by_number(tmp_path):

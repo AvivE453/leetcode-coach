@@ -14,21 +14,20 @@ success must be one attempt's: a failed DP solve beside a clean brute force is n
 with DP". Once an attempt qualifies the requirement stays met - trying another approach
 later is an experiment, and forgetting is SM-2's business.
 
-Nothing is stored. Every read replays the history, so a review saved later, a tag
-backfilled by `coach enrich`, or a canonical set widened by a new enrichment counts on the
-next page load. A problem reopened that way is due three days after the practice itself -
-often already past - never three days after the evidence was read.
+Nothing is read here and nothing is stored: the history comes from history.load(), and
+every read replays it, so a review saved later, a tag backfilled by `coach enrich`, or a
+canonical set widened by a new enrichment counts on the next page load. A problem reopened
+that way is due three days after the practice itself - often already past - never three
+days after the evidence was read.
 """
 
-import json
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
-from itertools import groupby
 from typing import Literal, NamedTuple
 
-from coach import assessment, enrich, scheduler
+from coach import enrich, history, scheduler
 
 # Aviv's number. Deliberately not scheduler.LAPSE_INTERVAL, so the two can be tuned apart.
 CORRECTION_INTERVAL_DAYS = 3
@@ -37,24 +36,12 @@ CORRECTION_INTERVAL_DAYS = 3
 Reason = Literal["wrong-approach", "failed", "assisted", "review-finding"]
 
 
-@dataclass(frozen=True)
-class Attempt:
-    """One logged attempt, as approach practice reads it."""
-
-    id: int
-    day: date
-    outcome: str
-    grade: int  # assessment.effective_quality(): the outcome, capped by the attempt's review
-    main_patterns: tuple[str, ...] | None  # None until tagged: unknown, and never evidence
-    secondary_patterns: tuple[str, ...] = ()
-
-
 class History(NamedTuple):
     """One attempted problem with a canonical set, and its attempts, oldest first."""
 
     problem: dict  # number, slug, title, difficulty
     canonical: enrich.Canonical
-    attempts: list[Attempt]
+    attempts: list[history.Attempt]
 
 
 @dataclass(frozen=True)
@@ -69,69 +56,45 @@ class Correction:
     evidence: tuple[int, ...]  # the attempts of the day `reason` describes
 
 
-def load(conn: sqlite3.Connection, number: int | None = None) -> list[History]:
-    """Every attempted problem that has a canonical set, with its attempts - the one read.
+def problem_dict(problem: history.Problem) -> dict:
+    """The problem as the web payload and the plan read it: a plain dict, not the record.
 
-    Attempts drive the join: a solution never linked to an attempt is no dated practice,
-    and a problem with a canonical set but no attempt is not loaded at all. Each attempt is
-    graded with its review, as the SM-2 replay grades it. `number` narrows to one problem.
+    `Correction.problem` is subscripted by web/app.py and weekly/plan.py, so the shape is
+    part of the contract even though the history carries a richer record.
     """
-    rows = conn.execute(
-        """
-        SELECT p.number, p.slug, p.title, p.difficulty,
-               p.intended_pattern, p.intended_secondary_patterns,
-               a.id AS attempt_id, a.date, a.outcome,
-               en.main_patterns, en.secondary_patterns, rv.verdict, rv.issues
-        FROM problems p
-        JOIN attempts a ON a.problem_number = p.number
-        LEFT JOIN solutions s ON s.attempt_id = a.id
-        LEFT JOIN enrichments en ON en.solution_id = s.id
-        LEFT JOIN reviews rv ON rv.solution_id = s.id
-        WHERE p.intended_pattern IS NOT NULL AND (:number IS NULL OR p.number = :number)
-        ORDER BY p.number, a.date, a.id
-        """,
-        {"number": number},
-    ).fetchall()
-
-    histories = []
-    for _, group in groupby(rows, key=lambda row: row["number"]):
-        problem_rows = list(group)
-        first = problem_rows[0]
-        histories.append(
-            History(
-                problem={key: first[key] for key in ("number", "slug", "title", "difficulty")},
-                canonical=enrich.Canonical(
-                    first["intended_pattern"], json.loads(first["intended_secondary_patterns"])
-                ),
-                attempts=[attempt_of(row) for row in problem_rows],
-            )
-        )
-    return histories
+    return {
+        "number": problem.number,
+        "slug": problem.slug,
+        "title": problem.title,
+        "difficulty": problem.difficulty,
+    }
 
 
-def attempt_of(row: sqlite3.Row) -> Attempt:
-    tagged = row["main_patterns"] is not None
-    return Attempt(
-        id=row["attempt_id"],
-        day=date.fromisoformat(row["date"]),
-        outcome=row["outcome"],
-        grade=assessment.effective_quality(
-            row["outcome"], row["verdict"], json.loads(row["issues"]) if row["issues"] else []
-        ),
-        main_patterns=tuple(json.loads(row["main_patterns"])) if tagged else None,
-        secondary_patterns=tuple(json.loads(row["secondary_patterns"])) if tagged else (),
-    )
+def load(conn: sqlite3.Connection, number: int | None = None) -> list[History]:
+    """Every attempted problem that has a canonical set, with its attempts, by number.
+
+    The read is history.load(): attempts drive its join, so a solution never linked to an
+    attempt is no dated practice, and a problem with a canonical set but no attempt has no
+    attempts to group. A problem never enriched is dropped here - unknown, not wrong.
+    `number` narrows to one problem.
+    """
+    grouped = history.by_problem(history.load(conn, number))
+    return [
+        History(problem_dict(attempts[0].problem), attempts[0].problem.canonical, attempts)
+        for _, attempts in sorted(grouped.items())
+        if attempts[0].problem.canonical.intended is not None
+    ]
 
 
 def evaluate(
-    problem: dict, canonical: enrich.Canonical, attempts: Sequence[Attempt]
+    problem: dict, canonical: enrich.Canonical, attempts: Sequence[history.Attempt]
 ) -> Correction | None:
     """The approach practice one problem still owes, or None when it owes none.
 
     Pure over the problem's attempts, oldest first. Untagged attempts are neither evidence
     nor success; they only move the due date, because they were still practice.
     """
-    tagged = [a for a in attempts if a.main_patterns is not None]
+    tagged = [a for a in attempts if a.tagged]
     off = {a.id for a in tagged if enrich.off_pattern(a.main_patterns, a.secondary_patterns, *canonical)}
     if not off:
         return None
@@ -151,14 +114,14 @@ def evaluate(
     )
 
 
-def day_reason(day: Sequence[Attempt], off: set[int]) -> Reason:
+def day_reason(day: Sequence[history.Attempt], off: set[int]) -> Reason:
     """Why one practice day left approach practice owed.
 
     A day whose tagged attempts all took the wrong approach is that. A day that did use an
     accepted approach must have been a failure day, explained by its outcomes before its
     reviews: a review only caps a grade the outcome had not already brought down.
     """
-    if all(a.id in off for a in day if a.main_patterns is not None):
+    if all(a.id in off for a in day if a.tagged):
         return "wrong-approach"
     outcomes = {a.outcome for a in day}
     if "failed" in outcomes:
@@ -168,11 +131,20 @@ def day_reason(day: Sequence[Attempt], off: set[int]) -> Reason:
     return "review-finding"
 
 
+def owed(attempts: Sequence[history.Attempt]) -> list[Correction]:
+    """Every problem in a history still owing approach practice, the soonest due first.
+
+    Pure over the whole history: each problem is judged on its own attempts, and a problem
+    with no canonical set is judged to owe nothing (enrich.off_pattern never fires on one).
+    """
+    found = []
+    for group in history.by_problem(attempts).values():
+        correction = evaluate(problem_dict(group[0].problem), group[0].problem.canonical, group)
+        if correction:
+            found.append(correction)
+    return sorted(found, key=lambda c: (c.due, c.problem["number"]))
+
+
 def outstanding(conn: sqlite3.Connection) -> list[Correction]:
     """Every problem still owing approach practice, the soonest due first."""
-    owed = [
-        correction
-        for history in load(conn)
-        if (correction := evaluate(history.problem, history.canonical, history.attempts))
-    ]
-    return sorted(owed, key=lambda c: (c.due, c.problem["number"]))
+    return owed(history.load(conn))
