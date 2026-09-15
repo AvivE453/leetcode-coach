@@ -2,6 +2,8 @@ NUMBER = 198
 SLUG = "house-robber"
 TITLE = "House Robber"
 DIFFICULTY = "Medium"
+SPLIT = "dev"
+METHOD = "rob"
 
 CANONICAL = '''\
 class Solution:
@@ -21,6 +23,21 @@ TESTS = [
 ]
 
 SCALE = ([(i * 7919) % 101 for i in range(32)],)
+SPACE_SCALE = ([(i * 7919) % 401 for i in range(100)],)
+
+
+def reference(nums):
+    best = 0
+    for chosen in range(1 << len(nums)):
+        if chosen & (chosen >> 1):
+            continue
+        best = max(best, sum(x for i, x in enumerate(nums) if chosen >> i & 1))
+    return best
+
+
+def generate(rng):
+    # constraints: 1 <= nums.length <= 100, 0 <= nums[i] <= 400
+    return ([rng.randint(0, 20) for _ in range(rng.randint(1, 10))],)
 
 MUTANTS = [
     {

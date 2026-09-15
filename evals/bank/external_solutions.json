@@ -1,0 +1,952 @@
+{
+  "sources": {
+    "neetcode": {
+      "repo": "neetcode-gh/leetcode",
+      "sha": "9f104d45b1efc8c2e42b6dcc7b1216cdf8c4f80e",
+      "license": "MIT"
+    },
+    "walkccc": {
+      "repo": "walkccc/LeetCode",
+      "sha": "9b85aa15e086d0b5dc1ead7184bca547942e6ff6",
+      "license": "MIT"
+    }
+  },
+  "solutions": [
+    {
+      "source": "neetcode",
+      "number": 1,
+      "path": "python/0001-two-sum.py",
+      "code": "class Solution:\n    def twoSum(self, nums: List[int], target: int) -> List[int]:\n        prevMap = {}  # val -> index\n\n        for i, n in enumerate(nums):\n            diff = target - n\n            if diff in prevMap:\n                return [prevMap[diff], i]\n            prevMap[n] = i\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "walkccc",
+      "number": 1,
+      "path": "solutions/1. Two Sum/1.py",
+      "code": "class Solution:\n  def twoSum(self, nums: list[int], target: int) -> list[int]:\n    numToIndex = {}\n\n    for i, num in enumerate(nums):\n      if target - num in numToIndex:\n        return numToIndex[target - num], i\n      numToIndex[num] = i\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 3,
+      "path": "python/0003-longest-substring-without-repeating-characters.py",
+      "code": "class Solution:\n    def lengthOfLongestSubstring(self, s: str) -> int:\n        charSet = set()\n        l = 0\n        res = 0\n\n        for r in range(len(s)):\n            while s[r] in charSet:\n                charSet.remove(s[l])\n                l += 1\n            charSet.add(s[r])\n            res = max(res, r - l + 1)\n        return res\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "walkccc",
+      "number": 3,
+      "path": "solutions/3. Longest Substring Without Repeating Characters/3.py",
+      "code": "class Solution:\n  def lengthOfLongestSubstring(self, s: str) -> int:\n    ans = 0\n    count = collections.Counter()\n\n    l = 0\n    for r, c in enumerate(s):\n      count[c] += 1\n      while count[c] > 1:\n        count[s[l]] -= 1\n        l += 1\n      ans = max(ans, r - l + 1)\n\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 4,
+      "path": "python/0004-median-of-two-sorted-arrays.py",
+      "code": "# Time: log(min(n, m))\n\n\nclass Solution:\n    def findMedianSortedArrays(self, nums1: List[int], nums2: List[int]) -> float:\n        A, B = nums1, nums2\n        total = len(nums1) + len(nums2)\n        half = total // 2\n\n        if len(B) < len(A):\n            A, B = B, A\n\n        l, r = 0, len(A) - 1\n        while True:\n            i = (l + r) // 2  # A\n            j = half - i - 2  # B\n\n            Aleft = A[i] if i >= 0 else float(\"-infinity\")\n            Aright = A[i + 1] if (i + 1) < len(A) else float(\"infinity\")\n            Bleft = B[j] if j >= 0 else float(\"-infinity\")\n            Bright = B[j + 1] if (j + 1) < len(B) else float(\"infinity\")\n\n            # partition is correct\n            if Aleft <= Bright and Bleft <= Aright:\n                # odd\n                if total % 2:\n                    return min(Aright, Bright)\n                # even\n                return (max(Aleft, Bleft) + min(Aright, Bright)) / 2\n            elif Aleft > Bright:\n                r = i - 1\n            else:\n                l = i + 1\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 4,
+      "path": "solutions/4. Median of Two Sorted Arrays/4.py",
+      "code": "class Solution:\n  def findMedianSortedArrays(self, nums1: list[int], nums2: list[int]) -> float:\n    n1 = len(nums1)\n    n2 = len(nums2)\n    if n1 > n2:\n      return self.findMedianSortedArrays(nums2, nums1)\n\n    l = 0\n    r = n1\n\n    while l <= r:\n      partition1 = (l + r) // 2\n      partition2 = (n1 + n2 + 1) // 2 - partition1\n      maxLeft1 = -2**31 if partition1 == 0 else nums1[partition1 - 1]\n      maxLeft2 = -2**31 if partition2 == 0 else nums2[partition2 - 1]\n      minRight1 = 2**31 - 1 if partition1 == n1 else nums1[partition1]\n      minRight2 = 2**31 - 1 if partition2 == n2 else nums2[partition2]\n      if maxLeft1 <= minRight2 and maxLeft2 <= minRight1:\n        return (max(maxLeft1, maxLeft2) + min(minRight1, minRight2)) * 0.5 if (n1 + n2) % 2 == 0 else max(maxLeft1, maxLeft2)\n      elif maxLeft1 > minRight2:\n        r = partition1 - 1\n      else:\n        l = partition1 + 1\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 10,
+      "path": "python/0010-regular-expression-matching.py",
+      "code": "# BOTTOM-UP Dynamic Programming\nclass Solution:\n    def isMatch(self, s: str, p: str) -> bool:\n        cache = [[False] * (len(p) + 1) for i in range(len(s) + 1)]\n        cache[len(s)][len(p)] = True\n\n        for i in range(len(s), -1, -1):\n            for j in range(len(p) - 1, -1, -1):\n                match = i < len(s) and (s[i] == p[j] or p[j] == \".\")\n\n                if (j + 1) < len(p) and p[j + 1] == \"*\":\n                    cache[i][j] = cache[i][j + 2]\n                    if match:\n                        cache[i][j] = cache[i + 1][j] or cache[i][j]\n                elif match:\n                    cache[i][j] = cache[i + 1][j + 1]\n\n        return cache[0][0]\n\n\n# TOP DOWN MEMOIZATION\nclass Solution:\n    def isMatch(self, s: str, p: str) -> bool:\n        cache = {}\n\n        def dfs(i, j):\n            if (i, j) in cache:\n                return cache[(i, j)]\n            if i >= len(s) and j >= len(p):\n                return True\n            if j >= len(p):\n                return False\n\n            match = i < len(s) and (s[i] == p[j] or p[j] == \".\")\n            if (j + 1) < len(p) and p[j + 1] == \"*\":\n                cache[(i, j)] = dfs(i, j + 2) or (  # dont use *\n                    match and dfs(i + 1, j)\n                )  # use *\n                return cache[(i, j)]\n            if match:\n                cache[(i, j)] = dfs(i + 1, j + 1)\n                return cache[(i, j)]\n            cache[(i, j)] = False\n            return False\n\n        return dfs(0, 0)\n",
+      "status": "rejected",
+      "reason": "defines class Solution 2 times"
+    },
+    {
+      "source": "walkccc",
+      "number": 10,
+      "path": "solutions/10. Regular Expression Matching/10.py",
+      "code": "class Solution:\n  def isMatch(self, s: str, p: str) -> bool:\n    m = len(s)\n    n = len(p)\n    # dp[i][j] := True if s[0..i) matches p[0..j)\n    dp = [[False] * (n + 1) for _ in range(m + 1)]\n    dp[0][0] = True\n\n    def isMatch(i: int, j: int) -> bool:\n      return j >= 0 and p[j] == '.' or s[i] == p[j]\n\n    for j, c in enumerate(p):\n      if c == '*' and dp[0][j - 1]:\n        dp[0][j + 1] = True\n\n    for i in range(m):\n      for j in range(n):\n        if p[j] == '*':\n          # The minimum index of '*' is 1.\n          noRepeat = dp[i + 1][j - 1]\n          doRepeat = isMatch(i, j - 1) and dp[i][j + 1]\n          dp[i + 1][j + 1] = noRepeat or doRepeat\n        elif isMatch(i, j):\n          dp[i + 1][j + 1] = dp[i][j]\n\n    return dp[m][n]\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 11,
+      "path": "python/0011-container-with-most-water.py",
+      "code": "class Solution:\n    def maxArea(self, height: List[int]) -> int:\n        l, r = 0, len(height) - 1\n        res = 0\n\n        while l < r:\n            res = max(res, min(height[l], height[r]) * (r - l))\n            if height[l] < height[r]:\n                l += 1\n            elif height[r] <= height[l]:\n                r -= 1\n            \n        return res\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 11,
+      "path": "solutions/11. Container With Most Water/11.py",
+      "code": "class Solution:\n  def maxArea(self, height: list[int]) -> int:\n    ans = 0\n    l = 0\n    r = len(height) - 1\n\n    while l < r:\n      minHeight = min(height[l], height[r])\n      ans = max(ans, minHeight * (r - l))\n      if height[l] < height[r]:\n        l += 1\n      else:\n        r -= 1\n\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 15,
+      "path": "python/0015-3sum.py",
+      "code": "class Solution:\n    def threeSum(self, nums: List[int]) -> List[List[int]]:\n        res = []\n        nums.sort()\n\n        for i, a in enumerate(nums):\n            # Skip positive integers\n            if a > 0:\n                break\n\n            if i > 0 and a == nums[i - 1]:\n                continue\n\n            l, r = i + 1, len(nums) - 1\n            while l < r:\n                threeSum = a + nums[l] + nums[r]\n                if threeSum > 0:\n                    r -= 1\n                elif threeSum < 0:\n                    l += 1\n                else:\n                    res.append([a, nums[l], nums[r]])\n                    l += 1\n                    r -= 1\n                    while nums[l] == nums[l - 1] and l < r:\n                        l += 1\n                        \n        return res\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 15,
+      "path": "solutions/15. 3Sum/15.py",
+      "code": "class Solution:\n  def threeSum(self, nums: list[int]) -> list[list[int]]:\n    if len(nums) < 3:\n      return []\n\n    ans = []\n\n    nums.sort()\n\n    for i in range(len(nums) - 2):\n      if i > 0 and nums[i] == nums[i - 1]:\n        continue\n      # Choose nums[i] as the first number in the triplet, then search the\n      # remaining numbers in [i + 1, n - 1].\n      l = i + 1\n      r = len(nums) - 1\n      while l < r:\n        summ = nums[i] + nums[l] + nums[r]\n        if summ == 0:\n          ans.append((nums[i], nums[l], nums[r]))\n          l += 1\n          r -= 1\n          while nums[l] == nums[l - 1] and l < r:\n            l += 1\n          while nums[r] == nums[r + 1] and l < r:\n            r -= 1\n        elif summ < 0:\n          l += 1\n        else:\n          r -= 1\n\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 20,
+      "path": "python/0020-valid-parentheses.py",
+      "code": "class Solution:\n    def isValid(self, s: str) -> bool:\n        bracketMap = {\")\": \"(\", \"]\": \"[\", \"}\": \"{\"}\n        stack = []\n\n        for c in s:\n            if c not in bracketMap:\n                stack.append(c)\n                continue\n            if not stack or stack[-1] != bracketMap[c]:\n                return False\n            stack.pop()\n\n        return not stack\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "walkccc",
+      "number": 20,
+      "path": "solutions/20. Valid Parentheses/20.py",
+      "code": "class Solution:\n  def isValid(self, s: str) -> bool:\n    stack = []\n\n    for c in s:\n      if c == '(':\n        stack.append(')')\n      elif c == '{':\n        stack.append('}')\n      elif c == '[':\n        stack.append(']')\n      elif not stack or stack.pop() != c:\n        return False\n\n    return not stack\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 33,
+      "path": "python/0033-search-in-rotated-sorted-array.py",
+      "code": "class Solution:\n    def search(self, nums: List[int], target: int) -> int:\n        l, r = 0, len(nums) - 1\n\n        while l <= r:\n            mid = (l + r) // 2\n            if target == nums[mid]:\n                return mid\n\n            # left sorted portion\n            if nums[l] <= nums[mid]:\n                if target > nums[mid] or target < nums[l]:\n                    l = mid + 1\n                else:\n                    r = mid - 1\n            # right sorted portion\n            else:\n                if target < nums[mid] or target > nums[r]:\n                    r = mid - 1\n                else:\n                    l = mid + 1\n        return -1\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 33,
+      "path": "solutions/33. Search in Rotated Sorted Array/33.py",
+      "code": "class Solution:\n  def search(self, nums: list[int], target: int) -> int:\n    l = 0\n    r = len(nums) - 1\n\n    while l <= r:\n      m = (l + r) // 2\n      if nums[m] == target:\n        return m\n      if nums[l] <= nums[m]:  # nums[l..m] are sorted.\n        if nums[l] <= target < nums[m]:\n          r = m - 1\n        else:\n          l = m + 1\n      else:  # nums[m..n - 1] are sorted.\n        if nums[m] < target <= nums[r]:\n          l = m + 1\n        else:\n          r = m - 1\n\n    return -1\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 39,
+      "path": "python/0039-combination-sum.py",
+      "code": "class Solution:\n    def combinationSum(self, candidates: List[int], target: int) -> List[List[int]]:\n        res = []\n\n        def dfs(i, cur, total):\n            if total == target:\n                res.append(cur.copy())\n                return\n            if i >= len(candidates) or total > target:\n                return\n\n            cur.append(candidates[i])\n            dfs(i, cur, total + candidates[i])\n            cur.pop()\n            dfs(i + 1, cur, total)\n\n        dfs(0, [], 0)\n        return res\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 39,
+      "path": "solutions/39. Combination Sum/39.py",
+      "code": "class Solution:\n  def combinationSum(self, candidates: list[int],\n                     target: int) -> list[list[int]]:\n    ans = []\n\n    def dfs(s: int, target: int, path: list[int]) -> None:\n      if target < 0:\n        return\n      if target == 0:\n        ans.append(path.clone())\n        return\n\n      for i in range(s, len(candidates)):\n        path.append(candidates[i])\n        dfs(i, target - candidates[i], path)\n        path.pop()\n\n    candidates.sort()\n    dfs(0, target, [])\n    return ans\n",
+      "status": "rejected",
+      "reason": "AssertionError: combination-sum/walkccc: clean variant is not clean (bug: input=([2, 3, 6, 7], 7) raised AttributeError: 'list' object has no attribute 'clone')"
+    },
+    {
+      "source": "neetcode",
+      "number": 42,
+      "path": "python/0042-trapping-rain-water.py",
+      "code": "class Solution:\n    def trap(self, height: List[int]) -> int:\n        if not height:\n            return 0\n\n        l, r = 0, len(height) - 1\n        leftMax, rightMax = height[l], height[r]\n        res = 0\n        while l < r:\n            if leftMax < rightMax:\n                l += 1\n                leftMax = max(leftMax, height[l])\n                res += leftMax - height[l]\n            else:\n                r -= 1\n                rightMax = max(rightMax, height[r])\n                res += rightMax - height[r]\n        return res\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 42,
+      "path": "solutions/42. Trapping Rain Water/42.py",
+      "code": "class Solution:\n  def trap(self, height: list[int]) -> int:\n    n = len(height)\n    l = [0] * n  # l[i] := max(height[0..i])\n    r = [0] * n  # r[i] := max(height[i..n))\n\n    for i, h in enumerate(height):\n      l[i] = h if i == 0 else max(h, l[i - 1])\n\n    for i, h in reversed(list(enumerate(height))):\n      r[i] = h if i == n - 1 else max(h, r[i + 1])\n\n    return sum(min(l[i], r[i]) - h\n               for i, h in enumerate(height))\n",
+      "status": "rejected",
+      "reason": "AssertionError: trapping-rain-water/walkccc: clean variant is not clean (peaks at 2,110,516 bytes on SPACE_SCALE, where the canonical needs 606)"
+    },
+    {
+      "source": "neetcode",
+      "number": 49,
+      "path": "python/0049-group-anagrams.py",
+      "code": "class Solution:\n    def groupAnagrams(self, strs: List[str]) -> List[List[str]]:\n        groups = {}\n\n        # Iterate over strings\n        for s in strs: # O(m)\n            count = {}\n\n            # Count frequency of each character\n            for char in s: # O(n)\n                count[char] = count.get(char, 0) + 1\n\n            # Convert count Dict to List, sort it, and then convert to Tuple (we cannot use dicts or lists as keys in a hashmap)\n            tup = tuple(sorted(count.items())) # O(1) because there is limited amount of possible keys in the alphabet -> O(26) + O(26*log26) + O(26)\n\n            if tup in groups:\n                groups[tup].append(s)\n            else:\n                groups[tup] = [s] \n            \n        return list(groups.values())\n    \n    def groupAnagrams(self, strs: List[str]) -> List[List[str]]:\n        ans = collections.defaultdict(list)\n\n        for s in strs:\n            count = [0] * 26\n            for c in s:\n                count[ord(c) - ord(\"a\")] += 1\n            ans[tuple(count)].append(s)\n        return list(ans.values())\n",
+      "status": "rejected",
+      "reason": "defines Solution.groupAnagrams 2 times"
+    },
+    {
+      "source": "walkccc",
+      "number": 49,
+      "path": "solutions/49. Group Anagrams/49.py",
+      "code": "class Solution:\n  def groupAnagrams(self, strs: list[str]) -> list[list[str]]:\n    dict = collections.defaultdict(list)\n\n    for str in strs:\n      key = ''.join(sorted(str))\n      dict[key].append(str)\n\n    return dict.values()\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 50,
+      "path": "python/0050-powx-n.py",
+      "code": "class Solution:\n    def myPow(self, x: float, n: int) -> float:\n        def helper(x, n):\n            if x == 0:\n                return 0\n            if n == 0:\n                return 1\n\n            res = helper(x * x, n // 2)\n            return x * res if n % 2 else res\n\n        res = helper(x, abs(n))\n        return res if n >= 0 else 1 / res\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 50,
+      "path": "solutions/50. Pow(x, n)/50.py",
+      "code": "class Solution:\n  def myPow(self, x: float, n: int) -> float:\n    if n == 0:\n      return 1\n    if n < 0:\n      return 1 / self.myPow(x, -n)\n    if n % 2 == 1:\n      return x * self.myPow(x, n - 1)\n    return self.myPow(x * x, n // 2)\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 51,
+      "path": "python/0051-n-queens.py",
+      "code": "class Solution:\n    def solveNQueens(self, n: int) -> List[List[str]]:\n        col = set()\n        posDiag = set()  # (r + c)\n        negDiag = set()  # (r - c)\n\n        res = []\n        board = [[\".\"] * n for i in range(n)]\n\n        def backtrack(r):\n            if r == n:\n                copy = [\"\".join(row) for row in board]\n                res.append(copy)\n                return\n\n            for c in range(n):\n                if c in col or (r + c) in posDiag or (r - c) in negDiag:\n                    continue\n\n                col.add(c)\n                posDiag.add(r + c)\n                negDiag.add(r - c)\n                board[r][c] = \"Q\"\n\n                backtrack(r + 1)\n\n                col.remove(c)\n                posDiag.remove(r + c)\n                negDiag.remove(r - c)\n                board[r][c] = \".\"\n\n        backtrack(0)\n        return res\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 51,
+      "path": "solutions/51. N-Queens/51.py",
+      "code": "class Solution:\n  def solveNQueens(self, n: int) -> list[list[str]]:\n    ans = []\n    cols = [False] * n\n    diag1 = [False] * (2 * n - 1)\n    diag2 = [False] * (2 * n - 1)\n\n    def dfs(i: int, board: list[int]) -> None:\n      if i == n:\n        ans.append(board)\n        return\n\n      for j in range(n):\n        if cols[j] or diag1[i + j] or diag2[j - i + n - 1]:\n          continue\n        cols[j] = diag1[i + j] = diag2[j - i + n - 1] = True\n        dfs(i + 1, board + ['.' * j + 'Q' + '.' * (n - j - 1)])\n        cols[j] = diag1[i + j] = diag2[j - i + n - 1] = False\n\n    dfs(0, [])\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 53,
+      "path": "python/0053-maximum-subarray.py",
+      "code": "class Solution:\n    def maxSubArray(self, nums: List[int]) -> int:\n        res = nums[0]\n\n        total = 0\n        for n in nums:\n            total += n\n            res = max(res, total)\n            if total < 0:\n                total = 0\n        return res\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "walkccc",
+      "number": 53,
+      "path": "solutions/53. Maximum Subarray/53.py",
+      "code": "class Solution:\n  def maxSubArray(self, nums: list[int]) -> int:\n    # dp[i] := the maximum sum subarray ending in i\n    dp = [0] * len(nums)\n\n    dp[0] = nums[0]\n    for i in range(1, len(nums)):\n      dp[i] = max(nums[i], dp[i - 1] + nums[i])\n\n    return max(dp)\n",
+      "status": "rejected",
+      "reason": "AssertionError: maximum-subarray/walkccc: clean variant is not clean (peaks at 800,308 bytes on SPACE_SCALE, where the canonical needs 606)"
+    },
+    {
+      "source": "neetcode",
+      "number": 54,
+      "path": "python/0054-spiral-matrix.py",
+      "code": "class Solution:\n    def spiralOrder(self, matrix: List[List[int]]) -> List[int]:\n        res = []\n        left, right = 0, len(matrix[0])\n        top, bottom = 0, len(matrix)\n\n        while left < right and top < bottom:\n            # get every i in the top row\n            for i in range(left, right):\n                res.append(matrix[top][i])\n            top += 1\n            # get every i in the right col\n            for i in range(top, bottom):\n                res.append(matrix[i][right - 1])\n            right -= 1\n            if not (left < right and top < bottom):\n                break\n            # get every i in the bottom row\n            for i in range(right - 1, left - 1, -1):\n                res.append(matrix[bottom - 1][i])\n            bottom -= 1\n            # get every i in the left col\n            for i in range(bottom - 1, top - 1, -1):\n                res.append(matrix[i][left])\n            left += 1\n\n        return res\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 54,
+      "path": "solutions/54. Spiral Matrix/54.py",
+      "code": "class Solution:\n  def spiralOrder(self, matrix: list[list[int]]) -> list[int]:\n    if not matrix:\n      return []\n\n    m = len(matrix)\n    n = len(matrix[0])\n    ans = []\n    r1 = 0\n    c1 = 0\n    r2 = m - 1\n    c2 = n - 1\n\n    # Repeatedly add matrix[r1..r2][c1..c2] to `ans`.\n    while len(ans) < m * n:\n      j = c1\n      while j <= c2 and len(ans) < m * n:\n        ans.append(matrix[r1][j])\n        j += 1\n      i = r1 + 1\n      while i <= r2 - 1 and len(ans) < m * n:\n        ans.append(matrix[i][c2])\n        i += 1\n      j = c2\n      while j >= c1 and len(ans) < m * n:\n        ans.append(matrix[r2][j])\n        j -= 1\n      i = r2 - 1\n      while i >= r1 + 1 and len(ans) < m * n:\n        ans.append(matrix[i][c1])\n        i -= 1\n      r1 += 1\n      c1 += 1\n      r2 -= 1\n      c2 -= 1\n\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 55,
+      "path": "python/0055-jump-game.py",
+      "code": "class Solution:\n    def canJump(self, nums: List[int]) -> bool:\n        goal = len(nums) - 1\n\n        for i in range(len(nums) - 2, -1, -1):\n            if i + nums[i] >= goal:\n                goal = i\n        return goal == 0\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 55,
+      "path": "solutions/55. Jump Game/55.py",
+      "code": "class Solution:\n  def canJump(self, nums: list[int]) -> bool:\n    i = 0\n    reach = 0\n\n    while i < len(nums) and i <= reach:\n      reach = max(reach, i + nums[i])\n      i += 1\n\n    return i == len(nums)\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 56,
+      "path": "python/0056-merge-intervals.py",
+      "code": "class Solution:\n    def merge(self, intervals: List[List[int]]) -> List[List[int]]:\n        intervals.sort(key=lambda pair: pair[0])\n        output = [intervals[0]]\n\n        for start, end in intervals:\n            lastEnd = output[-1][1]\n\n            if start <= lastEnd:\n                # merge\n                output[-1][1] = max(lastEnd, end)\n            else:\n                output.append([start, end])\n        return output\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "walkccc",
+      "number": 56,
+      "path": "solutions/56. Merge Intervals/56.py",
+      "code": "class Solution:\n  def merge(self, intervals: list[list[int]]) -> list[list[int]]:\n    ans = []\n\n    for interval in sorted(intervals):\n      if not ans or ans[-1][1] < interval[0]:\n        ans.append(interval)\n      else:\n        ans[-1][1] = max(ans[-1][1], interval[1])\n\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 57,
+      "path": "python/0057-insert-interval.py",
+      "code": "class Solution:\n    def insert(\n        self, intervals: List[List[int]], newInterval: List[int]\n    ) -> List[List[int]]:\n        res = []\n\n        for i in range(len(intervals)):\n            if newInterval[1] < intervals[i][0]:\n                res.append(newInterval)\n                return res + intervals[i:]\n            elif newInterval[0] > intervals[i][1]:\n                res.append(intervals[i])\n            else:\n                newInterval = [\n                    min(newInterval[0], intervals[i][0]),\n                    max(newInterval[1], intervals[i][1]),\n                ]\n        res.append(newInterval)\n        return res\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 57,
+      "path": "solutions/57. Insert Interval/57.py",
+      "code": "class Solution:\n  def insert(self, intervals: list[list[int]],\n             newInterval: list[int]) -> list[list[int]]:\n    n = len(intervals)\n    ans = []\n    i = 0\n\n    while i < n and intervals[i][1] < newInterval[0]:\n      ans.append(intervals[i])\n      i += 1\n\n    # Merge overlapping intervals.\n    while i < n and intervals[i][0] <= newInterval[1]:\n      newInterval[0] = min(newInterval[0], intervals[i][0])\n      newInterval[1] = max(newInterval[1], intervals[i][1])\n      i += 1\n\n    ans.append(newInterval)\n\n    while i < n:\n      ans.append(intervals[i])\n      i += 1\n\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 62,
+      "path": "python/0062-unique-paths.py",
+      "code": "class Solution:\n    def uniquePaths(self, m: int, n: int) -> int:\n        row = [1] * n\n\n        for i in range(m - 1):\n            newRow = [1] * n\n            for j in range(n - 2, -1, -1):\n                newRow[j] = newRow[j + 1] + row[j]\n            row = newRow\n        return row[0]\n\n        # O(n * m) O(n)\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 62,
+      "path": "solutions/62. Unique Paths/62.py",
+      "code": "class Solution:\n  def uniquePaths(self, m: int, n: int) -> int:\n    # dp[i][j] := the number of unique paths from (0, 0) to (i, j)\n    dp = [[1] * n for _ in range(m)]\n\n    for i in range(1, m):\n      for j in range(1, n):\n        dp[i][j] = dp[i - 1][j] + dp[i][j - 1]\n\n    return dp[-1][-1]\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 70,
+      "path": "python/0070-climbing-stairs.py",
+      "code": "class Solution:\n    def climbStairs(self, n: int) -> int:\n        if n <= 3:\n            return n\n        n1, n2 = 2, 3\n\n        for i in range(4, n + 1):\n            temp = n1 + n2\n            n1 = n2\n            n2 = temp\n        return n2\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "walkccc",
+      "number": 70,
+      "path": "solutions/70. Climbing Stairs/70.py",
+      "code": "class Solution:\n  def climbStairs(self, n: int) -> int:\n    # dp[i] := the number of ways to climb to the i-th stair\n    dp = [1, 1] + [0] * (n - 1)\n\n    for i in range(2, n + 1):\n      dp[i] = dp[i - 1] + dp[i - 2]\n\n    return dp[n]\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 76,
+      "path": "python/0076-minimum-window-substring.py",
+      "code": "class Solution:\n    def minWindow(self, s: str, t: str) -> str:\n        if len(s) < len(t):\n            return \"\"\n\n        countT, window = {}, {}\n        for c in t:\n            countT[c] = 1 + countT.get(c, 0)\n\n        have, need = 0, len(countT)\n        res, resLen = [-1, -1], float(\"infinity\")\n        l = 0\n        for r in range(len(s)):\n            c = s[r]\n            window[c] = 1 + window.get(c, 0)\n\n            if c in countT and window[c] == countT[c]:\n                have += 1\n\n            while have == need:\n                # update our result\n                if (r - l + 1) < resLen:\n                    res = [l, r]\n                    resLen = r - l + 1\n                # pop from the left of our window\n                window[s[l]] -= 1\n                if s[l] in countT and window[s[l]] < countT[s[l]]:\n                    have -= 1\n                l += 1\n        l, r = res\n        return s[l : r + 1] if resLen != float(\"infinity\") else \"\"\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 76,
+      "path": "solutions/76. Minimum Window Substring/76.py",
+      "code": "class Solution:\n  def minWindow(self, s: str, t: str) -> str:\n    count = collections.Counter(t)\n    required = len(t)\n    bestLeft = -1\n    minLength = len(s) + 1\n\n    l = 0\n    for r, c in enumerate(s):\n      count[c] -= 1\n      if count[c] >= 0:\n        required -= 1\n      while required == 0:\n        if r - l + 1 < minLength:\n          bestLeft = l\n          minLength = r - l + 1\n        count[s[l]] += 1\n        if count[s[l]] > 0:\n          required += 1\n        l += 1\n\n    return '' if bestLeft == -1 else s[bestLeft: bestLeft + minLength]\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 79,
+      "path": "python/0079-word-search.py",
+      "code": "class Solution:\n    def exist(self, board: List[List[str]], word: str) -> bool:\n        ROWS, COLS = len(board), len(board[0])\n        path = set()\n\n        def dfs(r, c, i):\n            if i == len(word):\n                return True\n            if (\n                min(r, c) < 0\n                or r >= ROWS\n                or c >= COLS\n                or word[i] != board[r][c]\n                or (r, c) in path\n            ):\n                return False\n            path.add((r, c))\n            res = (\n                dfs(r + 1, c, i + 1)\n                or dfs(r - 1, c, i + 1)\n                or dfs(r, c + 1, i + 1)\n                or dfs(r, c - 1, i + 1)\n            )\n            path.remove((r, c))\n            return res\n\n        # To prevent TLE,reverse the word if frequency of the first letter is more than the last letter's\n        count = sum(map(Counter, board), Counter())\n        if count[word[0]] > count[word[-1]]:\n            word = word[::-1]\n            \n        for r in range(ROWS):\n            for c in range(COLS):\n                if dfs(r, c, 0):\n                    return True\n        return False\n\n    # O(n * m * 4^n)\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 79,
+      "path": "solutions/79. Word Search/79.py",
+      "code": "class Solution:\n  def exist(self, board: list[list[str]], word: str) -> bool:\n    m = len(board)\n    n = len(board[0])\n\n    def dfs(i: int, j: int, s: int) -> bool:\n      if i < 0 or i == m or j < 0 or j == n:\n        return False\n      if board[i][j] != word[s] or board[i][j] == '*':\n        return False\n      if s == len(word) - 1:\n        return True\n\n      cache = board[i][j]\n      board[i][j] = '*'\n      isExist = (dfs(i + 1, j, s + 1) or\n                 dfs(i - 1, j, s + 1) or\n                 dfs(i, j + 1, s + 1) or\n                 dfs(i, j - 1, s + 1))\n      board[i][j] = cache\n\n      return isExist\n\n    return any(dfs(i, j, 0)\n               for i in range(m)\n               for j in range(n))\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 84,
+      "path": "python/0084-largest-rectangle-in-histogram.py",
+      "code": "class Solution:\n    def largestRectangleArea(self, heights: List[int]) -> int:\n        maxArea = 0\n        stack = []  # pair: (index, height)\n\n        for i, h in enumerate(heights):\n            start = i\n            while stack and stack[-1][1] > h:\n                index, height = stack.pop()\n                maxArea = max(maxArea, height * (i - index))\n                start = index\n            stack.append((start, h))\n\n        for i, h in stack:\n            maxArea = max(maxArea, h * (len(heights) - i))\n        return maxArea\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 84,
+      "path": "solutions/84. Largest Rectangle in Histogram/84.py",
+      "code": "class Solution:\n  def largestRectangleArea(self, heights: list[int]) -> int:\n    ans = 0\n    stack = []\n\n    for i in range(len(heights) + 1):\n      while stack and (i == len(heights) or heights[stack[-1]] > heights[i]):\n        h = heights[stack.pop()]\n        w = i - stack[-1] - 1 if stack else i\n        ans = max(ans, h * w)\n      stack.append(i)\n\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 91,
+      "path": "python/0091-decode-ways.py",
+      "code": "class Solution:\n    def numDecodings(self, s: str) -> int:\n        # Memoization\n        dp = {len(s): 1}\n\n        def dfs(i):\n            if i in dp:\n                return dp[i]\n            if s[i] == \"0\":\n                return 0\n\n            res = dfs(i + 1)\n            if i + 1 < len(s) and (\n                s[i] == \"1\" or s[i] == \"2\" and s[i + 1] in \"0123456\"\n            ):\n                res += dfs(i + 2)\n            dp[i] = res\n            return res\n\n        return dfs(0)\n\n        # Dynamic Programming\n        dp = {len(s): 1}\n        for i in range(len(s) - 1, -1, -1):\n            if s[i] == \"0\":\n                dp[i] = 0\n            else:\n                dp[i] = dp[i + 1]\n\n            if i + 1 < len(s) and (\n                s[i] == \"1\" or s[i] == \"2\" and s[i + 1] in \"0123456\"\n            ):\n                dp[i] += dp[i + 2]\n        return dp[0]\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 91,
+      "path": "solutions/91. Decode Ways/91.py",
+      "code": "class Solution:\n  def numDecodings(self, s: str) -> int:\n    n = len(s)\n    # dp[i] := the number of ways to decode s[i..n)\n    dp = [0] * n + [1]\n\n    def isValid(a: str, b=None) -> bool:\n      if b:\n        return a == '1' or a == '2' and b < '7'\n      return a != '0'\n\n    if isValid(s[-1]):\n      dp[n - 1] = 1\n\n    for i in reversed(range(n - 1)):\n      if isValid(s[i]):\n        dp[i] += dp[i + 1]\n      if isValid(s[i], s[i + 1]):\n        dp[i] += dp[i + 2]\n\n    return dp[0]\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 115,
+      "path": "python/0115-distinct-subsequences.py",
+      "code": "class Solution:\n    def numDistinct(self, s: str, t: str) -> int:\n        cache = {}\n\n        for i in range(len(s) + 1):\n            cache[(i, len(t))] = 1\n        for j in range(len(t)):\n            cache[(len(s), j)] = 0\n\n        for i in range(len(s) - 1, -1, -1):\n            for j in range(len(t) - 1, -1, -1):\n                if s[i] == t[j]:\n                    cache[(i, j)] = cache[(i + 1, j + 1)] + cache[(i + 1, j)]\n                else:\n                    cache[(i, j)] = cache[(i + 1, j)]\n        return cache[(0, 0)]\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 115,
+      "path": "solutions/115. Distinct Subsequences/115.py",
+      "code": "class Solution:\n  def numDistinct(self, s: str, t: str) -> int:\n    m = len(s)\n    n = len(t)\n    dp = [[0] * (n + 1) for _ in range(m + 1)]\n\n    for i in range(m + 1):\n      dp[i][0] = 1\n\n    for i in range(1, m + 1):\n      for j in range(1, n + 1):\n        if s[i - 1] == t[j - 1]:\n          dp[i][j] = dp[i - 1][j - 1] + dp[i - 1][j]\n        else:\n          dp[i][j] = dp[i - 1][j]\n\n    return dp[m][n]\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 121,
+      "path": "python/0121-best-time-to-buy-and-sell-stock.py",
+      "code": "class Solution:\n    def maxProfit(self, prices: List[int]) -> int:\n        res = 0\n        \n        lowest = prices[0]\n        for price in prices:\n            if price < lowest:\n                lowest = price\n            res = max(res, price - lowest)\n        return res\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "walkccc",
+      "number": 121,
+      "path": "solutions/121. Best Time to Buy and Sell Stock/121.py",
+      "code": "class Solution:\n  def maxProfit(self, prices: list[int]) -> int:\n    sellOne = 0\n    holdOne = -math.inf\n\n    for price in prices:\n      sellOne = max(sellOne, holdOne + price)\n      holdOne = max(holdOne, -price)\n\n    return sellOne\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 125,
+      "path": "python/0125-valid-palindrome.py",
+      "code": "class Solution:\n    def isPalindrome(self, s: str) -> bool:\n        new = ''\n        for a in s:\n            if a.isalpha() or a.isdigit():\n                new += a.lower()\n        return (new == new[::-1])\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 125,
+      "path": "solutions/125. Valid Palindrome/125.py",
+      "code": "class Solution:\n  def isPalindrome(self, s: str) -> bool:\n    l = 0\n    r = len(s) - 1\n\n    while l < r:\n      while l < r and not s[l].isalnum():\n        l += 1\n      while l < r and not s[r].isalnum():\n        r -= 1\n      if s[l].lower() != s[r].lower():\n        return False\n      l += 1\n      r -= 1\n\n    return True\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 127,
+      "path": "python/0127-word-ladder.py",
+      "code": "class Solution:\n    def ladderLength(self, beginWord: str, endWord: str, wordList: List[str]) -> int:\n        if endWord not in wordList:\n            return 0\n\n        nei = collections.defaultdict(list)\n        wordList.append(beginWord)\n        for word in wordList:\n            for j in range(len(word)):\n                pattern = word[:j] + \"*\" + word[j + 1 :]\n                nei[pattern].append(word)\n\n        visit = set([beginWord])\n        q = deque([beginWord])\n        res = 1\n        while q:\n            for i in range(len(q)):\n                word = q.popleft()\n                if word == endWord:\n                    return res\n                for j in range(len(word)):\n                    pattern = word[:j] + \"*\" + word[j + 1 :]\n                    for neiWord in nei[pattern]:\n                        if neiWord not in visit:\n                            visit.add(neiWord)\n                            q.append(neiWord)\n            res += 1\n        return 0\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 127,
+      "path": "solutions/127. Word Ladder/127.py",
+      "code": "class Solution:\n  def ladderLength(\n      self,\n      beginWord: str,\n      endWord: str,\n      wordList: list[str],\n  ) -> int:\n    wordSet = set(wordList)\n    if endWord not in wordSet:\n      return 0\n\n    q = collections.deque([beginWord])\n\n    step = 1\n    while q:\n      for _ in range(len(q)):\n        wordList = list(q.popleft())\n        for i, cache in enumerate(wordList):\n          for c in string.ascii_lowercase:\n            wordList[i] = c\n            word = ''.join(wordList)\n            if word == endWord:\n              return step + 1\n            if word in wordSet:\n              q.append(word)\n              wordSet.remove(word)\n          wordList[i] = cache\n      step += 1\n\n    return 0\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 128,
+      "path": "python/0128-longest-consecutive-sequence.py",
+      "code": "class Solution:\n    def longestConsecutive(self, nums: List[int]) -> int:\n        numSet = set(nums)\n        longest = 0\n\n        for n in numSet:\n            # check if its the start of a sequence\n            if (n - 1) not in numSet:\n                length = 1\n                while (n + length) in numSet:\n                    length += 1\n                longest = max(length, longest)\n        return longest\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 128,
+      "path": "solutions/128. Longest Consecutive Sequence/128.py",
+      "code": "class Solution:\n  def longestConsecutive(self, nums: list[int]) -> int:\n    ans = 0\n    seen = set(nums)\n\n    for num in seen:\n      # `num` is the start of a sequence.\n      if num - 1 in seen:\n        continue\n      length = 0\n      while num in seen:\n        num += 1\n        length += 1\n      ans = max(ans, length)\n\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 139,
+      "path": "python/0139-word-break.py",
+      "code": "class Solution:\n    def wordBreak(self, s: str, wordDict: List[str]) -> bool:\n\n        dp = [False] * (len(s) + 1)\n        dp[len(s)] = True\n\n        for i in range(len(s) - 1, -1, -1):\n            for w in wordDict:\n                if (i + len(w)) <= len(s) and s[i : i + len(w)] == w:\n                    dp[i] = dp[i + len(w)]\n                if dp[i]:\n                    break\n\n        return dp[0]\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 139,
+      "path": "solutions/139. Word Break/139.py",
+      "code": "class Solution:\n  def wordBreak(self, s: str, wordDict: list[str]) -> bool:\n    wordSet = set(wordDict)\n\n    @functools.lru_cache(None)\n    def wordBreak(s: str) -> bool:\n      \"\"\"Returns True if s can be segmented.\"\"\"\n      if s in wordSet:\n        return True\n      return any(s[:i] in wordSet and wordBreak(s[i:]) for i in range(len(s)))\n\n    return wordBreak(s)\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 152,
+      "path": "python/0152-maximum-product-subarray.py",
+      "code": "class Solution:\n    def maxProduct(self, nums: List[int]) -> int:\n        # O(n)/O(1) : Time/Memory\n        res = nums[0]\n        curMin, curMax = 1, 1\n\n        for n in nums:\n\n            tmp = curMax * n\n            curMax = max(n * curMax, n * curMin, n)\n            curMin = min(tmp, n * curMin, n)\n            res = max(res, curMax)\n        return res\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 152,
+      "path": "solutions/152. Maximum Product Subarray/152.py",
+      "code": "class Solution:\n  def maxProduct(self, nums: list[int]) -> int:\n    ans = nums[0]\n    dpMin = nums[0]  # the minimum so far\n    dpMax = nums[0]  # the maximum so far\n\n    for i in range(1, len(nums)):\n      num = nums[i]\n      prevMin = dpMin  # dpMin[i - 1]\n      prevMax = dpMax  # dpMax[i - 1]\n      if num < 0:\n        dpMin = min(prevMax * num, num)\n        dpMax = max(prevMin * num, num)\n      else:\n        dpMin = min(prevMin * num, num)\n        dpMax = max(prevMax * num, num)\n\n      ans = max(ans, dpMax)\n\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 153,
+      "path": "python/0153-find-minimum-in-rotated-sorted-array.py",
+      "code": "class Solution:\n    def findMin(self, nums: List[int]) -> int:\n        start , end = 0, len(nums) - 1 \n        curr_min = float(\"inf\")\n        \n        while start  <  end :\n            mid = start + (end - start ) // 2\n            curr_min = min(curr_min,nums[mid])\n            \n            # right has the min \n            if nums[mid] > nums[end]:\n                start = mid + 1\n                \n            # left has the  min \n            else:\n                end = mid - 1 \n                \n        return min(curr_min,nums[start])\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "walkccc",
+      "number": 153,
+      "path": "solutions/153. Find Minimum in Rotated Sorted Array/153.py",
+      "code": "class Solution:\n  def findMin(self, nums: list[int]) -> int:\n    l = 0\n    r = len(nums) - 1\n\n    while l < r:\n      m = (l + r) // 2\n      if nums[m] < nums[r]:\n        r = m\n      else:\n        l = m + 1\n\n    return nums[l]\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 167,
+      "path": "python/0167-two-sum-ii-input-array-is-sorted.py",
+      "code": "class Solution:\n    def twoSum(self, numbers: List[int], target: int) -> List[int]:\n        l, r = 0, len(numbers) - 1\n\n        while l < r:\n            curSum = numbers[l] + numbers[r]\n\n            if curSum > target:\n                r -= 1\n            elif curSum < target:\n                l += 1\n            else:\n                return [l + 1, r + 1]\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 167,
+      "path": "solutions/167. Two Sum II - Input array is sorted/167.py",
+      "code": "class Solution:\n  def twoSum(self, numbers: list[int], target: int) -> list[int]:\n    l = 0\n    r = len(numbers) - 1\n\n    while l < r:\n      summ = numbers[l] + numbers[r]\n      if summ == target:\n        return [l + 1, r + 1]\n      if summ < target:\n        l += 1\n      else:\n        r -= 1\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 190,
+      "path": "python/0190-reverse-bits.py",
+      "code": "class Solution:\n    def reverseBits(self, n: int) -> int:\n        res = 0\n        for i in range(32):\n            bit = (n >> i) & 1\n            res += (bit << (31 - i))\n        return res\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 190,
+      "path": "solutions/190. Reverse Bits/190.py",
+      "code": "class Solution:\n  def reverseBits(self, n: int) -> int:\n    ans = 0\n\n    for i in range(32):\n      if n >> i & 1:\n        ans |= 1 << 31 - i\n\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 191,
+      "path": "python/0191-number-of-1-bits.py",
+      "code": "class Solution:\n    def hammingWeight(self, n: int) -> int:\n        res = 0\n        while n:\n            n &= n - 1\n            res += 1\n        return res\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 191,
+      "path": "solutions/191. Number of 1 Bits/191.py",
+      "code": "class Solution:\n  def hammingWeight(self, n: int) -> int:\n    ans = 0\n\n    for i in range(32):\n      if (n >> i) & 1:\n        ans += 1\n\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 198,
+      "path": "python/0198-house-robber.py",
+      "code": "class Solution:\n    def rob(self, nums: List[int]) -> int:\n        rob1, rob2 = 0, 0\n\n        for n in nums:\n            temp = max(n + rob1, rob2)\n            rob1 = rob2\n            rob2 = temp\n        return rob2\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "walkccc",
+      "number": 198,
+      "path": "solutions/198. House Robber/198.py",
+      "code": "class Solution:\n  def rob(self, nums: list[int]) -> int:\n    if not nums:\n      return 0\n    if len(nums) == 1:\n      return nums[0]\n\n    # dp[i]:= max money of robbing nums[0..i]\n    dp = [0] * len(nums)\n    dp[0] = nums[0]\n    dp[1] = max(nums[0], nums[1])\n\n    for i in range(2, len(nums)):\n      dp[i] = max(dp[i - 1], dp[i - 2] + nums[i])\n\n    return dp[-1]\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 200,
+      "path": "python/0200-number-of-islands.py",
+      "code": "class Solution:\n    def numIslands(self, grid: List[List[str]]) -> int:\n        if not grid or not grid[0]:\n            return 0\n\n        islands = 0\n        visit = set()\n        rows, cols = len(grid), len(grid[0])\n\n        def dfs(r, c):\n            if (\n                r not in range(rows)\n                or c not in range(cols)\n                or grid[r][c] == \"0\"\n                or (r, c) in visit\n            ):\n                return\n\n            visit.add((r, c))\n            directions = [[0, 1], [0, -1], [1, 0], [-1, 0]]\n            for dr, dc in directions:\n                dfs(r + dr, c + dc)\n\n        for r in range(rows):\n            for c in range(cols):\n                if grid[r][c] == \"1\" and (r, c) not in visit:\n                    islands += 1\n                    dfs(r, c)\n        return islands\n\n# DFS O(1) Space and much less code\nclass Solution:\n    def numIslands(self, grid: List[List[str]]) -> int:\n        rows, cols = len(grid), len(grid[0])\n        def dfs(r, c):\n            if not 0 <= r < len(grid) or not 0 <= c < len(grid[0]) or grid[r][c] == '0':\n                return 0\n            grid[r][c] = '0'\n            dfs(r + 1, c)\n            dfs(r - 1, c)\n            dfs(r, c + 1)\n            dfs(r, c - 1)\n            return 1\n        count = 0\n        for r in range(rows):\n            for c in range(cols):\n                count += dfs(r, c)\n        return count\n\n# BFS Version From Video\nclass SolutionBFS:\n    def numIslands(self, grid: List[List[str]]) -> int:\n        if not grid:\n            return 0\n\n        rows, cols = len(grid), len(grid[0])\n        visited = set()\n        islands = 0\n\n         def bfs(r, c):\n             q = deque()\n             visited.add((r, c))\n             q.append((r, c))\n           \n             while q:\n                 row, col = q.popleft()\n                 directions = [[1, 0],[-1, 0],[0, 1],[0, -1]]\n               \n                 for dr, dc in directions:\n                     r, c = row + dr, col + dc\n                     if (r) in range(rows) and (c) in range(cols) and grid[r][c] == '1' and (r, c) not in visited:\n                       \n                         q.append((r, c ))\n                         visited.add((r, c ))\n\n         for r in range(rows):\n             for c in range(cols):\n               \n                 if grid[r][c] == \"1\" and (r, c) not in visited:\n                     bfs(r, c)\n                     islands += 1 \n\n         return islands\n\n",
+      "status": "rejected",
+      "reason": "does not parse: unexpected indent"
+    },
+    {
+      "source": "walkccc",
+      "number": 200,
+      "path": "solutions/200. Number of Islands/200.py",
+      "code": "class Solution:\n  def numIslands(self, grid: list[list[str]]) -> int:\n    DIRS = ((0, 1), (1, 0), (0, -1), (-1, 0))\n    m = len(grid)\n    n = len(grid[0])\n\n    def bfs(r, c):\n      q = collections.deque([(r, c)])\n      grid[r][c] = '2'  # Mark '2' as visited.\n      while q:\n        i, j = q.popleft()\n        for dx, dy in DIRS:\n          x = i + dx\n          y = j + dy\n          if x < 0 or x == m or y < 0 or y == n:\n            continue\n          if grid[x][y] != '1':\n            continue\n          q.append((x, y))\n          grid[x][y] = '2'  # Mark '2' as visited.\n\n    ans = 0\n\n    for i in range(m):\n      for j in range(n):\n        if grid[i][j] == '1':\n          bfs(i, j)\n          ans += 1\n\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 207,
+      "path": "python/0207-course-schedule.py",
+      "code": "class Solution:\n    def canFinish(self, numCourses: int, prerequisites: List[List[int]]) -> bool:\n        # dfs\n        preMap = {i: [] for i in range(numCourses)}\n\n        # map each course to : prereq list\n        for crs, pre in prerequisites:\n            preMap[crs].append(pre)\n\n        visiting = set()\n\n        def dfs(crs):\n            if crs in visiting:\n                return False\n            if preMap[crs] == []:\n                return True\n\n            visiting.add(crs)\n            for pre in preMap[crs]:\n                if not dfs(pre):\n                    return False\n            visiting.remove(crs)\n            preMap[crs] = []\n            return True\n\n        for c in range(numCourses):\n            if not dfs(c):\n                return False\n        return True\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 207,
+      "path": "solutions/207. Course Schedule/207.py",
+      "code": "from enum import Enum\n\n\nclass State(Enum):\n  INIT = 0\n  VISITING = 1\n  VISITED = 2\n\n\nclass Solution:\n  def canFinish(self, numCourses: int, prerequisites: list[list[int]]) -> bool:\n    graph = [[] for _ in range(numCourses)]\n    states = [State.INIT] * numCourses\n\n    for v, u in prerequisites:\n      graph[u].append(v)\n\n    def hasCycle(u: int) -> bool:\n      if states[u] == State.VISITING:\n        return True\n      if states[u] == State.VISITED:\n        return False\n      states[u] = State.VISITING\n      if any(hasCycle(v) for v in graph[u]):\n        return True\n      states[u] = State.VISITED\n      return False\n\n    return not any(hasCycle(i) for i in range(numCourses))\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 212,
+      "path": "python/0212-word-search-ii.py",
+      "code": "class TrieNode:\n    def __init__(self):\n        self.children = {}\n        self.isWord = False\n        self.refs = 0\n\n    def addWord(self, word):\n        cur = self\n        cur.refs += 1\n        for c in word:\n            if c not in cur.children:\n                cur.children[c] = TrieNode()\n            cur = cur.children[c]\n            cur.refs += 1\n        cur.isWord = True\n\n    def removeWord(self, word):\n        cur = self\n        cur.refs -= 1\n        for c in word:\n            if c in cur.children:\n                cur = cur.children[c]\n                cur.refs -= 1\n\n\nclass Solution:\n    def findWords(self, board: List[List[str]], words: List[str]) -> List[str]:\n        root = TrieNode()\n        for w in words:\n            root.addWord(w)\n\n        ROWS, COLS = len(board), len(board[0])\n        res, visit = set(), set()\n\n        def dfs(r, c, node, word):\n            if (\n                r not in range(ROWS) \n                or c not in range(COLS)\n                or board[r][c] not in node.children\n                or node.children[board[r][c]].refs < 1\n                or (r, c) in visit\n            ):\n                return\n\n            visit.add((r, c))\n            node = node.children[board[r][c]]\n            word += board[r][c]\n            if node.isWord:\n                node.isWord = False\n                res.add(word)\n                root.removeWord(word)\n\n            dfs(r + 1, c, node, word)\n            dfs(r - 1, c, node, word)\n            dfs(r, c + 1, node, word)\n            dfs(r, c - 1, node, word)\n            visit.remove((r, c))\n\n        for r in range(ROWS):\n            for c in range(COLS):\n                dfs(r, c, root, \"\")\n\n        return list(res)\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 212,
+      "path": "solutions/212. Word Search II/212.py",
+      "code": "class TrieNode:\n  def __init__(self):\n    self.children: dict[str, TrieNode] = {}\n    self.word: str | None = None\n\n\nclass Solution:\n  def findWords(self, board: list[list[str]], words: list[str]) -> list[str]:\n    m = len(board)\n    n = len(board[0])\n    ans = []\n    root = TrieNode()\n\n    def insert(word: str) -> None:\n      node = root\n      for c in word:\n        node = node.children.setdefault(c, TrieNode())\n      node.word = word\n\n    for word in words:\n      insert(word)\n\n    def dfs(i: int, j: int, node: TrieNode) -> None:\n      if i < 0 or i == m or j < 0 or j == n:\n        return\n      if board[i][j] == '*':\n        return\n\n      c = board[i][j]\n      if c not in node.children:\n        return\n\n      child = node.children[c]\n      if child.word:\n        ans.append(child.word)\n        child.word = None\n\n      board[i][j] = '*'\n      dfs(i + 1, j, child)\n      dfs(i - 1, j, child)\n      dfs(i, j + 1, child)\n      dfs(i, j - 1, child)\n      board[i][j] = c\n\n    for i in range(m):\n      for j in range(n):\n        dfs(i, j, root)\n\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 213,
+      "path": "python/0213-house-robber-ii.py",
+      "code": "class Solution:\n    def rob(self, nums: List[int]) -> int:\n        return max(nums[0], self.helper(nums[1:]), self.helper(nums[:-1]))\n\n    def helper(self, nums):\n        rob1, rob2 = 0, 0\n\n        for n in nums:\n            newRob = max(rob1 + n, rob2)\n            rob1 = rob2\n            rob2 = newRob\n        return rob2\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 213,
+      "path": "solutions/213. House Robber II/213.py",
+      "code": "class Solution:\n  def rob(self, nums: list[int]) -> int:\n    if not nums:\n      return 0\n    if len(nums) < 2:\n      return nums[0]\n\n    def rob(l: int, r: int) -> int:\n      dp1 = 0\n      dp2 = 0\n\n      for i in range(l, r + 1):\n        temp = dp1\n        dp1 = max(dp1, dp2 + nums[i])\n        dp2 = temp\n\n      return dp1\n\n    return max(rob(0, len(nums) - 2),\n               rob(1, len(nums) - 1))\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 217,
+      "path": "python/0217-contains-duplicate.py",
+      "code": "class Solution:\n    def containsDuplicate(self, nums: List[int]) -> bool:\n        hashset = set()\n\n        for n in nums:\n            if n in hashset:\n                return True\n            hashset.add(n)\n        return False\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "walkccc",
+      "number": 217,
+      "path": "solutions/217. Contains Duplicate/217.py",
+      "code": "class Solution:\n  def containsDuplicate(self, nums: list[int]) -> bool:\n    return len(nums) != len(set(nums))\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 238,
+      "path": "python/0238-product-of-array-except-self.py",
+      "code": "class Solution:\n    def productExceptSelf(self, nums: List[int]) -> List[int]:\n        res = [1] * (len(nums))\n\n        for i in range(1, len(nums)):\n            res[i] = res[i-1] * nums[i-1]\n        postfix = 1\n        for i in range(len(nums) - 1, -1, -1):\n            res[i] *= postfix\n            postfix *= nums[i]\n        return res\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "walkccc",
+      "number": 238,
+      "path": "solutions/238. Product of Array Except Self/238.py",
+      "code": "class Solution:\n  def productExceptSelf(self, nums: list[int]) -> list[int]:\n    n = len(nums)\n    prefix = [1] * n  # prefix product\n    suffix = [1] * n  # suffix product\n\n    for i in range(1, n):\n      prefix[i] = prefix[i - 1] * nums[i - 1]\n\n    for i in reversed(range(n - 1)):\n      suffix[i] = suffix[i + 1] * nums[i + 1]\n\n    return [prefix[i] * suffix[i] for i in range(n)]\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 239,
+      "path": "python/0239-sliding-window-maximum.py",
+      "code": "class Solution:\n    def maxSlidingWindow(self, nums: List[int], k: int) -> List[int]:\n        output = []\n        q = collections.deque()  # index\n        l = r = 0\n        # O(n) O(n)\n        while r < len(nums):\n            # pop smaller values from q\n            while q and nums[q[-1]] < nums[r]:\n                q.pop()\n            q.append(r)\n\n            # remove left val from window\n            if l > q[0]:\n                q.popleft()\n\n            if (r + 1) >= k:\n                output.append(nums[q[0]])\n                l += 1\n            r += 1\n\n        return output\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 239,
+      "path": "solutions/239. Sliding Window Maximum/239.py",
+      "code": "class Solution:\n  def maxSlidingWindow(self, nums: list[int], k: int) -> list[int]:\n    ans = []\n    maxQ = collections.deque()\n\n    for i, num in enumerate(nums):\n      while maxQ and maxQ[-1] < num:\n        maxQ.pop()\n      maxQ.append(num)\n      if i >= k and nums[i - k] == maxQ[0]:  # out-of-bounds\n        maxQ.popleft()\n      if i >= k - 1:\n        ans.append(maxQ[0])\n\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 242,
+      "path": "python/0242-valid-anagram.py",
+      "code": "class Solution:\n    def isAnagram(self, s: str, t: str) -> bool:\n        if len(s) != len(t):\n            return False\n\n        countS, countT = {}, {}\n\n        for i in range(len(s)):\n            countS[s[i]] = 1 + countS.get(s[i], 0)\n            countT[t[i]] = 1 + countT.get(t[i], 0)\n        return countS == countT\n\n    \n    # easier solution\n    #return True if sorted(s) == sorted(t) else False\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "walkccc",
+      "number": 242,
+      "path": "solutions/242. Valid Anagram/242.py",
+      "code": "class Solution:\n  def isAnagram(self, s: str, t: str) -> bool:\n    if len(s) != len(t):\n      return False\n\n    count = collections.Counter(s)\n    count.subtract(collections.Counter(t))\n    return all(freq == 0 for freq in count.values())\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 268,
+      "path": "python/0268-missing-number.py",
+      "code": "class Solution:\n    def missingNumber(self, nums: List[int]) -> int:\n        res = len(nums)\n\n        for i in range(len(nums)):\n            res += i - nums[i]\n        return res\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 268,
+      "path": "solutions/268. Missing Number/268.py",
+      "code": "class Solution:\n  def missingNumber(self, nums: list[int]) -> int:\n    ans = len(nums)\n\n    for i, num in enumerate(nums):\n      ans ^= i ^ num\n\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 300,
+      "path": "python/0300-longest-increasing-subsequence.py",
+      "code": "class Solution:\n    def lengthOfLIS(self, nums: List[int]) -> int:\n        LIS = [1] * len(nums)\n\n        for i in range(len(nums) - 1, -1, -1):\n            for j in range(i + 1, len(nums)):\n                if nums[i] < nums[j]:\n                    LIS[i] = max(LIS[i], 1 + LIS[j])\n        return max(LIS)\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 300,
+      "path": "solutions/300. Longest Increasing Subsequence/300.py",
+      "code": "class Solution:\n  def lengthOfLIS(self, nums: list[int]) -> int:\n    if not nums:\n      return 0\n\n    # dp[i] := the length of LIS ending in nums[i]\n    dp = [1] * len(nums)\n\n    for i in range(1, len(nums)):\n      for j in range(i):\n        if nums[j] < nums[i]:\n          dp[i] = max(dp[i], dp[j] + 1)\n\n    return max(dp)\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 312,
+      "path": "python/0312-burst-balloons.py",
+      "code": "class Solution:\n    def maxCoins(self, nums: List[int]) -> int:\n        cache = {}\n        nums = [1] + nums + [1]\n\n        for offset in range(2, len(nums)):\n            for left in range(len(nums) - offset):\n                right = left + offset\n                for pivot in range(left + 1, right):\n                    coins = nums[left] * nums[pivot] * nums[right]\n                    coins += cache.get((left, pivot), 0) + cache.get((pivot, right), 0)\n                    cache[(left, right)] = max(coins, cache.get((left, right), 0))\n        return cache.get((0, len(nums) - 1), 0)\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 312,
+      "path": "solutions/312. Burst Balloons/312.py",
+      "code": "class Solution:\n  def maxCoins(self, nums: list[int]) -> int:\n    n = len(nums)\n    nums = [1] + nums + [1]\n\n    @functools.lru_cache(None)\n    def dp(i: int, j: int) -> int:\n      \"\"\"Returns maxCoins(nums[i..j]).\"\"\"\n      if i > j:\n        return 0\n      return max(dp(i, k - 1) +\n                 dp(k + 1, j) +\n                 nums[i - 1] * nums[k] * nums[j + 1]\n                 for k in range(i, j + 1))\n\n    return dp(1, n)\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 322,
+      "path": "python/0322-coin-change.py",
+      "code": "class Solution:\n    def coinChange(self, coins: List[int], amount: int) -> int:\n        dp = [amount + 1] * (amount + 1)\n        dp[0] = 0\n\n        for a in range(1, amount + 1):\n            for c in coins:\n                if a - c >= 0:\n                    dp[a] = min(dp[a], 1 + dp[a - c])\n        return dp[amount] if dp[amount] != amount + 1 else -1\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "walkccc",
+      "number": 322,
+      "path": "solutions/322. Coin Change/322.py",
+      "code": "class Solution:\n  def coinChange(self, coins: list[int], amount: int) -> int:\n    # dp[i] := the minimum number Of coins to make up i\n    dp = [0] + [amount + 1] * amount\n\n    for coin in coins:\n      for i in range(coin, amount + 1):\n        dp[i] = min(dp[i], dp[i - coin] + 1)\n\n    return -1 if dp[amount] == amount + 1 else dp[amount]\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 329,
+      "path": "python/0329-longest-increasing-path-in-a-matrix.py",
+      "code": "class Solution:\n    def longestIncreasingPath(self, matrix: List[List[int]]) -> int:\n        ROWS, COLS = len(matrix), len(matrix[0])\n        dp = {}  # (r, c) -> LIP\n\n        def dfs(r, c, prevVal):\n            if r < 0 or r == ROWS or c < 0 or c == COLS or matrix[r][c] <= prevVal:\n                return 0\n            if (r, c) in dp:\n                return dp[(r, c)]\n\n            res = 1\n            res = max(res, 1 + dfs(r + 1, c, matrix[r][c]))\n            res = max(res, 1 + dfs(r - 1, c, matrix[r][c]))\n            res = max(res, 1 + dfs(r, c + 1, matrix[r][c]))\n            res = max(res, 1 + dfs(r, c - 1, matrix[r][c]))\n            dp[(r, c)] = res\n            return res\n\n        for r in range(ROWS):\n            for c in range(COLS):\n                dfs(r, c, -1)\n        return max(dp.values())\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 329,
+      "path": "solutions/329. Longest Increasing Path in a Matrix/329.py",
+      "code": "class Solution:\n  def longestIncreasingPath(self, matrix: list[list[int]]) -> int:\n    m = len(matrix)\n    n = len(matrix[0])\n\n    @functools.lru_cache(None)\n    def dfs(i: int, j: int, prev: int) -> int:\n      if i < 0 or i == m or j < 0 or j == n:\n        return 0\n      if matrix[i][j] <= prev:\n        return 0\n\n      curr = matrix[i][j]\n      return 1 + max(dfs(i + 1, j, curr),\n                     dfs(i - 1, j, curr),\n                     dfs(i, j + 1, curr),\n                     dfs(i, j - 1, curr))\n\n    return max(dfs(i, j, -math.inf) for i in range(m) for j in range(n))\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 332,
+      "path": "python/0332-reconstruct-itinerary.py",
+      "code": "class Solution:\n    def findItinerary(self, tickets: List[List[str]]) -> List[str]:\n        adj = {src: [] for src, dst in tickets}\n        res = []\n\n        for src, dst in tickets:\n            adj[src].append(dst)\n\n        for key in adj:\n            adj[key].sort()\n\n        def dfs(adj, src):\n            if src in adj:\n                destinations = adj[src][:]\n                while destinations:\n                    dest = destinations[0]\n                    adj[src].pop(0)\n                    dfs(adj, dest)\n                    destinations = adj[src][:]\n            res.append(src)\n\n        dfs(adj, \"JFK\")\n        res.reverse()\n\n        if len(res) != len(tickets) + 1:\n            return []\n\n        return res\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 332,
+      "path": "solutions/332. Reconstruct Itinerary/332.py",
+      "code": "class Solution:\n  def findItinerary(self, tickets: list[list[str]]) -> list[str]:\n    ans = []\n    graph = collections.defaultdict(list)\n\n    for a, b in reversed(sorted(tickets)):\n      graph[a].append(b)\n\n    def dfs(u: str) -> None:\n      while u in graph and graph[u]:\n        dfs(graph[u].pop())\n      ans.append(u)\n\n    dfs('JFK')\n    return ans[::-1]\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 338,
+      "path": "python/0338-counting-bits.py",
+      "code": "class Solution:\n    def countBits(self, n: int) -> List[int]:\n        dp = [0] * (n + 1)\n        offset = 1\n\n        for i in range(1, n + 1):\n            if offset * 2 == i:\n                offset = i\n            dp[i] = 1 + dp[i - offset]\n        return dp\n\n# Another dp solution\nclass Solution2:\n    def countBits(self, n: int) -> List[int]:\n        res = [0] * (n + 1)\n        for i in range(1, n + 1):\n            if i % 2 == 1:\n                res[i] = res[i - 1] + 1\n            else:\n                res[i] = res[i // 2]\n        return res\n# This solution is based on the division of odd and even numbers. \n# I think it's easier to understand.\n# This is my full solution, covering the details: https://leetcode.com/problems/counting-bits/solutions/4411054/odd-and-even-numbers-a-easier-to-understanding-way-of-dp/\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 338,
+      "path": "solutions/338. Counting Bits/338.py",
+      "code": "class Solution:\n  def countBits(self, n: int) -> list[int]:\n    # f(i) := i's number of 1s in bitmask\n    # f(i) = f(i / 2) + i % 2\n    ans = [0] * (n + 1)\n\n    for i in range(1, n + 1):\n      ans[i] = ans[i // 2] + (i & 1)\n\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 347,
+      "path": "python/0347-top-k-frequent-elements.py",
+      "code": "class Solution:\n    def topKFrequent(self, nums: List[int], k: int) -> List[int]:\n        count = {}\n        freq = [[] for i in range(len(nums) + 1)]\n\n        for n in nums:\n            count[n] = 1 + count.get(n, 0)\n        for n, c in count.items():\n            freq[c].append(n)\n\n        res = []\n        for i in range(len(freq) - 1, 0, -1):\n            res += freq[i]\n            if len(res) == k:\n                return res\n                \n\n        # O(n)\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "neetcode",
+      "number": 371,
+      "path": "python/0371-sum-of-two-integers.py",
+      "code": "class Solution:\n    def getSum(self, a: int, b: int) -> int:\n        def add(a, b):\n            if not a or not b:\n                return a or b\n            return add(a ^ b, (a & b) << 1)\n\n        if a * b < 0:  # assume a < 0, b > 0\n            if a > 0:\n                return self.getSum(b, a)\n            if add(~a, 1) == b:  # -a == b\n                return 0\n            if add(~a, 1) < b:  # -a < b\n                return add(~add(add(~a, 1), add(~b, 1)), 1)  # -add(-a, -b)\n\n        return add(a, b)  # a*b >= 0 or (-a) > b > 0\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 371,
+      "path": "solutions/371. Sum of Two Integers/371.py",
+      "code": "class Solution:\n  def getSum(self, a: int, b: int) -> int:\n    mask = 0xFFFFFFFF\n    MAX = 2000\n\n    while b != 0:\n      a, b = (a ^ b) & mask, ((a & b) << 1) & mask\n\n    return a if a < MAX else ~(a ^ mask)\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 417,
+      "path": "python/0417-pacific-atlantic-water-flow.py",
+      "code": "class Solution:\n    def pacificAtlantic(self, heights: List[List[int]]) -> List[List[int]]:\n        ROWS, COLS = len(heights), len(heights[0])\n        pac, atl = set(), set()\n\n        def dfs(r, c, visit, prevHeight):\n            if (\n                (r, c) in visit\n                or r < 0\n                or c < 0\n                or r == ROWS\n                or c == COLS\n                or heights[r][c] < prevHeight\n            ):\n                return\n            visit.add((r, c))\n            dfs(r + 1, c, visit, heights[r][c])\n            dfs(r - 1, c, visit, heights[r][c])\n            dfs(r, c + 1, visit, heights[r][c])\n            dfs(r, c - 1, visit, heights[r][c])\n\n        for c in range(COLS):\n            dfs(0, c, pac, heights[0][c])\n            dfs(ROWS - 1, c, atl, heights[ROWS - 1][c])\n\n        for r in range(ROWS):\n            dfs(r, 0, pac, heights[r][0])\n            dfs(r, COLS - 1, atl, heights[r][COLS - 1])\n\n        res = []\n        for r in range(ROWS):\n            for c in range(COLS):\n                if (r, c) in pac and (r, c) in atl:\n                    res.append([r, c])\n        return res\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 417,
+      "path": "solutions/417. Pacific Atlantic Water Flow/417.py",
+      "code": "class Solution:\n  def pacificAtlantic(self, heights: list[list[int]]) -> list[list[int]]:\n    DIRS = ((0, 1), (1, 0), (0, -1), (-1, 0))\n    m = len(heights)\n    n = len(heights[0])\n    qP = collections.deque()\n    qA = collections.deque()\n    seenP = [[False] * n for _ in range(m)]\n    seenA = [[False] * n for _ in range(m)]\n\n    for i in range(m):\n      qP.append((i, 0))\n      qA.append((i, n - 1))\n      seenP[i][0] = True\n      seenA[i][n - 1] = True\n\n    for j in range(n):\n      qP.append((0, j))\n      qA.append((m - 1, j))\n      seenP[0][j] = True\n      seenA[m - 1][j] = True\n\n    def bfs(q: deque, seen: list[list[bool]]):\n      while q:\n        i, j = q.popleft()\n        h = heights[i][j]\n        for dx, dy in DIRS:\n          x = i + dx\n          y = j + dy\n          if x < 0 or x == m or y < 0 or y == n:\n            continue\n          if seen[x][y] or heights[x][y] < h:\n            continue\n          q.append((x, y))\n          seen[x][y] = True\n\n    bfs(qP, seenP)\n    bfs(qA, seenA)\n\n    return [[i, j] for i in range(m) for j in range(n) if seenP[i][j] and seenA[i][j]]\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 424,
+      "path": "python/0424-longest-repeating-character-replacement.py",
+      "code": "class Solution:\n    def characterReplacement(self, s: str, k: int) -> int:\n        count = {}\n        \n        l = 0\n        maxf = 0\n        for r in range(len(s)):\n            count[s[r]] = 1 + count.get(s[r], 0)\n            maxf = max(maxf, count[s[r]])\n\n            if (r - l + 1) - maxf > k:\n                count[s[l]] -= 1\n                l += 1\n\n        return (r - l + 1)\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 424,
+      "path": "solutions/424. Longest Repeating Character Replacement/424.py",
+      "code": "class Solution:\n  def characterReplacement(self, s: str, k: int) -> int:\n    ans = 0\n    maxCount = 0\n    count = collections.Counter()\n\n    l = 0\n    for r, c in enumerate(s):\n      count[c] += 1\n      maxCount = max(maxCount, count[c])\n      while maxCount + k < r - l + 1:\n        count[s[l]] -= 1\n        l += 1\n      ans = max(ans, r - l + 1)\n\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 435,
+      "path": "python/0435-non-overlapping-intervals.py",
+      "code": "class Solution:\n    def eraseOverlapIntervals(self, intervals: List[List[int]]) -> int:\n        intervals.sort()\n        res = 0\n        prevEnd = intervals[0][1]\n        for start, end in intervals[1:]:\n            if start >= prevEnd:\n                prevEnd = end\n            else:\n                res += 1\n                prevEnd = min(end, prevEnd)\n        return res\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 435,
+      "path": "solutions/435. Non-overlapping Intervals/435.py",
+      "code": "class Solution:\n  def eraseOverlapIntervals(self, intervals: list[list[int]]) -> int:\n    ans = 0\n    currentEnd = -math.inf\n\n    for interval in sorted(intervals, key=lambda x: x[1]):\n      if interval[0] >= currentEnd:\n        currentEnd = interval[1]\n      else:\n        ans += 1\n\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 647,
+      "path": "python/0647-palindromic-substrings.py",
+      "code": "class Solution:\n    def countSubstrings(self, s: str) -> int:\n        res = 0\n\n        for i in range(len(s)):\n            res += self.countPali(s, i, i)\n            res += self.countPali(s, i, i + 1)\n        return res\n\n    def countPali(self, s, l, r):\n        res = 0\n        while l >= 0 and r < len(s) and s[l] == s[r]:\n            res += 1\n            l -= 1\n            r += 1\n        return res\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 647,
+      "path": "solutions/647. Palindromic Substrings/647.py",
+      "code": "class Solution:\n  def countSubstrings(self, s: str) -> int:\n    def extendPalindromes(l: int, r: int) -> int:\n      count = 0\n\n      while l >= 0 and r < len(s) and s[l] == s[r]:\n        count += 1\n        l -= 1\n        r += 1\n\n      return count\n\n    ans = 0\n\n    for i in range(len(s)):\n      ans += extendPalindromes(i, i)\n      ans += extendPalindromes(i, i + 1)\n\n    return ans\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 778,
+      "path": "python/0778-swim-in-rising-water.py",
+      "code": "class Solution:\n    def swimInWater(self, grid: List[List[int]]) -> int:\n        N = len(grid)\n        visit = set()\n        minH = [[grid[0][0], 0, 0]]  # (time/max-height, r, c)\n        directions = [[0, 1], [0, -1], [1, 0], [-1, 0]]\n\n        visit.add((0, 0))\n        while minH:\n            t, r, c = heapq.heappop(minH)\n            if r == N - 1 and c == N - 1:\n                return t\n            for dr, dc in directions:\n                neiR, neiC = r + dr, c + dc\n                if (\n                    neiR < 0\n                    or neiC < 0\n                    or neiR == N\n                    or neiC == N\n                    or (neiR, neiC) in visit\n                ):\n                    continue\n                visit.add((neiR, neiC))\n                heapq.heappush(minH, [max(t, grid[neiR][neiC]), neiR, neiC])\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "neetcode",
+      "number": 1143,
+      "path": "python/1143-longest-common-subsequence.py",
+      "code": "class Solution:\n    def longestCommonSubsequence(self, text1: str, text2: str) -> int:\n        dp = [[0 for j in range(len(text2) + 1)] for i in range(len(text1) + 1)]\n\n        for i in range(len(text1) - 1, -1, -1):\n            for j in range(len(text2) - 1, -1, -1):\n                if text1[i] == text2[j]:\n                    dp[i][j] = 1 + dp[i + 1][j + 1]\n                else:\n                    dp[i][j] = max(dp[i][j + 1], dp[i + 1][j])\n\n        return dp[0][0]\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    },
+    {
+      "source": "walkccc",
+      "number": 1143,
+      "path": "solutions/1143. Longest Common Subsequence/1143.py",
+      "code": "class Solution:\n  def longestCommonSubsequence(self, text1: str, text2: str) -> int:\n    m = len(text1)\n    n = len(text2)\n    # dp[i][j] := the length of LCS(text1[0..i), text2[0..j))\n    dp = [[0] * (n + 1) for _ in range(m + 1)]\n\n    for i in range(m):\n      for j in range(n):\n        dp[i + 1][j + 1] = (1 + dp[i][j] if text1[i] == text2[j]\n                            else max(dp[i][j + 1], dp[i + 1][j]))\n\n    return dp[m][n]\n",
+      "status": "accepted",
+      "reason": null
+    },
+    {
+      "source": "neetcode",
+      "number": 1851,
+      "path": "python/1851-minimum-interval-to-include-each-query.py",
+      "code": "class Solution:\n    def minInterval(self, intervals: List[List[int]], queries: List[int]) -> List[int]:\n        intervals.sort()\n        minHeap = []\n        res = {}\n        i = 0\n        for q in sorted(queries):\n            while i < len(intervals) and intervals[i][0] <= q:\n                l, r = intervals[i]\n                heapq.heappush(minHeap, (r - l + 1, r))\n                i += 1\n\n            while minHeap and minHeap[0][1] < q:\n                heapq.heappop(minHeap)\n            res[q] = minHeap[0][0] if minHeap else -1\n        return [res[q] for q in queries]\n",
+      "status": "rejected",
+      "reason": "same code as the canonical"
+    }
+  ]
+}

@@ -1,13 +1,18 @@
 """Eval runner. Makes real API calls - costs real money, never runs in CI.
 
     uv run python -m evals.run_evals --all
-    uv run python -m evals.run_evals --feedback
+    uv run python -m evals.run_evals --feedback --split test
     uv run python -m evals.run_evals --enrichment --retrieval
 
 Answers are cached per prompt version, model and a digest of the code they were
 computed for (see CallCache), so a repeat run costs nothing, an edited fixture is
 re-bought, and --dry-run counts the same calls the run will make.
 --refresh-cache forces everything to be re-bought.
+
+The feedback bank has a dev split, where prompts are tuned, and a test split that is
+only scored. A test split's misses and false positives stay hidden - from stdout and
+from RESULTS.md - unless --reveal-test is passed, because reading them is how a prompt
+gets tuned to them. Re-running with --reveal-test is free: the answers are cached.
 """
 
 import argparse
@@ -22,7 +27,7 @@ import numpy as np
 
 from coach import config, embed, enrich, llm, review
 from evals import corpus, pairs
-from evals.bank import oracle
+from evals.bank import controls, oracle
 from evals.bank.problems import load_all
 
 EVALS_DIR = Path(__file__).resolve().parent
@@ -30,6 +35,7 @@ CACHE_DIR = EVALS_DIR / "cache"
 RESULTS_PATH = EVALS_DIR / "RESULTS.md"
 WORKERS = 8
 TOP_K = 5
+DETAILS = ("misses", "false_positives", "regression_false_positives")
 
 # Rough observed cost of one eval call, for --dry-run. Dominated by output
 # tokens, since thinking is billed as output.
@@ -122,33 +128,29 @@ def enrichment_cache(model: str) -> CallCache:
 # ---------------------------------------------------------------- feedback
 
 
-def build_bank():
-    """Every fixture with an execution-derived label. Clean controls included.
+def build_bank(split: str | None = None):
+    """Every fixture with an execution-derived label, clean controls included - of one split, or all.
 
-    A clean control is the canonical solution or one of its CLEAN_VARIANTS, and each
-    variant has to be proven clean before it is scored as one.
+    Each clean control is proven before it is scored as one: the canonical by
+    verify_canonical, every other control by verify_clean. A mutant the tests are too
+    weak to label raises TestsTooWeak, so the bank will not run until a test is added.
     """
     fixtures = []
     for problem in load_all():
+        if split and problem.SPLIT != split:
+            continue
         oracle.verify_canonical(problem)
-        controls = [{"id": "canonical", "code": problem.CANONICAL, "control": "representative"}]
-        for variant in problem.CLEAN_VARIANTS:
-            oracle.verify_clean(problem, variant)
-            controls.append({"id": variant["id"], "code": variant["code"], "control": variant["control"]})
-        for control in controls:
-            fixtures.append({"slug": problem.SLUG, "category": None, "problem": problem, **control})
+        common = {"slug": problem.SLUG, "split": problem.SPLIT, "problem": problem}
+        for control in controls.clean_controls(problem):
+            if control["id"] != "canonical":
+                oracle.verify_clean(problem, control)
+            fixtures.append({**common, "category": None, **control})
         for mutant in problem.MUTANTS:
             verdict = oracle.classify(problem, mutant["code"])
             if verdict.category is None:
                 continue
-            fixtures.append({
-                "slug": problem.SLUG,
-                "id": mutant["id"],
-                "category": verdict.category,
-                "evidence": verdict.evidence,
-                "code": mutant["code"],
-                "problem": problem,
-            })
+            fixtures.append({**common, "id": mutant["id"], "category": verdict.category,
+                             "evidence": verdict.evidence, "code": mutant["code"], "origin": "authored"})
     return fixtures
 
 
@@ -176,19 +178,28 @@ def false_positive_line(fixture, issues) -> str:
 
 
 def score_controls(scored) -> dict:
-    """False positives on one group of clean controls: any issue at all on code proven correct."""
+    """False positives on one group of clean controls: any issue at all on code proven correct.
+
+    Broken down by who wrote the code, because a reviewer that goes easy on famous
+    solutions it has seen before, and hard on code it has not, shows up only there.
+    """
     lines = [false_positive_line(fixture, result["issues"]) for fixture, result in scored if result["issues"]]
-    optimal = sum(result["verdict"] == "optimal" for _, result in scored)
+    by_origin: dict[str, dict[str, int]] = {}
+    for fixture, result in scored:
+        counts = by_origin.setdefault(fixture["origin"], {"controls": 0, "false_positives": 0})
+        counts["controls"] += 1
+        counts["false_positives"] += bool(result["issues"])
     n = len(scored)
     return {
         "n": n,
         "rate": len(lines) / n if n else 0.0,
-        "optimal_rate": optimal / n if n else 0.0,
+        "optimal_rate": sum(result["verdict"] == "optimal" for _, result in scored) / n if n else 0.0,
         "lines": lines,
+        "by_origin": dict(sorted(by_origin.items())),
     }
 
 
-def score_feedback(fixtures, results) -> dict:
+def score_split(fixtures, results) -> dict:
     """Recall on the flawed fixtures, and false positives on the clean ones.
 
     Regression controls are scored apart. Each was written to probe a false positive
@@ -198,12 +209,12 @@ def score_feedback(fixtures, results) -> dict:
     """
     per_category: dict[str, list[bool]] = {}
     misses = []
-    controls: dict[str, list] = {"representative": [], "regression": []}
+    groups: dict[str, list] = {"representative": [], "regression": []}
     for fixture, result in zip(fixtures, results):
         if result is None:
             continue
         if not fixture["category"]:
-            controls[fixture["control"]].append((fixture, result))
+            groups[fixture["control"]].append((fixture, result))
             continue
         found = {issue["category"] for issue in result["issues"]}
         caught = fixture["category"] in found
@@ -211,8 +222,8 @@ def score_feedback(fixtures, results) -> dict:
         if not caught:
             misses.append(miss_line(fixture, found))
 
-    representative = score_controls(controls["representative"])
-    regression = score_controls(controls["regression"])
+    representative = score_controls(groups["representative"])
+    regression = score_controls(groups["regression"])
     all_flags = [x for v in per_category.values() for x in v]
     return {
         "recall_by_category": {c: sum(v) / len(v) for c, v in sorted(per_category.items())},
@@ -221,6 +232,7 @@ def score_feedback(fixtures, results) -> dict:
         "false_positive_rate": representative["rate"],
         "clean_controls": representative["n"],
         "optimal_verdict_rate": representative["optimal_rate"],
+        "false_positives_by_origin": representative["by_origin"],
         "false_positives": representative["lines"],
         "regression_false_positive_rate": regression["rate"],
         "regression_controls": regression["n"],
@@ -229,14 +241,30 @@ def score_feedback(fixtures, results) -> dict:
     }
 
 
-def run_feedback(refresh: bool, model: str) -> dict:
+def score_feedback(fixtures, results) -> dict:
+    """Scores for each split, each from its own fixtures: a test number never absorbs a dev fixture."""
+    splits: dict[str, tuple[list, list]] = {}
+    for fixture, result in zip(fixtures, results):
+        split_fixtures, split_results = splits.setdefault(fixture["split"], ([], []))
+        split_fixtures.append(fixture)
+        split_results.append(result)
+    return {split: score_split(*group) for split, group in sorted(splits.items())}
+
+
+def hide_details(scores: dict) -> dict:
+    """A split's numbers without the lines that name what it missed or flagged."""
+    return {**{key: value for key, value in scores.items() if key not in DETAILS}, "details_hidden": True}
+
+
+def run_feedback(refresh: bool, model: str, split: str | None, reveal_test: bool) -> dict:
     print("\n[feedback] labelling fixtures by execution ...")
-    fixtures = build_bank()
-    flawed = [f for f in fixtures if f["category"]]
-    regression = [f for f in fixtures if not f["category"] and f["control"] == "regression"]
-    representative = len(fixtures) - len(flawed) - len(regression)
-    print(f"  {len(flawed)} flawed + {representative} clean controls"
-          f" + {len(regression)} regression controls")
+    fixtures = build_bank(split)
+    for name in sorted({f["split"] for f in fixtures}):
+        in_split = [f for f in fixtures if f["split"] == name]
+        flawed = sum(bool(f["category"]) for f in in_split)
+        regression = sum(not f["category"] and f["control"] == "regression" for f in in_split)
+        print(f"  {name}: {flawed} flawed + {len(in_split) - flawed - regression} clean controls"
+              f" + {regression} regression controls")
 
     # Cached per prompt version and fixture, so correcting a LABEL (which changes
     # scoring, not the model's answer) costs nothing to re-score.
@@ -261,11 +289,13 @@ def run_feedback(refresh: bool, model: str) -> dict:
 
     keyed = [(review_key(f), f) for f in fixtures]
     cached = review_cache(model).fill(keyed, review_one, "reviewing", refresh)
-    results = [cached.get(key) for key, _ in keyed]
+    scores = score_feedback(fixtures, [cached.get(key) for key, _ in keyed])
+    if "test" in scores and not reveal_test:
+        scores["test"] = hide_details(scores["test"])
     return {
         "prompt_version": review.PROMPT_VERSION,
         "fixtures": len(fixtures),
-        **score_feedback(fixtures, results),
+        "splits": scores,
     }
 
 
@@ -387,13 +417,14 @@ def run_retrieval(cached: dict) -> dict:
 # ------------------------------------------------------------------ report
 
 
-def append_results(sections: dict, model: str) -> None:
-    stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
-    lines = [f"\n## {stamp} · model `{model}`\n"]
-
-    if "feedback" in sections:
-        f = sections["feedback"]
-        lines.append(f"### Feedback quality — prompt `{f['prompt_version']}`\n")
+def feedback_lines(feedback: dict) -> list[str]:
+    """The run-log lines for one feedback run: a table per split, then what it missed and flagged."""
+    lines = []
+    for split, f in feedback["splits"].items():
+        heading = f"### Feedback quality — prompt `{feedback['prompt_version']}` · split `{split}`"
+        if split == "test":
+            heading += " · details " + ("hidden" if f.get("details_hidden") else "revealed")
+        lines.append(heading + "\n")
         lines.append("| Metric | Value | n |")
         lines.append("|---|---|---|")
         for category, value in f["recall_by_category"].items():
@@ -402,12 +433,19 @@ def append_results(sections: dict, model: str) -> None:
                      f" {sum(f['counts'].values())} |")
         lines.append(f"| **false-positive rate** (clean controls) |"
                      f" **{f['false_positive_rate']:.0%}** | {f['clean_controls']} |")
+        for origin, counts in f["false_positives_by_origin"].items():
+            lines.append(f"| false-positive rate · {origin} |"
+                         f" {counts['false_positives'] / counts['controls']:.0%} | {counts['controls']} |")
         lines.append(f"| verdict `optimal` on clean controls | {f['optimal_verdict_rate']:.0%} |"
                      f" {f['clean_controls']} |")
         if f["regression_controls"]:
             lines.append(f"| false-positive rate (regression controls, scored apart) |"
                          f" {f['regression_false_positive_rate']:.0%} | {f['regression_controls']} |")
         lines.append("")
+        if f.get("details_hidden"):
+            lines.append("_Misses and false positives not shown: `--reveal-test` shows them, and"
+                         " spends this split for prompt work._\n")
+            continue
         # One bullet each: these now carry the execution evidence behind the label
         # and the model's own words, which do not fit on a joined line.
         if f["misses"]:
@@ -422,6 +460,15 @@ def append_results(sections: dict, model: str) -> None:
             lines.append("**False positives on regression controls** (scored apart)\n")
             lines.extend(f"- {fp}" for fp in f["regression_false_positives"])
             lines.append("")
+    return lines
+
+
+def append_results(sections: dict, model: str) -> None:
+    stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    lines = [f"\n## {stamp} · model `{model}`\n"]
+
+    if "feedback" in sections:
+        lines.extend(feedback_lines(sections["feedback"]))
 
     if "enrichment" in sections:
         e = sections["enrichment"]
@@ -463,11 +510,15 @@ def append_results(sections: dict, model: str) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--feedback", action="store_true")
     parser.add_argument("--enrichment", action="store_true")
     parser.add_argument("--retrieval", action="store_true")
     parser.add_argument("--all", action="store_true")
+    parser.add_argument("--split", choices=("dev", "test"),
+                        help="Build and score one split of the feedback bank (default: both)")
+    parser.add_argument("--reveal-test", action="store_true",
+                        help="Show the test split's misses and false positives - this spends it for prompt work")
     parser.add_argument("--refresh-cache", action="store_true")
     parser.add_argument("--model", default=config.EVAL_MODEL,
                         help=f"Model to score (default: {config.EVAL_MODEL}). Pass"
@@ -489,7 +540,7 @@ def main() -> int:
         reviews = enrichments = 0
         if want_feedback:
             print("labelling fixtures by execution to count them ...", flush=True)
-            keyed = [(review_key(f), f) for f in build_bank()]
+            keyed = [(review_key(f), f) for f in build_bank(args.split)]
             reviews = len(review_cache(args.model).pending(keyed, args.refresh_cache))
         if want_enrichment or want_retrieval:
             keyed = [(enrich_key(e), e) for e in corpus.load()]
@@ -509,7 +560,7 @@ def main() -> int:
 
     sections = {}
     if want_feedback:
-        sections["feedback"] = run_feedback(args.refresh_cache, args.model)
+        sections["feedback"] = run_feedback(args.refresh_cache, args.model, args.split, args.reveal_test)
     if want_enrichment or want_retrieval:
         print("\n[enrichment] corpus ...")
         cached = enrich_corpus(args.refresh_cache, args.model)

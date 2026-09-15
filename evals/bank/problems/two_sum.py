@@ -2,6 +2,8 @@ NUMBER = 1
 SLUG = "two-sum"
 TITLE = "Two Sum"
 DIFFICULTY = "Easy"
+SPLIT = "dev"
+METHOD = "twoSum"
 
 CANONICAL = '''\
 class Solution:
@@ -22,6 +24,30 @@ TESTS = [
 ]
 
 SCALE = (list(range(3000)), 5997)
+SPACE_SCALE = (list(range(10_000)), 19_997)
+
+
+def normalize(pair):
+    """LeetCode accepts the two indices in either order, and some solutions return a tuple."""
+    return sorted(pair)
+
+
+def reference(nums, target):
+    for i in range(len(nums)):
+        for j in range(i + 1, len(nums)):
+            if nums[i] + nums[j] == target:
+                return [i, j]
+
+
+def generate(rng):
+    # constraints: 2 <= nums.length <= 10^4, and exactly one pair adds up to target
+    while True:
+        nums = [rng.randint(-9, 9) for _ in range(rng.randint(2, 9))]
+        i, j = rng.sample(range(len(nums)), 2)
+        target = nums[i] + nums[j]
+        pairs = sum(nums[a] + nums[b] == target for a in range(len(nums)) for b in range(a + 1, len(nums)))
+        if pairs == 1:
+            return (nums, target)
 
 MUTANTS = [
     {

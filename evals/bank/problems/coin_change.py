@@ -2,6 +2,8 @@ NUMBER = 322
 SLUG = "coin-change"
 TITLE = "Coin Change"
 DIFFICULTY = "Medium"
+SPLIT = "dev"
+METHOD = "coinChange"
 
 CANONICAL = '''\
 class Solution:
@@ -23,6 +25,27 @@ TESTS = [
 ]
 
 SCALE = ([1, 2, 5, 10, 25], 400)
+SPACE_SCALE = ([1, 2, 5, 10, 25], 10_000)
+
+
+def reference(coins, amount):
+    # breadth-first over totals: the first time a total is reached, it is reached with fewest coins
+    fewest = {0: 0}
+    frontier = [0]
+    while frontier:
+        reached = []
+        for total in frontier:
+            for coin in coins:
+                if total + coin <= amount and total + coin not in fewest:
+                    fewest[total + coin] = fewest[total] + 1
+                    reached.append(total + coin)
+        frontier = reached
+    return fewest.get(amount, -1)
+
+
+def generate(rng):
+    # constraints: 1 <= coins.length <= 12, distinct coins >= 1, 0 <= amount <= 10^4
+    return (rng.sample(range(1, 12), rng.randint(1, 4)), rng.randint(0, 40))
 
 MUTANTS = [
     {

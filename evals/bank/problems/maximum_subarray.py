@@ -2,6 +2,8 @@ NUMBER = 53
 SLUG = "maximum-subarray"
 TITLE = "Maximum Subarray"
 DIFFICULTY = "Medium"
+SPLIT = "dev"
+METHOD = "maxSubArray"
 
 CANONICAL = '''\
 class Solution:
@@ -22,6 +24,20 @@ TESTS = [
 ]
 
 SCALE = ([(-1) ** i * (i % 17) for i in range(250)],)
+SPACE_SCALE = ([(-1) ** i * (i % 17) for i in range(100_000)],)
+
+
+def reference(nums):
+    return max(sum(nums[i:j]) for i in range(len(nums)) for j in range(i + 1, len(nums) + 1))
+
+
+def generate(rng):
+    # constraints: 1 <= nums.length <= 10^5, -10^4 <= nums[i] <= 10^4
+    return ([rng.randint(-10, 10) for _ in range(rng.randint(1, 10))],)
+
+
+def is_edge(nums):
+    return len(nums) == 1 or max(nums) < 0
 
 MUTANTS = [
     {

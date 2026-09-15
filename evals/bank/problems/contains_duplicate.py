@@ -2,6 +2,8 @@ NUMBER = 217
 SLUG = "contains-duplicate"
 TITLE = "Contains Duplicate"
 DIFFICULTY = "Easy"
+SPLIT = "dev"
+METHOD = "containsDuplicate"
 
 CANONICAL = '''\
 class Solution:
@@ -23,6 +25,16 @@ TESTS = [
 ]
 
 SCALE = (list(range(3000)),)
+SPACE_SCALE = (list(range(100_000)),)
+
+
+def reference(nums):
+    return any(nums[i] == nums[j] for i in range(len(nums)) for j in range(i + 1, len(nums)))
+
+
+def generate(rng):
+    # constraints: 1 <= nums.length <= 10^5
+    return ([rng.randint(-4, 4) for _ in range(rng.randint(1, 10))],)
 
 MUTANTS = [
     {

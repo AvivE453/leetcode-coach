@@ -6,5 +6,7 @@ __pycache__/
 .ruff_cache/
 dist/
 evals/cache/
+evals/bank/private/
+*.partial
 CLAUDE.md
 data/coach.db

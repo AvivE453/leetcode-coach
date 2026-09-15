@@ -2,6 +2,8 @@ NUMBER = 3
 SLUG = "longest-substring-without-repeating-characters"
 TITLE = "Longest Substring Without Repeating Characters"
 DIFFICULTY = "Medium"
+SPLIT = "dev"
+METHOD = "lengthOfLongestSubstring"
 
 CANONICAL = '''\
 class Solution:
@@ -28,6 +30,25 @@ TESTS = [
 
 # All-distinct characters, so a brute force cannot break early out of its inner loop.
 SCALE = ("".join(chr(0x4E00 + i) for i in range(2000)),)
+SPACE_SCALE = ("".join(chr(32 + i % 95) for i in range(50_000)),)
+
+
+def reference(s):
+    best = 0
+    for i in range(len(s)):
+        for j in range(i + 1, len(s) + 1):
+            if len(set(s[i:j])) == j - i:
+                best = max(best, j - i)
+    return best
+
+
+def generate(rng):
+    # constraints: 0 <= s.length <= 5 * 10^4; letters, digits, symbols and spaces
+    return ("".join(rng.choice("abc d!") for _ in range(rng.randint(0, 12))),)
+
+
+def is_edge(s):
+    return len(s) <= 1
 
 MUTANTS = [
     {

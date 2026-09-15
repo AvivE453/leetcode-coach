@@ -2,6 +2,8 @@ NUMBER = 153
 SLUG = "find-minimum-in-rotated-sorted-array"
 TITLE = "Find Minimum in Rotated Sorted Array"
 DIFFICULTY = "Medium"
+SPLIT = "dev"
+METHOD = "findMin"
 
 CANONICAL = '''\
 class Solution:
@@ -25,6 +27,18 @@ TESTS = [
 ]
 
 SCALE = (list(range(500, 2000)) + list(range(500)),)
+SPACE_SCALE = (list(range(2500, 5000)) + list(range(2500)),)
+
+
+def reference(nums):
+    return min(nums)
+
+
+def generate(rng):
+    # constraints: 1 <= n <= 5000, unique values, sorted ascending and then rotated
+    values = sorted(rng.sample(range(-30, 30), rng.randint(1, 10)))
+    k = rng.randrange(len(values))
+    return (values[k:] + values[:k],)
 
 MUTANTS = [
     {

@@ -16,11 +16,19 @@ that does not exist, and a reviewer is right to ignore it. Where a test was
 removed for this reason the mutant it caught usually becomes indistinguishable
 from the canonical solution, and `oracle.classify` discards it automatically.
 
+The judge's own tools sit beside them. `reference` is a brute force written to be
+obviously right rather than fast; `generate(rng)` returns random inputs the problem's
+constraints allow; `normalize`, where present, maps every answer LeetCode accepts to one
+form; SPACE_SCALE is the largest input the constraints allow, for the memory check.
+SPLIT puts the problem in "dev", where prompts are tuned, or "test", which is only ever
+scored (see evals/bank/controls.py).
+
 CLEAN_VARIANTS are further clean controls: other correct solutions, each one proven
-clean by `oracle.verify_clean` (it passes every test and is not measurably slower
-than the canonical). Execution does not measure space, so a variant must also use no
-more space than the canonical - an O(n) slice where the canonical needs O(1) is a
-genuine finding, and the reviewer would be scored as a false positive for being right.
+clean by `oracle.verify_clean` - it passes every test, agrees with the reference, is not
+measurably slower than the canonical, and does not need megabytes where the canonical needs
+almost no memory. Memory is checked because timing cannot see it: an O(n) copy where the
+canonical needs O(1) is a genuine finding, and a reviewer reporting it would be scored as a
+false positive for being right.
 
 A variant's `control` says how it is scored. "representative" is another way a strong
 candidate writes the optimal solution, and counts toward the headline false-positive

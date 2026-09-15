@@ -2,6 +2,8 @@ NUMBER = 242
 SLUG = "valid-anagram"
 TITLE = "Valid Anagram"
 DIFFICULTY = "Easy"
+SPLIT = "dev"
+METHOD = "isAnagram"
 
 CANONICAL = '''\
 class Solution:
@@ -30,6 +32,19 @@ TESTS = [
 ]
 
 SCALE = ("ab" * 40000, "ba" * 40000)
+SPACE_SCALE = ("ab" * 25_000, "ba" * 25_000)
+
+
+def reference(s, t):
+    return sorted(s) == sorted(t)
+
+
+def generate(rng):
+    # constraints: 1 <= s.length, t.length <= 5 * 10^4; lowercase English letters
+    def word():
+        return "".join(rng.choice("abc") for _ in range(rng.randint(1, 8)))
+
+    return (word(), word())
 
 MUTANTS = [
     {

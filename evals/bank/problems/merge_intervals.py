@@ -2,6 +2,8 @@ NUMBER = 56
 SLUG = "merge-intervals"
 TITLE = "Merge Intervals"
 DIFFICULTY = "Medium"
+SPLIT = "dev"
+METHOD = "merge"
 
 CANONICAL = '''\
 class Solution:
@@ -25,6 +27,38 @@ TESTS = [
 ]
 
 SCALE = ([[i, i + 1] for i in range(0, 6000, 2)],)
+SPACE_SCALE = ([[i, i + 1] for i in range(0, 20_000, 2)],)
+
+
+def normalize(merged):
+    """LeetCode accepts the merged intervals in any order, as lists or tuples."""
+    return sorted(list(interval) for interval in merged)
+
+
+def reference(intervals):
+    merged = [list(interval) for interval in intervals]
+    changed = True
+    while changed:
+        changed = False
+        for a in range(len(merged)):
+            for b in range(a + 1, len(merged)):
+                if merged[a][0] <= merged[b][1] and merged[b][0] <= merged[a][1]:
+                    merged[a] = [min(merged[a][0], merged[b][0]), max(merged[a][1], merged[b][1])]
+                    del merged[b]
+                    changed = True
+                    break
+            if changed:
+                break
+    return sorted(merged)
+
+
+def generate(rng):
+    # constraints: 1 <= intervals.length <= 10^4, 0 <= start <= end <= 10^4
+    intervals = []
+    for _ in range(rng.randint(1, 8)):
+        start = rng.randint(0, 12)
+        intervals.append([start, start + rng.randint(0, 5)])
+    return (intervals,)
 
 MUTANTS = [
     {

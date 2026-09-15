@@ -2,6 +2,8 @@ NUMBER = 238
 SLUG = "product-of-array-except-self"
 TITLE = "Product of Array Except Self"
 DIFFICULTY = "Medium"
+SPLIT = "dev"
+METHOD = "productExceptSelf"
 
 CANONICAL = '''\
 class Solution:
@@ -27,6 +29,27 @@ TESTS = [
 ]
 
 SCALE = ([1] * 3000,)  # all ones: keeps arithmetic O(1) so timing measures the loop shape
+SPACE_SCALE = ([1] * 100_000,)
+
+
+def reference(nums):
+    out = []
+    for i in range(len(nums)):
+        product = 1
+        for j, x in enumerate(nums):
+            if i != j:
+                product *= x
+        out.append(product)
+    return out
+
+
+def generate(rng):
+    # constraints: 2 <= nums.length <= 10^5, -30 <= nums[i] <= 30
+    return ([rng.randint(-3, 3) for _ in range(rng.randint(2, 8))],)
+
+
+def is_edge(nums):
+    return 0 in nums
 
 MUTANTS = [
     {

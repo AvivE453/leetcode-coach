@@ -2,6 +2,8 @@ NUMBER = 70
 SLUG = "climbing-stairs"
 TITLE = "Climbing Stairs"
 DIFFICULTY = "Easy"
+SPLIT = "dev"
+METHOD = "climbStairs"
 
 CANONICAL = '''\
 class Solution:
@@ -20,6 +22,27 @@ TESTS = [
 ]
 
 SCALE = (32,)
+SPACE_SCALE = (45,)
+
+
+def reference(n):
+    ways = {0: 1, 1: 1}
+
+    def count(left):
+        if left not in ways:
+            ways[left] = count(left - 1) + count(left - 2)
+        return ways[left]
+
+    return count(n)
+
+
+def generate(rng):
+    # constraints: 1 <= n <= 45
+    return (rng.randint(1, 45),)
+
+
+def is_edge(n):
+    return n <= 2
 
 MUTANTS = [
     {

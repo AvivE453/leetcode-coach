@@ -2,6 +2,8 @@ NUMBER = 20
 SLUG = "valid-parentheses"
 TITLE = "Valid Parentheses"
 DIFFICULTY = "Easy"
+SPLIT = "dev"
+METHOD = "isValid"
 
 CANONICAL = '''\
 class Solution:
@@ -31,6 +33,20 @@ TESTS = [
 ]
 
 SCALE = ("()" * 50000,)
+SPACE_SCALE = ("(" * 5000 + ")" * 5000,)
+
+
+def reference(s):
+    while True:
+        shorter = s.replace("()", "").replace("[]", "").replace("{}", "")
+        if shorter == s:
+            return s == ""
+        s = shorter
+
+
+def generate(rng):
+    # constraints: 1 <= s.length <= 10^4, only the six bracket characters
+    return ("".join(rng.choice("()[]{}") for _ in range(rng.randint(1, 10))),)
 
 MUTANTS = [
     {
