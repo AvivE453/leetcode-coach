@@ -164,7 +164,10 @@ function renderLogResult(data) {
   box.replaceChildren();
   box.hidden = false;
 
-  box.append(el("h3", { text: `Logged (${data.number}) ${data.title} (${data.outcome})` }));
+  box.append(el("div", { class: "result-head" }, [
+    el("h3", { text: `Logged (${data.number}) ${data.title} (${data.outcome})` }),
+    el("a", { class: "btn ghost", href: `/solutions?number=${data.number}`, text: "Go to review" }),
+  ]));
   box.append(el("p", { text: `Next review: ${data.practice.review_due}` }));
   if (!data.counted_as_review) {
     box.append(el("p", { class: "hint", text:
@@ -172,9 +175,6 @@ function renderLogResult(data) {
   }
   const note = approachPracticeNote(data);
   if (note) box.append(note);
-  box.append(el("p", {}, [
-    el("a", { class: "btn ghost", href: `/solutions?number=${data.number}`, text: "Go to review" }),
-  ]));
 
   const e = data.enrichment;
   if (e.status === "skipped") {

@@ -2,8 +2,8 @@
    Contrast: body text 14.8:1, muted text 7.4:1, white on the button gradient
    5.2:1 at its lightest stop (WCAG AA at every size). */
 
-/* Permanent Marker (Apache License 2.0, fonts/PermanentMarker-LICENSE.txt), served from
-   here rather than Google Fonts so the coach renders the same offline. It has one weight,
+/* Both fonts are served from here rather than Google Fonts so the coach renders the same offline.
+   Permanent Marker (Apache License 2.0, fonts/PermanentMarker-LICENSE.txt) has one weight,
    so bold is never synthesised: a smeared faux-bold marker reads worse than none. */
 @font-face {
   font-family: "Permanent Marker";
@@ -11,6 +11,16 @@
   font-weight: 400;
   font-display: swap;
   src: url("fonts/PermanentMarker-Regular.woff2") format("woff2");
+}
+
+/* Inter (SIL Open Font License 1.1, fonts/Inter-LICENSE.txt), the variable build: one file
+   carries every weight the stylesheet asks for, 650 included. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("fonts/InterVariable.woff2") format("woff2");
 }
 
 :root {
@@ -27,6 +37,8 @@
   --medium: #fbbf24;
   --hard: #f87171;
   --danger: #fca5a5;
+  --font-text: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Permanent Marker", ui-sans-serif, system-ui, sans-serif;
   --radius: 14px;
   --shadow: 0 10px 30px rgba(3, 8, 20, 0.45);
   /* The card palette, taken from the neon reference the cards were restyled after. */
@@ -43,10 +55,15 @@ body {
   margin: 0;
   background: radial-gradient(1200px 600px at 20% -10%, #14213c 0%, var(--bg) 55%) fixed;
   color: var(--text);
-  font: 16px/1.55 "Permanent Marker", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 16px/1.55 var(--font-text);
   font-synthesis: none;
   min-height: 100vh;
 }
+
+/* The marker is for headings, the big numbers, the difficulty, the nav and the log form's two
+   buttons: it has one weight and blurs at small sizes, so everything meant to be read runs in Inter. */
+h1, h2, h3, .hero .label, .hero .big, .card .k, .card .v,
+.hero-diff, .diff, .pills a, .hero .btn, .form-card .btn { font-family: var(--font-display); }
 
 .wrap { max-width: 1040px; margin: 0 auto; padding: 28px 20px 80px; }
 
@@ -191,7 +208,7 @@ a { color: var(--accent); }
 .section-title + .hint { margin-bottom: 16px; }
 
 .card .v { font-size: 1.8rem; font-weight: 650; margin: 0; line-height: 1.15; }
-.card .v small { display: block; font-size: 0.86rem; font-weight: 400; color: var(--text); }
+.card .v small { display: block; font-family: var(--font-text); font-size: 0.86rem; font-weight: 400; color: var(--text); }
 
 .bar {
   height: 6px;
@@ -299,7 +316,9 @@ fieldset { border: 0; padding: 0; margin: 0 0 16px; }
 }
 
 .result { border-left: 3px solid var(--tone); }
-.result h3 { margin: 0 0 8px; font-size: 1rem; }
+/* The title shares a row with its link to the review, which sits in the top-right corner. */
+.result-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.result h3 { margin: 0; font-size: 1.3rem; color: var(--tone); }
 .result p { margin: 4px 0; }
 
 .badge {
@@ -326,7 +345,7 @@ fieldset { border: 0; padding: 0; margin: 0 0 16px; }
 /* Stale patterns is teal. By id, because the in-a-row tone cycle would otherwise outrank it. */
 #topics > .card { --tone: var(--tone-teal); }
 
-.diff { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.04em; }
+.diff { font-size: 0.95rem; font-weight: 700; letter-spacing: 0.04em; }
 .diff.Easy { color: var(--easy); }
 .diff.Medium { color: var(--medium); }
 .diff.Hard { color: var(--hard); }
