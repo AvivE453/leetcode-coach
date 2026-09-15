@@ -75,9 +75,12 @@ Without it that test skips and the rest of the suite still passes.
 
 ## How it works
 
-Everything the LLM does here is **measured**, not assumed: review feedback catches 97% of
-planted flaws (29/30) and reports no issue on any of 35 correct solutions, against ground
-truth produced by *executing* the code rather than by opinion.
+Everything the LLM does here is **measured**, not assumed. On 25 problems the review prompt
+was never tuned on, 8 of them Hard, review feedback catches 82% of planted flaws (59/72)
+and reports an issue on 20% of correct solutions (10/49). Ground truth comes from
+*executing* the code rather than from opinion, and every correct solution in that set was
+written outside this repo. On the problems the prompt was tuned on it scored 97% and 0%:
+that gap is what a held-out set is for.
 
 The architecture, the design decisions behind it, and the full eval methodology are in
 **[docs/DESIGN.md](docs/DESIGN.md)**.

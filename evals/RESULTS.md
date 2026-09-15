@@ -10,6 +10,77 @@ Ground truth: feedback labels come from executing each mutant against a test har
 
 ## Feedback quality
 
+### Held out: 82% recall, 20% false positives
+
+`bank-v4` holds 60 problems. The 13 that every row further down was measured on, and that
+`review-v4` was written against, sit in its `dev` split with 22 new ones. The other 25 new
+problems are a `test` split no prompt has been tuned on - 3 Easy, 14 Medium, 8 Hard,
+assigned mechanically (within each difficulty, sorted by number, alternating, test
+first). Every clean control in it was written outside this repo: NeetCode and walkccc
+solutions copied unmodified at pinned commits, and the author's own clean solves. The
+bank, tests and mutants included, was committed (`7350811`) before any review call on
+it. This is the number to quote:
+
+| `review-v4` · Sonnet 5 · `bank-v4` test | Result | 95% CI (Wilson) |
+|---|---|---|
+| **recall on planted flaws** | **82%** (59/72) | 72–89% |
+| · bug | 75% (33/44) | 61–85% |
+| · complexity | 90% (19/21) | 71–97% |
+| · edge-case | 100% (7/7) | 65–100% |
+| **false-positive rate on clean controls** | **20%** (10/49) | 12–34% |
+| · NeetCode | 22% (5/23) | 10–42% |
+| · walkccc | 14% (3/22) | 5–33% |
+| · the author's own solves | 50% (2/4) | 15–85% |
+
+By difficulty, recall and false positives: Easy 7/8 and 3/8, Medium 32/41 and 5/27, Hard
+20/23 and 2/14. At this size the reviewer does no worse on Hard problems.
+
+**The tuned numbers did not transfer.** On the 13 problems it was written against,
+`review-v4` scored 97% (29/30) and 0% (0/35). The false-positive gap is well outside
+chance (Fisher exact p = 0.004), the recall gap borderline (p = 0.06). The two sets
+differ in more than tuning - the test problems are harder, and none of their code was
+written here - so the drop is not attributed to overfitting alone. What it does settle is
+which number describes the reviewer.
+
+**What the revealed lines show.** This reading came after the run, from the bank's
+authors - Claude Code among them, the same model family as the reviewer - so check it
+against the run log below; it does not correct the number.
+
+- **8 of the 10 false positives are defensible claims.** Five say published code uses
+  more space than it needs: a filtered, reversed copy in NeetCode's Valid Palindrome
+  where two pointers need O(1), and a full table for Longest Common Subsequence and
+  Distinct Subsequences (canonical and walkccc for each) where one rolling row is enough.
+  The canonical does the same in each, and the oracle measures memory only against the
+  canonical, so it passed them as clean. Two more are space remarks on the author's own
+  solves, whose code and claims stay private; read against that code, they hold up on
+  the same grounds. The eighth is Pacific Atlantic's recursive DFS, which can exceed
+  CPython's default recursion limit on a 200×200 grid: true in plain Python, and hidden
+  by the oracle raising that limit. The other two are wrong or immaterial: Group Anagrams
+  (walkccc) returning `dict.values()` called a bug, alongside a sorted-string key called
+  non-optimal at k ≤ 100, and slice copies in House Robber II at n ≤ 100.
+- **Of the 13 misses, 2 are the old category dispute.** Spiral Matrix and Pacific
+  Atlantic are reported as `edge-case`, but a LeetCode example input fails, so the oracle
+  says `bug`. **One is a label the prompt's own constraints rule argues against:**
+  counting all 32 bits of every number (Counting Bits) is 20× slower than the DP at scale,
+  yet takes about 0.14 s at the largest n allowed.
+- **The other 10 are plain misses, and 8 of them report nothing at all on a bug that fails
+  one of LeetCode's own examples:** the flipped comparison in Container With Most Water,
+  two mistakes in Trapping Rain Water's pointers, both Insert Interval mutants, Minimum
+  Window Substring, Longest Consecutive Sequence, and buckets walked from the least
+  frequent in Top K Frequent Elements. Each is one small edit to a published NeetCode
+  solution, which fits a reviewer that recognises a famous solution instead of tracing
+  it. This run cannot test that guess, since the dev mutants came from code written here.
+  The last two are a DP that takes the best neighbour on a match (Longest Common
+  Subsequence, where only a space remark came back) and a loop over `nums` instead of its
+  set (Longest Consecutive Sequence), which turns quadratic when a sequence start repeats.
+
+**What follows.** The test split is revealed, so it is spent: a `review-v5` needs new test
+problems before its number means anything. And before a false-positive rate can be read
+as the reviewer's error rate alone, "clean" has to mean optimal, not merely no worse than
+the canonical.
+
+### How it got here, on the dev problems
+
 Four prompts on two models, measured against three versions of the bank. `bank-v1` was
 the first fixture set; `bank-v2` is the same set after three ground-truth defects were
 corrected (below); `bank-v3` adds 22 clean controls and 6 regression controls to
@@ -162,22 +233,32 @@ hashing pairs.
 
 ## Known limitations
 
-- **edge-case n=4.** Differences below roughly 25 percentage points in that column are
-  a single fixture and should not be read as signal.
-- **Bank scope is array/string/DP.** Tree, graph and linked-list problems need
+- **"Clean" means no worse than the canonical, not optimal.** The oracle times and
+  measures a control against its problem's canonical, and runs everything with a raised
+  recursion limit, so code that shares the canonical's extra space or recursion depth
+  passes as clean. By the reading above, that is 8 of the 10 false positives on the
+  `bank-v4` test split.
+- **Small categories.** edge-case has n=4 on dev and n=7 on test; there a difference of
+  15-25 points is a single fixture and should not be read as signal.
+- **Bank scope is plain-value problems.** Tree and linked-list problems need
   node-construction harnesses; their patterns are covered only by the enrichment eval.
 - **Mutation choice is still authored.** The taxonomy in `evals/bank/problems/__init__.py`
   was fixed before any results were seen and every *label* comes from execution, but
   which mutations got written remains a judgement call and could favour defects this
-  model finds easy.
-- **So is variant choice, and later.** Every clean control is proven clean by execution,
-  but the 28 `bank-v3` variants were written after `review-v3`'s false positives had been
-  read, so the absolute false-positive rate may be optimistic even where the comparison
-  between prompts on the same bank is fair.
-- **Controls are not independent.** The 35 headline controls come from 13 problems, and a
-  model that misjudges a problem tends to misjudge every solution to it (both Climbing
-  Stairs controls drew the same O(log n) claim under v3), so the effective sample is
-  smaller than 35.
+  model finds easy - or, on the test split, hard: most test mutants are small edits to a
+  famous published solution.
+- **Dev controls were written after the failures.** Every clean control is proven clean
+  by execution, but the 28 `bank-v3` variants were written after `review-v3`'s false
+  positives had been read, so dev's false-positive rate may be optimistic even where the
+  comparison between prompts on the same bank is fair. That is why the test split scores
+  no code written here.
+- **Controls are not independent.** The 49 test controls come from 25 problems, and 7 of
+  the 10 false positives sit on three of them; a model that misjudges a problem tends to
+  misjudge every solution to it (both Climbing Stairs controls drew the same O(log n)
+  claim under v3). The effective sample is smaller than the count.
+- **The held-out comparison is confounded.** The test problems are harder than the dev
+  ones and their code was written elsewhere, so the drop from dev to test is not
+  attributed to prompt tuning alone.
 - **Two things changed at once, twice.** Opus 5 → Sonnet 5 arrived together with
   `review-v3` and `enrich-v5`, so neither the false-positive regression nor the retrieval
   gain is attributed to the model or the prompt alone.
@@ -378,4 +459,69 @@ Card misses: longest-consecutive-sequence -> two-sum; top-k-frequent-elements ->
 **Missed flaws**
 
 - valid-parentheses/no-leftover-check — planted bug (input=('(',) expected=False got=True), reported nothing
+
+
+## 2026-09-15 20:33 UTC · model `claude-sonnet-5`
+
+### Feedback quality — prompt `review-v4` · split `test` · details hidden
+
+| Metric | Value | n |
+|---|---|---|
+| recall · bug | 75% | 44 |
+| recall · complexity | 90% | 21 |
+| recall · edge-case | 100% | 7 |
+| **recall · overall** | **82%** | 72 |
+| **false-positive rate** (clean controls) | **20%** | 49 |
+| false-positive rate · aviv | 50% | 4 |
+| false-positive rate · neetcode | 22% | 23 |
+| false-positive rate · walkccc | 14% | 22 |
+| verdict `optimal` on clean controls | 78% | 49 |
+
+_Misses and false positives not shown: `--reveal-test` shows them, and spends this split for prompt work._
+
+
+## 2026-09-15 20:37 UTC · model `claude-sonnet-5`
+
+### Feedback quality — prompt `review-v4` · split `test` · details revealed
+
+| Metric | Value | n |
+|---|---|---|
+| recall · bug | 75% | 44 |
+| recall · complexity | 90% | 21 |
+| recall · edge-case | 100% | 7 |
+| **recall · overall** | **82%** | 72 |
+| **false-positive rate** (clean controls) | **20%** | 49 |
+| false-positive rate · aviv | 50% | 4 |
+| false-positive rate · neetcode | 22% | 23 |
+| false-positive rate · walkccc | 14% | 22 |
+| verdict `optimal` on clean controls | 78% | 49 |
+
+**Missed flaws**
+
+- container-with-most-water/move-the-taller-side — planted bug (input=([1, 8, 6, 2, 5, 4, 8, 3, 7],) expected=49 got=8), reported nothing
+- trapping-rain-water/moves-the-higher-wall — planted bug (input=([0, 1, 0, 2, 1, 0, 1, 3, 2, 1, 2, 1],) expected=6 got=17), reported nothing
+- trapping-rain-water/water-counted-before-the-wall-rises — planted bug (input=([0, 1, 0, 2, 1, 0, 1, 3, 2, 1, 2, 1],) expected=6 got=1), reported nothing
+- spiral-matrix/no-break-between-halves — planted bug (input=([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]],) expected=[1, 2, 3, 4, 8, 12, 11, 10, 9, 5, 6, 7] got=[1, 2, 3, 4, 8, 12, 11, 10, 9, 5, 6, 7, 6]), reported ['edge-case']
+- insert-interval/touching-does-not-merge — planted bug (input=([[1, 2], [3, 5], [6, 7], [8, 10], [12, 16]], [4, 8]) expected=[[1, 2], [3, 10], [12, 16]] got=[[1, 2], [3, 8], [8, 10], [12, 16]]), reported nothing
+- insert-interval/keeps-the-new-start — planted bug (input=([[1, 3], [6, 9]], [2, 5]) expected=[[1, 5], [6, 9]] got=[[2, 5], [6, 9]]), reported nothing
+- minimum-window-substring/records-after-shrinking — planted bug (input=('ADOBECODEBANC', 'ABC') expected='BANC' got='ANC'), reported nothing
+- longest-consecutive-sequence/skips-the-next-number — planted bug (input=([100, 4, 200, 1, 3, 2],) expected=4 got=3), reported nothing
+- longest-consecutive-sequence/walks-every-duplicate — planted complexity (858x slower at scale (203ms vs 0.236ms)), reported nothing
+- counting-bits/thirty-two-bits-each — planted complexity (20x slower at scale (137ms vs 6.76ms)), reported nothing
+- top-k-frequent-elements/least-frequent-first — planted bug (input=([1, 1, 1, 2, 2, 3], 2) expected=[1, 2] got=[3, 2]), reported nothing
+- pacific-atlantic-water-flow/water-needs-a-strict-drop — planted bug (input=([[1, 2, 2, 3, 5], [3, 2, 3, 4, 4], [2, 4, 5, 3, 1], [6, 7, 1, 4, 5], [5, 1, 1, 2, 4]],) expected=[[0, 4], [1, 3], [1, 4], [2, 2], [3, 0], [3, 1], [4, 0]] got=[]), reported ['edge-case']
+- longest-common-subsequence/match-extends-the-best-neighbour — planted bug (input=('aa', 'a') expected=1 got=2), reported ['complexity']
+
+**False positives** (on code the oracle proved correct)
+
+- group-anagrams/walkccc — complexity: Sorting each string to build the key gives O(n*k log k) where k is the max string length; the standard optimal approach uses a character-count tuple as the key to get O(n*k); bug: The function is annotated to return list[list[str]] but actually returns dict.values(), a view object rather than a list; while this often works because callers iterate over it, it doesn't match the declared return type and could break code that expects list-specific behavior (e.g., indexing, len checks in some harnesses)
+- distinct-subsequences/canonical — complexity: The DP table is stored as a dictionary keyed by every (i, j) pair, giving O(n*m) space. Since each row only depends on the next row, this can be reduced to O(m) (or O(min(n,m))) space using a single rolling array, which is the standard optimal-space approach for this problem.
+- distinct-subsequences/walkccc — complexity: The DP table is allocated as full (m+1) x (n+1) 2D array, using O(m*n) space, when the recurrence only depends on the previous row, so it can be rolled into a single O(n) array (or O(min(m,n)) with the shorter string as columns). This is asymptotically worse than the optimal space bound.
+- valid-palindrome/canonical — complexity: The solution builds an entirely new filtered string and reverses it, using O(n) extra space, when the standard approach solves this with O(1) space via two pointers scanning from both ends; complexity: Repeated string concatenation with += inside the loop can degrade to O(n^2) time in the worst case since strings are immutable and each concatenation may create a new string
+- valid-palindrome/aviv-13 — complexity (private code: the claim is in evals/cache)
+- valid-palindrome/aviv-36 — complexity (private code: the claim is in evals/cache)
+- house-robber-ii/canonical — complexity: nums[1:] and nums[:-1] each allocate a new list of size n-1, making total space usage O(n) instead of the O(1) extra space achievable by running the same rolling-variable loop over index ranges (e.g., helper(nums, 1, n-1) and helper(nums, 0, n-2)) without copying.
+- pacific-atlantic-water-flow/canonical — edge-case: The dfs is implemented with plain Python recursion and no sys.setrecursionlimit adjustment. On a grid near the maximum constraint (up to 200x200 = 40,000 cells) with a monotonically increasing height arrangement (e.g., a snake-like path of strictly increasing values), the recursion can chain through most of the cells in a single call stack, exceeding Python's default recursion limit (1000) and raising a RecursionError even though the algorithm itself is logically correct.
+- longest-common-subsequence/canonical — complexity: Uses a full (m+1) x (n+1) 2D array for space, i.e. O(m*n) space, when the recurrence only ever needs the current and next row, so it could be reduced to O(min(m,n)) with a rolling array.
+- longest-common-subsequence/walkccc — complexity: The full 2D dp table of size (m+1)x(n+1) is kept, but the LCS length recurrence only ever needs the previous row (or column) to compute the next one. This means space is O(m*n) when it could be reduced to O(min(m,n)) with a rolling 1D array, which matters when m and n approach the constraint limit of 1000 each (dp table of ~1,000,000 ints).
 

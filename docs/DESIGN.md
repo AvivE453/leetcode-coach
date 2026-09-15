@@ -265,16 +265,18 @@ The point of the eval harness is that "the feedback looked good" is not a claim 
 defend or iterate against. Full numbers and methodology:
 **[evals/RESULTS.md](../evals/RESULTS.md)**.
 
-### Review feedback — 71 fixtures
+### Review feedback — 25 problems it was never tuned on
 
 | Metric | Result |
 |---|---|
-| Recall on planted flaws | **97%** (29/30) |
-| False-positive rate on clean controls | **0%** (0/35; 95% upper bound ≈ 10%) |
-| False-positive rate on regression controls, scored apart | 0% (0/6) |
-| By category | bug 94% · complexity 100% · edge-case 100% |
+| Recall on planted flaws | **82%** (59/72; 95% CI 72–89%) |
+| False-positive rate on clean controls | **20%** (10/49; 95% CI 12–34%) |
+| By category | bug 75% · complexity 90% · edge-case 100% |
+| The same prompt on the 13 problems it was written against | 97% recall · 0% false positives (0/35) |
 
-Measured on `review-v4` with `claude-sonnet-5`, the prompt and model the coach ships.
+Measured on `review-v4` with `claude-sonnet-5`, the prompt and model the coach ships, on
+the held-out `test` split of the fixture bank: 3 Easy, 14 Medium and 8 Hard problems, with
+every correct solution written outside this repo.
 
 The false-positive rate matters as much as recall: a reviewer that reports five issues
 on every solution scores perfect recall and is useless, because it would send you
@@ -289,12 +291,26 @@ is a `complexity` flaw; and one the tests cannot distinguish from the original i
 mislabelled ones — the safe direction to fail. It also means the author of a planted
 flaw is not the authority on whether it is real.
 
-Clean controls are held to the same standard. Besides each problem's canonical solution,
-the bank carries 22 other correct solutions - a different but equally optimal formulation
-or idiom - and each must pass every test and time within 5× of the canonical before it
-counts as clean; space is not measured, so a variant may use no more of it than the
-canonical. Six more were written to probe false positives an earlier run showed, and are
-scored apart so they cannot flatter the headline rate.
+**Labels are proven, not just tested.** A handful of hand-written tests can let a broken
+mutant through, so every problem also carries a brute force written to be obviously right
+and a generator of the random inputs its constraints allow. Code that passes the tests but
+disagrees with the brute force on any of up to a thousand generated inputs stops the bank
+with `TestsTooWeak` until a test covers that input.
+
+**Clean controls are held to the same standard, and the test split's were written
+elsewhere.** A control must pass every test, agree with the brute force, time within 5× of
+the canonical, and not need megabytes where the canonical needs almost none. The test
+split's come from NeetCode's and walkccc's published solutions, copied unmodified at pinned
+commits - one that breaks a rule is rejected with its reason, never fixed (67 accepted, 50
+rejected) - and from the author's own clean solves, kept out of git. Controls written in
+this repo count only on `dev`, where six that probe false positives an earlier run showed
+are scored apart so they cannot flatter the rate.
+
+**The test split is held out by construction.** The 47 problems added for it were divided
+mechanically - within each difficulty, sorted by number, alternating - and the whole bank,
+tests and mutants included, was committed before any review call on it. Its misses and
+false positives stay out of the report until `--reveal-test`, because reading them is how a
+prompt gets tuned to them.
 
 ### The result worth reading
 
@@ -332,6 +348,16 @@ allowed sizes - and scored 0/35 with recall unchanged. Every false positive went
 appeared, but four fixtures in one run is suggestive rather than conclusive; RESULTS.md
 has the caveats.
 
+**Then a held-out split showed the tuned numbers do not transfer.** On 25 problems no
+prompt had been written against, the same prompt caught 82% of planted flaws and flagged
+20% of correct solutions - against 0/35 on the tuned problems, Fisher exact p = 0.004.
+Reading the revealed lines splits that 20% in two. Eight of the ten claims are
+defensible: extra space that the canonical solution uses too, which the oracle measures
+only relatively, and recursion deeper than CPython's default limit, which the oracle
+raises. So "clean" has to mean optimal before that rate is the reviewer's alone. The
+misses are the reviewer's: eight bugs that fail one of LeetCode's own examples, each a
+small edit to a famous published solution, drew no comment at all.
+
 ### Pattern tagging and retrieval
 
 | Eval | Result |
@@ -345,23 +371,28 @@ run on 42 pair directions, so read it as a clear direction more than a precise s
 misses that remain cluster where this small corpus is dense - 1-D DP problems, and a
 graph/tree trio - with several labelled pairs competing for five result slots.
 
-Known limitations — small `edge-case` sample, an array/string/DP-only bank, controls that
-share 13 problems, and the fact that mutation and variant *choice* remain authored even
-though every label is executed — are listed in
-[evals/RESULTS.md](../evals/RESULTS.md#known-limitations).
+Known limitations — "clean" measured against the canonical rather than the optimum, small
+`edge-case` samples, a bank of plain-value problems, controls that cluster on a few
+problems, and the fact that mutation *choice* remains authored even though every label is
+executed — are listed in [evals/RESULTS.md](../evals/RESULTS.md#known-limitations).
 
 ### Running the evals
 
 ```bash
-uv run python -m evals.validate_bank               # re-label the fixture bank, no API calls
-uv run python -m evals.run_evals --all --dry-run   # count the calls and the cost first
-uv run python -m evals.run_evals --all             # real API calls, roughly $2.60
+uv run python -m evals.validate_bank                        # prove every label and control, no API calls
+uv run python -m evals.run_evals --all --dry-run            # count the calls and the cost first
+uv run python -m evals.run_evals --feedback --split test    # the held-out split: 121 calls, about $3
+uv run python -m evals.run_evals --feedback --split test --reveal-test   # free from the cache; spends the split
 ```
 
 `--dry-run` counts the calls a real run would make with the same code that buys them, so
 the two cannot disagree. Responses cache by prompt version, model, and a digest of the
 code they scored, so a repeat run costs nothing, correcting a *label* re-scores for free,
 and editing a *fixture* re-buys just that fixture.
+
+Published solutions enter through `python -m evals.bank.import_external fetch <n>` and
+`judge`, which record every rejection with its reason; your own clean solves through
+`python -m evals.bank.import_private --db <copy of coach.db>`, into a gitignored store.
 
 ---
 
