@@ -53,3 +53,37 @@ class Solution:
 ''',
     },
 ]
+
+CLEAN_VARIANTS = [
+    {
+        "id": "reset-when-negative",
+        "control": "representative",
+        "code": '''\
+class Solution:
+    def maxSubArray(self, nums):
+        best = float("-inf")
+        running = 0
+        for x in nums:
+            running += x
+            best = max(best, running)
+            if running < 0:
+                running = 0
+        return best
+''',
+    },
+    {
+        "id": "prefix-sum-minus-lowest",
+        "control": "representative",
+        "code": '''\
+class Solution:
+    def maxSubArray(self, nums):
+        best = float("-inf")
+        prefix = lowest = 0
+        for x in nums:
+            prefix += x
+            best = max(best, prefix - lowest)
+            lowest = min(lowest, prefix)
+        return best
+''',
+    },
+]

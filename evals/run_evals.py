@@ -123,17 +123,20 @@ def enrichment_cache(model: str) -> CallCache:
 
 
 def build_bank():
-    """Every fixture with an execution-derived label. Clean controls included."""
+    """Every fixture with an execution-derived label. Clean controls included.
+
+    A clean control is the canonical solution or one of its CLEAN_VARIANTS, and each
+    variant has to be proven clean before it is scored as one.
+    """
     fixtures = []
     for problem in load_all():
         oracle.verify_canonical(problem)
-        fixtures.append({
-            "slug": problem.SLUG,
-            "id": "canonical",
-            "category": None,  # clean control
-            "code": problem.CANONICAL,
-            "problem": problem,
-        })
+        controls = [{"id": "canonical", "code": problem.CANONICAL, "control": "representative"}]
+        for variant in problem.CLEAN_VARIANTS:
+            oracle.verify_clean(problem, variant)
+            controls.append({"id": variant["id"], "code": variant["code"], "control": variant["control"]})
+        for control in controls:
+            fixtures.append({"slug": problem.SLUG, "category": None, "problem": problem, **control})
         for mutant in problem.MUTANTS:
             verdict = oracle.classify(problem, mutant["code"])
             if verdict.category is None:
@@ -168,16 +171,72 @@ def false_positive_line(fixture, issues) -> str:
     The category alone ("complexity") says only which box was ticked; on code known
     to be correct, the claim itself is the part worth arguing with.
     """
-    return f"{fixture['slug']} — " + "; ".join(
+    return f"{fixture['slug']}/{fixture['id']} — " + "; ".join(
         f"{i['category']}: {i['description']}" for i in issues)
+
+
+def score_controls(scored) -> dict:
+    """False positives on one group of clean controls: any issue at all on code proven correct."""
+    lines = [false_positive_line(fixture, result["issues"]) for fixture, result in scored if result["issues"]]
+    optimal = sum(result["verdict"] == "optimal" for _, result in scored)
+    n = len(scored)
+    return {
+        "n": n,
+        "rate": len(lines) / n if n else 0.0,
+        "optimal_rate": optimal / n if n else 0.0,
+        "lines": lines,
+    }
+
+
+def score_feedback(fixtures, results) -> dict:
+    """Recall on the flawed fixtures, and false positives on the clean ones.
+
+    Regression controls are scored apart. Each was written to probe a false positive
+    an earlier run had already shown, so a prompt revised after reading that run is
+    expected to do well on them; pooled with the representative controls they would
+    flatter the headline rate.
+    """
+    per_category: dict[str, list[bool]] = {}
+    misses = []
+    controls: dict[str, list] = {"representative": [], "regression": []}
+    for fixture, result in zip(fixtures, results):
+        if result is None:
+            continue
+        if not fixture["category"]:
+            controls[fixture["control"]].append((fixture, result))
+            continue
+        found = {issue["category"] for issue in result["issues"]}
+        caught = fixture["category"] in found
+        per_category.setdefault(fixture["category"], []).append(caught)
+        if not caught:
+            misses.append(miss_line(fixture, found))
+
+    representative = score_controls(controls["representative"])
+    regression = score_controls(controls["regression"])
+    all_flags = [x for v in per_category.values() for x in v]
+    return {
+        "recall_by_category": {c: sum(v) / len(v) for c, v in sorted(per_category.items())},
+        "recall_overall": sum(all_flags) / len(all_flags) if all_flags else 0.0,
+        "counts": {c: len(v) for c, v in sorted(per_category.items())},
+        "false_positive_rate": representative["rate"],
+        "clean_controls": representative["n"],
+        "optimal_verdict_rate": representative["optimal_rate"],
+        "false_positives": representative["lines"],
+        "regression_false_positive_rate": regression["rate"],
+        "regression_controls": regression["n"],
+        "regression_false_positives": regression["lines"],
+        "misses": misses,
+    }
 
 
 def run_feedback(refresh: bool, model: str) -> dict:
     print("\n[feedback] labelling fixtures by execution ...")
     fixtures = build_bank()
     flawed = [f for f in fixtures if f["category"]]
-    clean = [f for f in fixtures if not f["category"]]
-    print(f"  {len(flawed)} flawed + {len(clean)} clean controls")
+    regression = [f for f in fixtures if not f["category"] and f["control"] == "regression"]
+    representative = len(fixtures) - len(flawed) - len(regression)
+    print(f"  {len(flawed)} flawed + {representative} clean controls"
+          f" + {len(regression)} regression controls")
 
     # Cached per prompt version and fixture, so correcting a LABEL (which changes
     # scoring, not the model's answer) costs nothing to re-score.
@@ -203,43 +262,10 @@ def run_feedback(refresh: bool, model: str) -> dict:
     keyed = [(review_key(f), f) for f in fixtures]
     cached = review_cache(model).fill(keyed, review_one, "reviewing", refresh)
     results = [cached.get(key) for key, _ in keyed]
-
-    per_category: dict[str, list[bool]] = {}
-    misses = []
-    for fixture, result in zip(fixtures, results):
-        if result is None or not fixture["category"]:
-            continue
-        found = {issue["category"] for issue in result["issues"]}
-        caught = fixture["category"] in found
-        per_category.setdefault(fixture["category"], []).append(caught)
-        if not caught:
-            misses.append(miss_line(fixture, found))
-
-    false_positives = []
-    optimal_verdicts = 0
-    scored_clean = 0
-    for fixture, result in zip(fixtures, results):
-        if result is None or fixture["category"]:
-            continue
-        scored_clean += 1
-        if result["issues"]:
-            false_positives.append(false_positive_line(fixture, result["issues"]))
-        if result["verdict"] == "optimal":
-            optimal_verdicts += 1
-
-    recall = {c: sum(v) / len(v) for c, v in sorted(per_category.items())}
-    all_flags = [x for v in per_category.values() for x in v]
     return {
         "prompt_version": review.PROMPT_VERSION,
         "fixtures": len(fixtures),
-        "recall_by_category": recall,
-        "recall_overall": sum(all_flags) / len(all_flags) if all_flags else 0.0,
-        "counts": {c: len(v) for c, v in sorted(per_category.items())},
-        "false_positive_rate": len(false_positives) / scored_clean if scored_clean else 0.0,
-        "clean_controls": scored_clean,
-        "optimal_verdict_rate": optimal_verdicts / scored_clean if scored_clean else 0.0,
-        "misses": misses,
-        "false_positives": false_positives,
+        **score_feedback(fixtures, results),
     }
 
 
@@ -378,6 +404,9 @@ def append_results(sections: dict, model: str) -> None:
                      f" **{f['false_positive_rate']:.0%}** | {f['clean_controls']} |")
         lines.append(f"| verdict `optimal` on clean controls | {f['optimal_verdict_rate']:.0%} |"
                      f" {f['clean_controls']} |")
+        if f["regression_controls"]:
+            lines.append(f"| false-positive rate (regression controls, scored apart) |"
+                         f" {f['regression_false_positive_rate']:.0%} | {f['regression_controls']} |")
         lines.append("")
         # One bullet each: these now carry the execution evidence behind the label
         # and the model's own words, which do not fit on a joined line.
@@ -388,6 +417,10 @@ def append_results(sections: dict, model: str) -> None:
         if f["false_positives"]:
             lines.append("**False positives** (on code the oracle proved correct)\n")
             lines.extend(f"- {fp}" for fp in f["false_positives"])
+            lines.append("")
+        if f["regression_false_positives"]:
+            lines.append("**False positives on regression controls** (scored apart)\n")
+            lines.extend(f"- {fp}" for fp in f["regression_false_positives"])
             lines.append("")
 
     if "enrichment" in sections:

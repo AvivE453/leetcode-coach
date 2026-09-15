@@ -38,6 +38,25 @@ def test_verify_canonical_rejects_a_broken_canonical():
         oracle.verify_canonical(broken)
 
 
+def test_verify_clean_rejects_a_variant_the_oracle_cannot_prove_clean():
+    variant = {"id": "first-only", "code": "class Solution:\n    def run(self, nums):\n        return nums[0]\n"}
+    with pytest.raises(AssertionError, match=r"fake/first-only: clean variant is not clean \(bug"):
+        oracle.verify_clean(make_problem(), variant)
+
+
+def test_verify_clean_accepts_a_correct_variant():
+    variant = {"id": "loop", "code": '''\
+class Solution:
+    def run(self, nums):
+        best = nums[0]
+        for x in nums:
+            if x > best:
+                best = x
+        return best
+'''}
+    oracle.verify_clean(make_problem(), variant)
+
+
 def test_general_failure_is_a_bug():
     mutant = '''\
 class Solution:

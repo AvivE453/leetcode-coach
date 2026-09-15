@@ -192,7 +192,8 @@ vocabulary is fine enough to *diagnose weaknesses*.
 Each solution is embedded as `title + main patterns + key trick + code`, so two problems
 that share a technique retrieve each other even when they share no vocabulary; after a
 solve is logged, similar past solves are those sharing any of its main patterns. Measured,
-not assumed: see the retrieval eval below — it wins, but only modestly.
+not assumed: see the retrieval eval below — it wins by 17 points on `enrich-v5`, up from 5
+on `enrich-v2`.
 
 **One vector per solve, not one per problem.**
 Embeddings are keyed by `solution_id`. Re-solving a problem a different way — Best Time to
@@ -264,17 +265,16 @@ The point of the eval harness is that "the feedback looked good" is not a claim 
 defend or iterate against. Full numbers and methodology:
 **[evals/RESULTS.md](../evals/RESULTS.md)**.
 
-### Review feedback — 43 fixtures
+### Review feedback — 71 fixtures
 
 | Metric | Result |
 |---|---|
 | Recall on planted flaws | **97%** (29/30) |
-| False-positive rate on clean controls | **0%** (13 controls) |
+| False-positive rate on clean controls | **0%** (0/35; 95% upper bound ≈ 10%) |
+| False-positive rate on regression controls, scored apart | 0% (0/6) |
 | By category | bug 94% · complexity 100% · edge-case 100% |
 
-These numbers were measured on `review-v2`. The shipped prompt is now `review-v3`, which
-adds a `strengths` field so a review also says what the solution got right; its
-issue-detection has not been re-scored, and the table stands as a v2 result until it is.
+Measured on `review-v4` with `claude-sonnet-5`, the prompt and model the coach ships.
 
 The false-positive rate matters as much as recall: a reviewer that reports five issues
 on every solution scores perfect recall and is useless, because it would send you
@@ -288,6 +288,13 @@ is a `complexity` flaw; and one the tests cannot distinguish from the original i
 **discarded**. That discard rule means weak tests cost fixtures rather than producing
 mislabelled ones — the safe direction to fail. It also means the author of a planted
 flaw is not the authority on whether it is real.
+
+Clean controls are held to the same standard. Besides each problem's canonical solution,
+the bank carries 22 other correct solutions - a different but equally optimal formulation
+or idiom - and each must pass every test and time within 5× of the canonical before it
+counts as clean; space is not measured, so a variant may use no more of it than the
+canonical. Six more were written to probe false positives an earlier run showed, and are
+scored apart so they cannot flatter the headline rate.
 
 ### The result worth reading
 
@@ -312,28 +319,43 @@ Because that is where the value turned out to be, a miss in the report now carri
 execution evidence behind its label, so the next disagreement can be adjudicated rather
 than merely counted.
 
+**Then a model switch broke the false-positive rate, and the eval caught it.** Moving to
+`claude-sonnet-5` with `review-v3` kept recall at 29/30 but took false positives from 0/13
+to 3/13: "an empty list raises IndexError" on problems whose constraints rule an empty
+input out, and "O(n) is not optimal" for Climbing Stairs at `n <= 45`. That is not
+cosmetic - a reported edge case caps an attempt's grade below SM-2's passing line, so a
+correct solve would lapse. Thirteen controls could not have measured a fix (0/13 still
+allows a true rate near 23%), so the bank grew to 35 clean controls first. The unchanged
+prompt scored 4/35 there; `review-v4` added one rule - judge against the problem's stated
+constraints and guarantees, and ignore faster algorithms that make no difference at the
+allowed sizes - and scored 0/35 with recall unchanged. Every false positive went and none
+appeared, but four fixtures in one run is suggestive rather than conclusive; RESULTS.md
+has the caveats.
+
 ### Pattern tagging and retrieval
 
 | Eval | Result |
 |---|---|
-| `intended_pattern` vs NeetCode's published Blind 75 sections (measured on `enrich-v2`) | **100%** (29 problems) |
-| Retrieval recall@5 — enriched cards | **64%** |
-| Retrieval recall@5 — raw code | 60% |
+| `intended_pattern` vs NeetCode's published Blind 75 sections (`enrich-v5`) | **97%** (29 problems) |
+| Retrieval recall@5 — enriched cards | **79%** |
+| Retrieval recall@5 — raw code | 62% |
 
-Enriched cards beat raw code by 5 points: a real win, but a **weak** one, and reported
-as such. Both variants fail on the same cluster, where four labelled 1-D DP pairs
-compete for five result slots in a corpus dense with DP problems.
+Enriched cards beat raw code by 17 points on `enrich-v5`, up from 5 on `enrich-v2`: one
+run on 42 pair directions, so read it as a clear direction more than a precise size. The
+misses that remain cluster where this small corpus is dense - 1-D DP problems, and a
+graph/tree trio - with several labelled pairs competing for five result slots.
 
-Known limitations — small `edge-case` sample, an array/string/DP-only bank, and the
-fact that mutation *choice* remains authored even though every label is executed — are
-listed in [evals/RESULTS.md](../evals/RESULTS.md#known-limitations).
+Known limitations — small `edge-case` sample, an array/string/DP-only bank, controls that
+share 13 problems, and the fact that mutation and variant *choice* remain authored even
+though every label is executed — are listed in
+[evals/RESULTS.md](../evals/RESULTS.md#known-limitations).
 
 ### Running the evals
 
 ```bash
 uv run python -m evals.validate_bank               # re-label the fixture bank, no API calls
 uv run python -m evals.run_evals --all --dry-run   # count the calls and the cost first
-uv run python -m evals.run_evals --all             # real API calls, roughly $2
+uv run python -m evals.run_evals --all             # real API calls, roughly $2.60
 ```
 
 `--dry-run` counts the calls a real run would make with the same code that buys them, so

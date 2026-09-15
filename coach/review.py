@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from coach import config, llm
 
-PROMPT_VERSION = "review-v3"
+PROMPT_VERSION = "review-v4"
 
 
 class Issue(BaseModel):
@@ -42,15 +42,20 @@ Report:
   something actually visible in the code; never generic praise like "clean and readable",
   and never restate what the problem asked for as though it were an achievement. Empty
   list when the solution is broken enough that nothing stands out.
-- issues: only genuine problems. The three categories are mutually exclusive - decide
-  which one applies by asking what kind of input breaks the code:
+- issues: only genuine problems, judged against this problem's stated LeetCode
+  constraints and guarantees - input sizes, value ranges, a non-empty input, a
+  guaranteed answer, the allowed characters. An input the constraints exclude is not a
+  flaw, and code that relies on a guarantee the problem gives is not a flaw. The three
+  categories are mutually exclusive - decide which one applies by asking what kind of
+  input breaks the code:
   - "bug": wrong on a REPRESENTATIVE input - an ordinary case a reader would write down
     first, with nothing degenerate about it. Name that input.
   - "edge-case": correct on representative inputs, wrong ONLY at a boundary or
-    degenerate input - empty, single element, all-negative, zeros, all-duplicates,
-    already-sorted, integer limits. Name the boundary class.
-  - "complexity": asymptotically worse than the known optimal, but correct on every
-    input.
+    degenerate input that the constraints allow - empty, single element, all-negative,
+    zeros, all-duplicates, already-sorted, integer limits. Name the boundary class.
+  - "complexity": asymptotically worse than the standard optimal approach for this
+    problem, but correct on every input. A faster algorithm that makes no practical
+    difference at the input sizes the constraints allow does not count.
   Precedence: if the failing input is a boundary case, it is "edge-case", never "bug",
   even though a boundary failure is also technically a wrong answer.
   A correct, optimal solution gets an EMPTY issues list - do not invent nitpicks.

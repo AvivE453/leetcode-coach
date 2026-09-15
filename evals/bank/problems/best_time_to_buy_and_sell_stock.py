@@ -49,3 +49,35 @@ class Solution:
 ''',
     },
 ]
+
+CLEAN_VARIANTS = [
+    {
+        "id": "track-lowest-price",
+        "control": "representative",
+        "code": '''\
+class Solution:
+    def maxProfit(self, prices):
+        lowest = float("inf")
+        profit = 0
+        for price in prices:
+            if price < lowest:
+                lowest = price
+            elif price - lowest > profit:
+                profit = price - lowest
+        return profit
+''',
+    },
+    {
+        "id": "kadane-on-daily-changes",
+        "control": "representative",
+        "code": '''\
+class Solution:
+    def maxProfit(self, prices):
+        best = run = 0
+        for i in range(1, len(prices)):
+            run = max(0, run + prices[i] - prices[i - 1])
+            best = max(best, run)
+        return best
+''',
+    },
+]

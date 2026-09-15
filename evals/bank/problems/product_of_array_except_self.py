@@ -60,3 +60,23 @@ class Solution:
 ''',
     },
 ]
+
+CLEAN_VARIANTS = [
+    {
+        "id": "both-passes-in-one-loop",
+        "control": "representative",
+        "code": '''\
+class Solution:
+    def productExceptSelf(self, nums):
+        n = len(nums)
+        out = [1] * n
+        left = right = 1
+        for i in range(n):
+            out[i] *= left
+            left *= nums[i]
+            out[n - 1 - i] *= right
+            right *= nums[n - 1 - i]
+        return out
+''',
+    },
+]

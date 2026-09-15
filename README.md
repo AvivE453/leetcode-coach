@@ -76,8 +76,8 @@ Without it that test skips and the rest of the suite still passes.
 ## How it works
 
 Everything the LLM does here is **measured**, not assumed: review feedback catches 97% of
-planted flaws with a 0% false-positive rate, against ground truth produced by *executing*
-mutated solutions rather than by opinion.
+planted flaws (29/30) and reports no issue on any of 35 correct solutions, against ground
+truth produced by *executing* the code rather than by opinion.
 
 The architecture, the design decisions behind it, and the full eval methodology are in
 **[docs/DESIGN.md](docs/DESIGN.md)**.

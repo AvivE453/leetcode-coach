@@ -152,3 +152,11 @@ def verify_canonical(problem) -> None:
     if failures:
         raise AssertionError(f"{problem.SLUG}: canonical solution fails its own tests: "
                              f"{failures[0].detail}")
+
+
+def verify_clean(problem, variant) -> None:
+    """A clean control the oracle cannot prove clean would score a correct report as a false positive."""
+    verdict = classify(problem, variant["code"])
+    if verdict.category is not None:
+        raise AssertionError(f"{problem.SLUG}/{variant['id']}: clean variant is not clean"
+                             f" ({verdict.category}: {verdict.evidence})")

@@ -50,3 +50,25 @@ def test_a_false_positive_quotes_the_claim_not_just_its_category():
     assert "The inner loop rescans the array." in line
     assert "Empty input is unhandled." in line
     assert "complexity" in line and "edge-case" in line
+
+
+def test_regression_controls_are_scored_apart_from_the_headline_rate():
+    """A regression control probes a false positive already seen, so it must not flatter the headline."""
+    def control(kind, fixture_id):
+        return {"slug": "two-sum", "id": fixture_id, "category": None, "control": kind, "code": "..."}
+
+    fixtures = [
+        control("representative", "canonical"),
+        control("representative", "store-complement"),
+        control("regression", "relies-on-guaranteed-answer"),
+    ]
+    quiet = {"issues": [], "verdict": "optimal"}
+    flagged = {"issues": [{"category": "edge-case", "description": "Returns None with no pair."}],
+               "verdict": "acceptable"}
+
+    scored = run_evals.score_feedback(fixtures, [quiet, quiet, flagged])
+
+    assert (scored["false_positive_rate"], scored["clean_controls"]) == (0.0, 2)
+    assert scored["false_positives"] == []
+    assert (scored["regression_false_positive_rate"], scored["regression_controls"]) == (1.0, 1)
+    assert "two-sum/relies-on-guaranteed-answer" in scored["regression_false_positives"][0]

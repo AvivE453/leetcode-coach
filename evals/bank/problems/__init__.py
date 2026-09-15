@@ -15,6 +15,18 @@ array to a problem whose constraints say `1 <= nums.length` invents a defect
 that does not exist, and a reviewer is right to ignore it. Where a test was
 removed for this reason the mutant it caught usually becomes indistinguishable
 from the canonical solution, and `oracle.classify` discards it automatically.
+
+CLEAN_VARIANTS are further clean controls: other correct solutions, each one proven
+clean by `oracle.verify_clean` (it passes every test and is not measurably slower
+than the canonical). Execution does not measure space, so a variant must also use no
+more space than the canonical - an O(n) slice where the canonical needs O(1) is a
+genuine finding, and the reviewer would be scored as a false positive for being right.
+
+A variant's `control` says how it is scored. "representative" is another way a strong
+candidate writes the optimal solution, and counts toward the headline false-positive
+rate with the canonical. "regression" was written to probe a false positive an earlier
+run already showed (`probes` names it), and is scored apart: a prompt revised after
+reading that run is expected to do well on it, so pooling it would flatter the rate.
 """
 
 import importlib

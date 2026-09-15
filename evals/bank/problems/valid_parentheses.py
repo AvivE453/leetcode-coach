@@ -88,3 +88,41 @@ class Solution:
 ''',
     },
 ]
+
+CLEAN_VARIANTS = [
+    {
+        "id": "push-the-expected-closer",
+        "control": "representative",
+        "code": '''\
+class Solution:
+    def isValid(self, s):
+        closer = {"(": ")", "[": "]", "{": "}"}
+        stack = []
+        for ch in s:
+            if ch in closer:
+                stack.append(closer[ch])
+            elif not stack or stack.pop() != ch:
+                return False
+        return not stack
+''',
+    },
+    {
+        "id": "odd-length-shortcut",
+        "control": "representative",
+        "code": '''\
+class Solution:
+    def isValid(self, s):
+        if len(s) % 2:
+            return False
+        pairs = {")": "(", "]": "[", "}": "{"}
+        stack = []
+        for ch in s:
+            if ch in pairs:
+                if not stack or stack.pop() != pairs[ch]:
+                    return False
+            else:
+                stack.append(ch)
+        return not stack
+''',
+    },
+]

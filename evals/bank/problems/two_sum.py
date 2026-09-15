@@ -54,3 +54,48 @@ class Solution:
 ''',
     },
 ]
+
+CLEAN_VARIANTS = [
+    {
+        "id": "two-pass-hashmap",
+        "control": "representative",
+        "code": '''\
+class Solution:
+    def twoSum(self, nums, target):
+        index = {x: i for i, x in enumerate(nums)}
+        for i, x in enumerate(nums):
+            j = index.get(target - x)
+            if j is not None and j != i:
+                return [i, j]
+        return []
+''',
+    },
+    {
+        "id": "store-complement",
+        "control": "representative",
+        "code": '''\
+class Solution:
+    def twoSum(self, nums, target):
+        wanted = {}
+        for i, x in enumerate(nums):
+            if x in wanted:
+                return [wanted[x], i]
+            wanted[target - x] = i
+        return []
+''',
+    },
+    {
+        "id": "relies-on-guaranteed-answer",
+        "control": "regression",
+        "probes": "flagging an input the constraints exclude (exactly one answer is guaranteed)",
+        "code": '''\
+class Solution:
+    def twoSum(self, nums, target):
+        seen = {}
+        for i, x in enumerate(nums):
+            if target - x in seen:
+                return [seen[target - x], i]
+            seen[x] = i
+''',
+    },
+]

@@ -62,3 +62,31 @@ class Solution:
 ''',
     },
 ]
+
+CLEAN_VARIANTS = [
+    {
+        "id": "best-up-to-previous-two",
+        "control": "representative",
+        "code": '''\
+class Solution:
+    def rob(self, nums):
+        two_back = one_back = 0
+        for x in nums:
+            two_back, one_back = one_back, max(one_back, two_back + x)
+        return one_back
+''',
+    },
+    {
+        "id": "seed-with-first-house",
+        "control": "regression",
+        "probes": "flagging an input the constraints exclude (1 <= nums.length)",
+        "code": '''\
+class Solution:
+    def rob(self, nums):
+        prev, best = 0, nums[0]
+        for i in range(1, len(nums)):
+            prev, best = best, max(best, prev + nums[i])
+        return best
+''',
+    },
+]

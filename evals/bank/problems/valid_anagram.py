@@ -60,3 +60,50 @@ class Solution:
 ''',
     },
 ]
+
+CLEAN_VARIANTS = [
+    {
+        "id": "counter-equality",
+        "control": "representative",
+        "code": '''\
+from collections import Counter
+
+
+class Solution:
+    def isAnagram(self, s, t):
+        return Counter(s) == Counter(t)
+''',
+    },
+    {
+        "id": "one-dict-both-strings",
+        "control": "representative",
+        "code": '''\
+class Solution:
+    def isAnagram(self, s, t):
+        if len(s) != len(t):
+            return False
+        balance = {}
+        for a, b in zip(s, t):
+            balance[a] = balance.get(a, 0) + 1
+            balance[b] = balance.get(b, 0) - 1
+        return all(count == 0 for count in balance.values())
+''',
+    },
+    {
+        "id": "lowercase-letter-array",
+        "control": "regression",
+        "probes": "flagging a guarantee the constraints give (only lowercase English letters)",
+        "code": '''\
+class Solution:
+    def isAnagram(self, s, t):
+        if len(s) != len(t):
+            return False
+        base = ord("a")
+        counts = [0] * 26
+        for a, b in zip(s, t):
+            counts[ord(a) - base] += 1
+            counts[ord(b) - base] -= 1
+        return not any(counts)
+''',
+    },
+]

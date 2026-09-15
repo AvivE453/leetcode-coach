@@ -68,3 +68,44 @@ class Solution:
 ''',
     },
 ]
+
+CLEAN_VARIANTS = [
+    {
+        "id": "set-size",
+        "control": "representative",
+        "code": '''\
+class Solution:
+    def containsDuplicate(self, nums):
+        return len(set(nums)) != len(nums)
+''',
+    },
+    {
+        "id": "count-dict",
+        "control": "representative",
+        "code": '''\
+class Solution:
+    def containsDuplicate(self, nums):
+        counts = {}
+        for x in nums:
+            if x in counts:
+                return True
+            counts[x] = 1
+        return False
+''',
+    },
+    {
+        "id": "seed-with-first",
+        "control": "regression",
+        "probes": "flagging an input the constraints exclude (1 <= nums.length)",
+        "code": '''\
+class Solution:
+    def containsDuplicate(self, nums):
+        seen = {nums[0]}
+        for i in range(1, len(nums)):
+            if nums[i] in seen:
+                return True
+            seen.add(nums[i])
+        return False
+''',
+    },
+]

@@ -60,3 +60,35 @@ class Solution:
 ''',
     },
 ]
+
+CLEAN_VARIANTS = [
+    {
+        "id": "coins-outer-loop",
+        "control": "representative",
+        "code": '''\
+class Solution:
+    def coinChange(self, coins, amount):
+        fewest = [0] + [amount + 1] * amount
+        for coin in coins:
+            for value in range(coin, amount + 1):
+                fewest[value] = min(fewest[value], fewest[value - coin] + 1)
+        return fewest[amount] if fewest[amount] <= amount else -1
+''',
+    },
+    {
+        "id": "sorted-coins-early-break",
+        "control": "representative",
+        "code": '''\
+class Solution:
+    def coinChange(self, coins, amount):
+        coins = sorted(coins)
+        best = [0] + [float("inf")] * amount
+        for value in range(1, amount + 1):
+            for coin in coins:
+                if coin > value:
+                    break
+                best[value] = min(best[value], best[value - coin] + 1)
+        return -1 if best[amount] == float("inf") else best[amount]
+''',
+    },
+]

@@ -93,3 +93,39 @@ class Solution:
 ''',
     },
 ]
+
+CLEAN_VARIANTS = [
+    {
+        "id": "start-key-sort",
+        "control": "representative",
+        "code": '''\
+class Solution:
+    def merge(self, intervals):
+        merged = []
+        for start, end in sorted(intervals, key=lambda interval: interval[0]):
+            if not merged or merged[-1][1] < start:
+                merged.append([start, end])
+            else:
+                merged[-1][1] = max(merged[-1][1], end)
+        return merged
+''',
+    },
+    {
+        "id": "seed-with-first-interval",
+        "control": "regression",
+        "probes": "flagging an input the constraints exclude (1 <= intervals.length)",
+        "code": '''\
+class Solution:
+    def merge(self, intervals):
+        ordered = sorted(intervals)
+        merged = [list(ordered[0])]
+        for i in range(1, len(ordered)):
+            start, end = ordered[i]
+            if start <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end])
+        return merged
+''',
+    },
+]

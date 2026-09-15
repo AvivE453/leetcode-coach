@@ -85,3 +85,38 @@ class Solution:
 ''',
     },
 ]
+
+CLEAN_VARIANTS = [
+    {
+        "id": "shrink-with-a-set",
+        "control": "representative",
+        "code": '''\
+class Solution:
+    def lengthOfLongestSubstring(self, s):
+        window = set()
+        left = best = 0
+        for right, ch in enumerate(s):
+            while ch in window:
+                window.remove(s[left])
+                left += 1
+            window.add(ch)
+            best = max(best, right - left + 1)
+        return best
+''',
+    },
+    {
+        "id": "jump-start-past-last-seen",
+        "control": "representative",
+        "code": '''\
+class Solution:
+    def lengthOfLongestSubstring(self, s):
+        last = {}
+        start = best = 0
+        for i, ch in enumerate(s):
+            start = max(start, last.get(ch, -1) + 1)
+            last[ch] = i
+            best = max(best, i - start + 1)
+        return best
+''',
+    },
+]

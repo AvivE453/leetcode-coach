@@ -11,10 +11,16 @@ from evals.bank.problems import load_all
 def main() -> int:
     total = discarded = mismatched = 0
     counts: dict[str, int] = {}
+    controls = {"representative": 0, "regression": 0}
 
     for problem in load_all():
         oracle.verify_canonical(problem)
+        controls["representative"] += 1
         print(f"\n#{problem.NUMBER} {problem.TITLE}  (canonical OK)")
+        for variant in problem.CLEAN_VARIANTS:
+            oracle.verify_clean(problem, variant)
+            controls[variant["control"]] += 1
+            print(f"  {'clean':<11}{variant['id']} ({variant['control']})")
         for mutant in problem.MUTANTS:
             total += 1
             verdict = oracle.classify(problem, mutant["code"])
@@ -34,7 +40,8 @@ def main() -> int:
     print(f"{kept}/{total} mutants labelled by execution, {discarded} discarded"
           f" as indistinguishable, {mismatched} categorised differently than intended.")
     print("by category: " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())))
-    print(f"clean controls: {len(load_all())}")
+    print(f"clean controls: {controls['representative']} (canonical included),"
+          f" plus {controls['regression']} regression controls scored apart")
     return 0
 
 
