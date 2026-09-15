@@ -171,8 +171,13 @@ def false_positive_line(fixture, issues) -> str:
     """An issue reported against code the oracle proved correct, in the model's words.
 
     The category alone ("complexity") says only which box was ticked; on code known
-    to be correct, the claim itself is the part worth arguing with.
+    to be correct, the claim itself is the part worth arguing with. Except on Aviv's
+    own solves: the claim can quote the code, and this line lands in RESULTS.md, which
+    is public, so it keeps only the categories and the claim stays in evals/cache.
     """
+    if fixture["origin"] == "aviv":
+        return (f"{fixture['slug']}/{fixture['id']} — "
+                + ", ".join(i["category"] for i in issues) + " (private code: the claim is in evals/cache)")
     return f"{fixture['slug']}/{fixture['id']} — " + "; ".join(
         f"{i['category']}: {i['description']}" for i in issues)
 

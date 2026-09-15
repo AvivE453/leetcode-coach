@@ -54,12 +54,22 @@ def test_a_false_positive_quotes_the_claim_not_just_its_category():
         {"category": "edge-case", "description": "Empty input is unhandled."},
     ]
 
-    line = run_evals.false_positive_line(FIXTURE, issues)
+    line = run_evals.false_positive_line(control("canonical"), issues)
 
-    assert "valid-parentheses" in line
+    assert "two-sum/canonical" in line
     assert "The inner loop rescans the array." in line
     assert "Empty input is unhandled." in line
     assert "complexity" in line and "edge-case" in line
+
+
+def test_a_false_positive_on_private_code_names_its_categories_but_not_the_claim():
+    """RESULTS.md is public and a claim can quote the code it is about."""
+    issues = [{"category": "edge-case", "description": "`nums[i] + nums[j]` is never checked."}]
+
+    line = run_evals.false_positive_line(control("aviv-3", origin="aviv"), issues)
+
+    assert "two-sum/aviv-3" in line and "edge-case" in line
+    assert "nums[i]" not in line
 
 
 def test_regression_controls_are_scored_apart_from_the_headline_rate():
