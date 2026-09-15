@@ -18,6 +18,7 @@ from coach import (
     curriculum,
     embed,
     enrich,
+    history,
     llm,
     mastery,
     scheduler,
@@ -224,31 +225,15 @@ def problem_canonical(problem) -> enrich.Canonical:
 def update_review_state(conn: sqlite3.Connection, number: int) -> scheduler.ReviewState:
     """Reschedule one problem from every attempt logged against it, and their reviews.
 
-    Replayed from the attempts instead of stepped forward from the stored row: what a
+    Replayed from history.load() instead of stepped forward from the stored row: what a
     solve does to the schedule depends on the other solves that day and on a review that
     can arrive days later, and scheduler.replay() is the one owner of that rule. Each
-    attempt is graded by assessment.effective_quality() - the grade mastery caps its
-    score at - so an unreviewed or untagged attempt counts at its logged outcome.
+    attempt's grade already caps at its review through history.Attempt.grade - the same
+    assessment.effective_quality() mastery caps its score at - so an unreviewed or
+    untagged attempt counts at its logged outcome.
     """
-    rows = conn.execute(
-        """
-        SELECT a.date, a.outcome, rv.verdict, rv.issues
-        FROM attempts a
-        LEFT JOIN solutions s ON s.attempt_id = a.id
-        LEFT JOIN reviews rv ON rv.solution_id = s.id
-        WHERE a.problem_number = ?
-        """,
-        (number,),
-    )
-    new = scheduler.replay(
-        [
-            (
-                date.fromisoformat(r["date"]),
-                assessment.effective_quality(r["outcome"], r["verdict"], json_list(r["issues"])),
-            )
-            for r in rows
-        ]
-    )
+    attempts = history.load(conn, number)
+    new = scheduler.replay([(a.day, a.grade) for a in attempts])
     conn.execute(
         """
         INSERT INTO review_state (problem_number, ease, interval_days, next_due, reps, lapses)
@@ -768,12 +753,13 @@ def weekly_review(conn: sqlite3.Connection, today: date | None = None) -> Weekly
     history to judge a pattern on.
     """
     today = today or date.today()
-    week = weekly_collect.collect(conn, today)
-    history = mastery.load_history(conn)
-    analysis = weekly_analyze.analyze(conn, today, history=history)
+    attempts = history.load(conn)
+    week = weekly_collect.window(attempts, today)
+    scored = mastery.scored(attempts)
+    analysis = weekly_analyze.analyze(conn, today, attempts=attempts)
     # The same statistics over the same loaded history, cut at the start of the
     # window - so `delta` compares two numbers computed the one way.
-    earlier = [a for a in history if a.day < week["start"]]
+    earlier = [a for a in scored if a.day < week["start"]]
     score_before = {p["pattern"]: p["score"] for p in mastery.pattern_stats(earlier)}
 
     all_time = {p["pattern"]: p for p in analysis["patterns"]}
@@ -815,7 +801,7 @@ def pattern_table(conn: sqlite3.Connection) -> list[dict]:
     the attempts beside them.
     """
     stats = sorted(
-        mastery.pattern_stats(mastery.load_history(conn)),
+        mastery.pattern_stats(mastery.scored(history.load(conn))),
         key=lambda p: (-p["solved"], p["pattern"]),
     )
     return [

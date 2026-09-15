@@ -2,7 +2,7 @@ import sqlite3
 from collections.abc import Sequence
 from datetime import date, timedelta
 
-from coach import assessment, corrections, curriculum, mastery, scheduler
+from coach import assessment, corrections, curriculum, history, mastery, scheduler
 
 STALE_DAYS = 30
 # How far ahead a plan counts a review as due. The weekly plan covers the next
@@ -16,13 +16,14 @@ def analyze(
     conn: sqlite3.Connection,
     today: date,
     lookahead_days: int = PLAN_LOOKAHEAD_DAYS,
-    history: Sequence[mastery.ScoredAttempt] | None = None,
+    attempts: Sequence[history.Attempt] | None = None,
 ) -> dict:
-    # A caller that has already loaded mastery's history passes it in, so one
-    # request reads it once - the weekly review needs it again for its baseline.
-    if history is None:
-        history = mastery.load_history(conn)
-    patterns = mastery.pattern_stats(history)
+    # A caller that has already loaded the practice history passes it in, so one
+    # request reads it once - mastery, corrections and findings all read the same
+    # attempts, and the weekly review needs them again for its baseline.
+    if attempts is None:
+        attempts = history.load(conn)
+    patterns = mastery.pattern_stats(mastery.scored(attempts))
     # Weak is the mastery score, not the raw struggle rate: five shaky-but-solved
     # attempts and five failures are the same rate and very different problems.
     # struggle_rate stays as the honest raw number the reports show.
@@ -38,9 +39,9 @@ def analyze(
         "patterns": patterns,
         "weak_patterns": weak,
         "stale_patterns": stale,
-        "corrections_due": [c for c in corrections.outstanding(conn) if c.due <= horizon],
+        "corrections_due": [c for c in corrections.owed(attempts) if c.due <= horizon],
         "due": scheduler.due_reviews(conn, today, lookahead_days),
         # Why a due problem came back, when its last practice day holds a reported failure.
-        "findings": assessment.open_findings(conn),
+        "findings": assessment.findings(attempts),
         "curriculum": curriculum.progress(conn),
     }

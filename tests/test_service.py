@@ -5,7 +5,18 @@ import numpy as np
 import pytest
 from conftest import CODE, TWO_SUM, seed_db, tag_solution
 
-from coach import config, corrections, db, embed, enrich, llm, mastery, review, service
+from coach import (
+    config,
+    corrections,
+    db,
+    embed,
+    enrich,
+    history,
+    llm,
+    mastery,
+    review,
+    service,
+)
 from coach.weekly import analyze as weekly_analyze
 from coach.weekly import collect as weekly_collect
 
@@ -1161,13 +1172,19 @@ def test_weekly_review_orders_the_worst_patterns_first(tmp_path, monkeypatch):
 
 
 def test_weekly_review_loads_history_once(tmp_path, monkeypatch):
-    """Current mastery and the week's baseline come from one read, not two replays."""
+    """Current mastery and the week's baseline come from one read, not two replays.
+
+    history.load() is the shared read now - mastery, corrections, findings and the
+    weekly window are all pure over the same attempts weekly_review() loads once.
+    """
     conn = seed_db(tmp_path, monkeypatch)
     scored_attempt(conn, WEEK_TODAY - timedelta(days=10), "failed")
     scored_attempt(conn, WEEK_TODAY, "clean")
     loads = []
-    real = mastery.load_history
-    monkeypatch.setattr(mastery, "load_history", lambda conn: loads.append(conn) or real(conn))
+    real = history.load
+    monkeypatch.setattr(
+        history, "load", lambda conn, number=None: loads.append(conn) or real(conn, number)
+    )
 
     p = service.weekly_review(conn, WEEK_TODAY).patterns[0]
 
