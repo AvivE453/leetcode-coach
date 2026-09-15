@@ -161,7 +161,7 @@ def load_history(conn: sqlite3.Connection) -> list[ScoredAttempt]:
     return scored(history.load(conn))
 
 
-def pattern_stats(history: Sequence[ScoredAttempt]) -> list[dict]:
+def pattern_stats(scored_attempts: Sequence[ScoredAttempt]) -> list[dict]:
     """Per-pattern practice aggregates, one row per pattern, ordered by name.
 
     The single answer to "how is each pattern going": how many problems it solved,
@@ -175,7 +175,7 @@ def pattern_stats(history: Sequence[ScoredAttempt]) -> list[dict]:
     this same function over the attempts before it, not a second query to drift.
     """
     by_pattern: dict[str, list[ScoredAttempt]] = {}
-    for attempt in history:
+    for attempt in scored_attempts:
         by_pattern.setdefault(attempt.pattern, []).append(attempt)
 
     stats = []
