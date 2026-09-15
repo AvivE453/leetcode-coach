@@ -4,7 +4,7 @@ from datetime import date
 import pytest
 from conftest import tag_solution
 
-from coach import db, mastery, service
+from coach import db, enrich, history, mastery, service
 from coach.weekly import analyze as weekly_analyze
 
 
@@ -223,6 +223,67 @@ def test_is_weak_needs_both_a_low_score_and_enough_problems():
     assert mastery.is_weak(stats_row(solved=floor, attempts=floor, score=2.49)) is True
     assert mastery.is_weak(stats_row(solved=floor, attempts=floor, score=mastery.WEAK_SCORE)) is False
     assert mastery.is_weak(stats_row(solved=floor - 1, attempts=20, score=1.0)) is False
+
+
+def loaded_attempt(attempt_id, day, outcome, main=None, secondary=(), review=None, problem=1):
+    """One history.Attempt built by hand - what load() would have returned for that row."""
+    verdict, found = review if review else (None, ())
+    return history.Attempt(
+        id=attempt_id,
+        problem=history.Problem(
+            number=problem,
+            slug=f"problem-{problem}",
+            title=f"Problem {problem}",
+            difficulty="Easy",
+            canonical=enrich.Canonical(None, []),
+        ),
+        day=day,
+        outcome=outcome,
+        minutes=None,
+        main_patterns=tuple(main) if main is not None else None,
+        secondary_patterns=tuple(secondary),
+        verdict=verdict,
+        issues=tuple(issues(*found)),
+    )
+
+
+def test_scored_keeps_the_order_it_was_given():
+    """Pure over the loaded history: load() already ordered it, and re-sorting here
+    would fold one pattern's attempts out of the sequence they happened in."""
+    attempts = [
+        loaded_attempt(1, date(2026, 8, 1), "clean", main=["hashmap"]),
+        loaded_attempt(2, date(2026, 8, 2), "failed", main=["hashmap"]),
+        loaded_attempt(3, date(2026, 8, 3), "struggled", main=["hashmap"]),
+    ]
+
+    assert [a.day for a in mastery.scored(attempts)] == [a.day for a in attempts]
+    assert [a.day for a in mastery.scored(list(reversed(attempts)))] == [
+        date(2026, 8, 3), date(2026, 8, 2), date(2026, 8, 1)
+    ]
+
+
+def test_scored_drops_untagged_solves_and_ignores_secondary_patterns():
+    """Untagged is unknown, not evidence; and only main patterns earn a score."""
+    attempts = [
+        loaded_attempt(1, date(2026, 8, 1), "clean", main=None, problem=2),
+        loaded_attempt(2, date(2026, 8, 2), "struggled", main=["dfs"], secondary=["hashmap"]),
+    ]
+
+    assert [(a.pattern, a.problem, a.score) for a in mastery.scored(attempts)] == [("dfs", 1, 3.0)]
+    assert mastery.scored([]) == []
+
+
+def test_scored_gives_every_main_pattern_the_whole_solve():
+    """Never split between them and never credited to the first alone."""
+    attempt = loaded_attempt(
+        1, date(2026, 8, 1), "clean", main=["dfs", "dp-knapsack"],
+        review=("acceptable", ("complexity",)),
+    )
+
+    assert [(a.pattern, a.score) for a in mastery.scored([attempt])] == [
+        ("dfs", pytest.approx(4.7)),
+        ("dp-knapsack", pytest.approx(4.7)),
+    ]
 
 
 def test_load_history_scores_each_solve_oldest_first(tmp_path):

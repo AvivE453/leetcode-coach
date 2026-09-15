@@ -22,13 +22,12 @@ later from the Solutions page - and computing on read is what lets it count the
 moment it is saved, without any writer having to remember to refresh a score.
 """
 
-import json
 import sqlite3
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
 
-from coach import assessment
+from coach import assessment, history
 from coach.scheduler import QUALITY
 
 OUTCOME_WEIGHT = 0.7
@@ -127,42 +126,39 @@ class ScoredAttempt:
     score: float  # attempt_score(): the review blended in and capped, when there is one
 
 
-def load_history(conn: sqlite3.Connection) -> list[ScoredAttempt]:
-    """Every tagged solve, scored, oldest first - the one read mastery is computed from.
+def scored(attempts: Sequence[history.Attempt]) -> list[ScoredAttempt]:
+    """The loaded history as mastery sees it: one scored row per main pattern per solve.
 
     A solve with several main patterns is one attempt of each, at its full score:
     main patterns are equal, so the solve is neither split between them nor credited
-    to the first alone. Ordered by date and then id, so two solves from the same day
-    fold in logging order. Each review is joined onto the attempt it judges, so a
-    review saved days later re-scores that attempt wherever it sits. Untagged solves
-    are left out: with no pattern there is nothing to attribute them to.
-    """
-    rows = conn.execute(
-        """
-        SELECT tag.value AS pattern, a.problem_number, a.date, a.outcome,
-               rv.verdict, rv.issues
-        FROM attempts a
-        JOIN solutions s ON s.attempt_id = a.id
-        JOIN enrichments en ON en.solution_id = s.id
-        JOIN json_each(en.main_patterns) tag
-        LEFT JOIN reviews rv ON rv.solution_id = s.id
-        ORDER BY a.date, a.id, tag.key
-        """
-    ).fetchall()
+    to the first alone. Untagged solves are left out: with no pattern there is nothing
+    to attribute them to - and unknown patterns are not evidence of any.
 
-    history = []
-    for r in rows:
-        issues = json.loads(r["issues"]) if r["issues"] else []
-        history.append(
-            ScoredAttempt(
-                pattern=r["pattern"],
-                problem=r["problem_number"],
-                day=date.fromisoformat(r["date"]),
-                outcome=r["outcome"],
-                score=attempt_score(r["outcome"], r["verdict"], issues),
-            )
+    Pure over the loaded attempts, so it keeps whatever order they came in - which is
+    oldest first across every problem, the order the EMA folds in.
+    """
+    return [
+        ScoredAttempt(
+            pattern=pattern,
+            problem=attempt.problem.number,
+            day=attempt.day,
+            outcome=attempt.outcome,
+            score=attempt_score(attempt.outcome, attempt.verdict, attempt.issues),
         )
-    return history
+        for attempt in attempts
+        if attempt.tagged
+        for pattern in attempt.main_patterns
+    ]
+
+
+def load_history(conn: sqlite3.Connection) -> list[ScoredAttempt]:
+    """Every tagged solve, scored, oldest first - the one read mastery is computed from.
+
+    The read itself is `history.load()`, shared with every other reader of practice
+    history, so a review saved days later re-scores the attempt it judges wherever
+    that attempt sits, without mastery owning a join of its own.
+    """
+    return scored(history.load(conn))
 
 
 def pattern_stats(history: Sequence[ScoredAttempt]) -> list[dict]:
