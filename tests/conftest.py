@@ -57,6 +57,19 @@ def seed_db(tmp_path, monkeypatch, problems=None) -> sqlite3.Connection:
     return conn
 
 
+def drop_column(conn: sqlite3.Connection, table: str, column: str) -> None:
+    """Put a table back to the shape it had before a column was added.
+
+    The suite has no other way to reach that shape: seed_db() runs init_schema, so every
+    test database here already has the newest schema, and code that reads a new column
+    straight off a row passes every test and still fails on data/coach.db - which
+    db.connect() never migrates, by design. `coach init` is what adds a column, and it
+    is run by hand, so there is always a window where the code is ahead of the database.
+    """
+    conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+    conn.commit()
+
+
 def tag_solution(conn, solution_id, *main_patterns, secondary=(), key_trick=None) -> None:
     """Store a solve's tags directly, as enrichment would, without calling the model.
 

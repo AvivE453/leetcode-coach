@@ -103,8 +103,13 @@ def fetch_content(slug: str) -> str | None:
     """One problem's statement (with its constraints), cleaned to plain text.
 
     A single request per problem, not part of the bulk `fetch()` - callers fetch this
-    lazily, only for a problem actually under review. Paid-only or missing questions
-    return None rather than raising, so a review can fall back to no constraints text.
+    lazily, only for a problem actually under review.
+
+    None means "no statement to be had", and the commonest reason is not an error: the
+    public API withholds `content` for paid-only problems, answering 200 with no
+    `errors` and the field null. A malformed answer reads as None too, rather than
+    raising out of a caller that only knows to expect network failures - GraphQL
+    reports its own errors with HTTP 200, so `raise_for_status` never sees them.
     """
     with httpx.Client(headers=HEADERS, timeout=30, http2=True) as client:
         response = client.post(
@@ -112,8 +117,8 @@ def fetch_content(slug: str) -> str | None:
             json={"query": CONTENT_QUERY, "variables": {"titleSlug": slug}},
         )
         response.raise_for_status()
-        question = response.json()["data"]["question"]
-    if not question or not question["content"]:
+        question = (response.json().get("data") or {}).get("question")
+    if not question or not question.get("content"):
         return None
     return _clean_html(question["content"])
 

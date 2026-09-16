@@ -4,7 +4,7 @@ from datetime import date, timedelta
 import httpx
 import numpy as np
 import pytest
-from conftest import CODE, TWO_SUM, seed_db, tag_solution
+from conftest import CODE, TWO_SUM, drop_column, seed_db, tag_solution
 
 from coach import (
     config,
@@ -417,6 +417,39 @@ def test_a_review_prompt_includes_the_fetched_problem_statement(tmp_path, monkey
     service.review_solution_now(conn, logged.solution_id, service.get_problem(conn, 1), CODE)
 
     assert "2 <= nums.length <= 10^4" in seen_prompts[0]
+
+
+def test_problem_content_is_none_on_a_database_that_has_not_been_migrated(tmp_path, monkeypatch):
+    """`db.connect()` never adds schema, so the column is missing until `coach init` runs."""
+    conn = seed_db(tmp_path, monkeypatch)
+    drop_column(conn, "problems", "content")
+    monkeypatch.setattr(
+        "coach.catalog.fetch_content", lambda slug: pytest.fail("fetched with nowhere to cache it")
+    )
+
+    assert service.problem_content(conn, service.get_problem(conn, 1)) is None
+
+
+def test_a_review_still_runs_on_a_database_that_has_not_been_migrated(tmp_path, monkeypatch):
+    """The review button is the one that spends money, and it used to 500 here.
+
+    Reading `problem["content"]` off a pre-migration row raises IndexError, which
+    /api/solutions/{n}/review does not catch - so the whole review failed for a column
+    that only makes it sharper. It reviews without the statement instead.
+    """
+    conn = seed_db(tmp_path, monkeypatch)
+    logged = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+    drop_column(conn, "problems", "content")
+    seen_prompts = []
+    monkeypatch.setattr(
+        "coach.llm.parse",
+        lambda prompt, output_format, **kw: seen_prompts.append(prompt) or FEEDBACK,
+    )
+
+    result = service.review_solution_now(conn, logged.solution_id, service.get_problem(conn, 1), CODE)
+
+    assert result.review is not None and result.skipped is None
+    assert "Problem statement:" not in seen_prompts[0]
 
 
 def test_a_late_bug_review_puts_the_problem_on_the_plan_with_its_reason(tmp_path, monkeypatch):

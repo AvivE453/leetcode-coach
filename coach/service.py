@@ -452,11 +452,27 @@ def enrich_solution_now(
 def problem_content(conn: sqlite3.Connection, problem: sqlite3.Row) -> str | None:
     """This problem's statement, cached in `problems.content` after the first fetch.
 
+    None is not only a failure. The public API withholds the statement for paid-only
+    problems - 781 of the catalog's 4041, six of them in blind75 - so reviewing without
+    one is a path that runs for good, not a degradation. The guard here only saves the
+    round trip: `catalog.fetch_content` would return None for them anyway.
+
     A None cell means never fetched, or the fetch failed - the next review for this
     problem tries again, since LeetCode being briefly unreachable shouldn't ban it
-    from constraints text for good. Paid-only problems are never attempted, since the
-    public API has nothing to give for them.
+    from constraints text for good.
+
+    A database that has not been through `coach init` since this column landed has no
+    `content` to read: `db.connect()` never adds schema, so the column is missing until
+    then, and reading it off the row raises rather than returning anything. It reviews
+    without a statement until the migration runs, the way every other input here
+    degrades - the alternative was a 500 on the one button that spends money.
     """
+    # .keys() is load-bearing: sqlite3.Row's `in` searches VALUES, not column names, so
+    # `"content" not in problem` is False for any row holding "content" in some other
+    # column and True for a migrated row whose content is NULL - backwards, and only on
+    # some rows. noqa: SIM118 is right about dicts and wrong about Row.
+    if "content" not in problem.keys():  # noqa: SIM118
+        return None
     if problem["content"]:
         return problem["content"]
     if problem["paid_only"]:
@@ -497,7 +513,7 @@ def review_solution_now(
 
     content = problem_content(conn, problem)
     try:
-        r = review_llm.review_solution(problem, code, content=content)
+        r = review_llm.review_solution(problem, code, content)
     except llm.LLMUnavailable as exc:
         return ReviewResult(skipped=str(exc))
 
