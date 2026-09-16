@@ -16,13 +16,13 @@ The fold is an exponential moving average, so recent solves move the score and
 old ones fade without being thrown away - the same shape as SM-2's ease, one
 level up: ease tracks one problem, this tracks one pattern.
 
-Nothing here is stored. Every read replays the saved history (`load_history`),
-because a review usually arrives *after* the solve was logged - sometimes days
-later from the Solutions page - and computing on read is what lets it count the
-moment it is saved, without any writer having to remember to refresh a score.
+Nothing here is stored. Every read replays the saved history (`scored()`, over
+`coach/history.py`'s `load()`), because a review usually arrives *after* the solve
+was logged - sometimes days later from the Solutions page - and computing on read
+is what lets it count the moment it is saved, without any writer having to remember
+to refresh a score.
 """
 
-import sqlite3
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -149,16 +149,6 @@ def scored(attempts: Sequence[history.Attempt]) -> list[ScoredAttempt]:
         if attempt.tagged
         for pattern in attempt.main_patterns
     ]
-
-
-def load_history(conn: sqlite3.Connection) -> list[ScoredAttempt]:
-    """Every tagged solve, scored, oldest first - the one read mastery is computed from.
-
-    The read itself is `history.load()`, shared with every other reader of practice
-    history, so a review saved days later re-scores the attempt it judges wherever
-    that attempt sits, without mastery owning a join of its own.
-    """
-    return scored(history.load(conn))
 
 
 def pattern_stats(scored_attempts: Sequence[ScoredAttempt]) -> list[dict]:

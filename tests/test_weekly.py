@@ -60,22 +60,22 @@ def reasons(item):
     return [(r.kind, r.text) for r in item.reasons]
 
 
-def test_collect_window_excludes_older_attempts(tmp_path):
+def test_window_over_the_database_excludes_older_attempts(tmp_path):
     conn = make_db(tmp_path)
     add_problem(conn, 1, "two-sum", "Two Sum")
     add_attempt(conn, 1, TODAY - timedelta(days=2), pattern="hashmap")
     add_attempt(conn, 1, TODAY - timedelta(days=20))
 
-    week = weekly_collect.collect(conn, TODAY)
+    week = weekly_collect.window(history.load(conn), TODAY)
     assert len(week["attempts"]) == 1
     assert week["distinct_problems"] == 1
     assert week["attempts"][0]["main_patterns"] == ["hashmap"]
     assert week["start"] == TODAY - timedelta(days=6)
 
 
-def test_collect_empty_week(tmp_path):
+def test_window_over_the_database_when_the_week_is_empty(tmp_path):
     conn = make_db(tmp_path)
-    week = weekly_collect.collect(conn, TODAY)
+    week = weekly_collect.window(history.load(conn), TODAY)
     assert week["attempts"] == []
     assert week["distinct_problems"] == 0
 
@@ -435,7 +435,7 @@ def test_approach_practice_joins_the_plan_on_its_due_date_and_not_before(
 
     assert [i.number for i in weekly_plan.build_plan(conn, analysis, limit=10).approach] == planned
     # Kept off the plan while it waits, never dropped: the problem owes it either way.
-    assert [c.problem["number"] for c in corrections.outstanding(conn)] == [2]
+    assert [c.problem["number"] for c in corrections.owed(history.load(conn))] == [2]
 
 
 def test_a_review_due_before_its_approach_practice_carries_only_its_own_reason(tmp_path):
@@ -454,7 +454,7 @@ def test_a_review_due_before_its_approach_practice_carries_only_its_own_reason(t
 
     assert listed(plan.due) == [(2, [("review", f"review due {TODAY.isoformat()}")])]
     assert plan.approach == []
-    assert [c.due for c in corrections.outstanding(conn)] == [TODAY + timedelta(days=2)]
+    assert [c.due for c in corrections.owed(history.load(conn))] == [TODAY + timedelta(days=2)]
 
 
 def test_approach_practice_is_ordered_by_due_date_and_held_to_the_limit(tmp_path):

@@ -11,7 +11,6 @@ reported bug holds an attempt down, but an "optimal" review never turns a solve 
 needed hints into evidence of independent mastery.
 """
 
-import sqlite3
 from collections.abc import Sequence
 from datetime import date
 from typing import TYPE_CHECKING, Literal
@@ -80,12 +79,3 @@ def findings(attempts: Sequence["history.Attempt"]) -> dict[int, Correctness]:
         if attempt.finding is not None and attempt.day == last_day[number]:
             found.setdefault(number, []).append(attempt.finding)
     return {number: min(worst, key=SEVERITY.index) for number, worst in found.items()}
-
-
-def open_findings(conn: sqlite3.Connection) -> dict[int, Correctness]:
-    """findings() over the whole practice history."""
-    # Imported here, not at the top: history.py derives an attempt's grade and finding
-    # through this module, so the layer below must not import the layer above to start with.
-    from coach import history
-
-    return findings(history.load(conn))

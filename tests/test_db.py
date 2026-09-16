@@ -1,7 +1,7 @@
 import pytest
 from conftest import tag_solution
 
-from coach import db, mastery, review
+from coach import db, history, mastery, review
 
 
 def make_problem(**overrides) -> dict:
@@ -171,10 +171,12 @@ def test_init_schema_drops_pattern_scores_and_keeps_the_history_it_came_from(tmp
         """
     )
     conn.commit()
-    history = ("problems", "attempts", "solutions", "enrichments", "reviews", "review_state")
+    tables_to_snapshot = ("problems", "attempts", "solutions", "enrichments", "reviews", "review_state")
 
     def snapshot():
-        return {t: [tuple(r) for r in conn.execute(f"SELECT * FROM {t}")] for t in history}
+        return {
+            t: [tuple(r) for r in conn.execute(f"SELECT * FROM {t}")] for t in tables_to_snapshot
+        }
 
     before = snapshot()
 
@@ -185,7 +187,7 @@ def test_init_schema_drops_pattern_scores_and_keeps_the_history_it_came_from(tmp
     assert "pattern_scores" not in tables
     assert snapshot() == before
     # and the history the cache was built from still scores: a clean solve held at 1 by its bug
-    assert mastery.pattern_stats(mastery.load_history(conn))[0]["score"] == pytest.approx(1.0)
+    assert mastery.pattern_stats(mastery.scored(history.load(conn)))[0]["score"] == pytest.approx(1.0)
 
 
 def test_init_schema_rebuilds_single_pattern_enrichments_as_main_patterns(tmp_path):

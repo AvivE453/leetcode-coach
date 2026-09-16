@@ -94,14 +94,14 @@ BUG = ("needs-work", ("bug",))
 EDGE = ("needs-work", ("edge-case",))
 
 
-def test_open_findings_reads_only_the_last_practice_day(tmp_path):
+def test_findings_reads_the_database_only_the_last_practice_day(tmp_path):
     """A later solve moves past an old finding, even unreviewed: it is trusted as logged."""
     conn = make_db(tmp_path)
     add_solve(conn, "2026-09-01", BUG)
     add_solve(conn, "2026-09-08")
     add_solve(conn, "2026-09-01", EDGE, problem=15)
 
-    assert assessment.open_findings(conn) == {15: "edge-case"}
+    assert assessment.findings(history.load(conn)) == {15: "edge-case"}
 
 
 def test_a_same_day_retry_does_not_clear_a_finding(tmp_path):
@@ -110,7 +110,7 @@ def test_a_same_day_retry_does_not_clear_a_finding(tmp_path):
     add_solve(conn, "2026-09-01", BUG)
     add_solve(conn, "2026-09-01")
 
-    assert assessment.open_findings(conn) == {1: "bug"}
+    assert assessment.findings(history.load(conn)) == {1: "bug"}
 
 
 @pytest.mark.parametrize(
@@ -127,7 +127,7 @@ def test_the_worst_finding_on_the_day_wins(tmp_path, day_reviews, expected):
     for review in day_reviews:
         add_solve(conn, "2026-09-01", review)
 
-    assert assessment.open_findings(conn) == {1: expected}
+    assert assessment.findings(history.load(conn)) == {1: expected}
 
 
 def test_problems_without_a_finding_are_left_out(tmp_path):
@@ -135,7 +135,7 @@ def test_problems_without_a_finding_are_left_out(tmp_path):
     add_solve(conn, "2026-09-01", ("optimal", ()))
     add_solve(conn, "2026-09-01", ("acceptable", ("complexity",)), problem=15)
 
-    assert assessment.open_findings(conn) == {}
+    assert assessment.findings(history.load(conn)) == {}
 
 
 def attempt(number, day, review=None):

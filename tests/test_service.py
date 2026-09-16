@@ -481,7 +481,7 @@ def test_enrich_solution_now_accepts_a_canonical_alternate_approach(tmp_path, mo
     # the note still points at the approach that went unpractised
     assert e.also_solvable_with == ["hashmap"]
     assert e.intended_secondary_patterns == ["two-pointers"]
-    assert corrections.outstanding(conn) == []
+    assert corrections.owed(history.load(conn)) == []
 
 
 def test_enrich_solution_now_carries_both_signals_when_embedding_fails(tmp_path, monkeypatch):
@@ -537,7 +537,7 @@ def test_enrich_solution_now_judges_against_the_stored_set_not_the_latest_answer
         service.get_problem(conn, 1)
     )
     analysis = weekly_analyze.analyze(conn, date.today())
-    assert (analysis["corrections_due"], corrections.outstanding(conn)) == ([], [])
+    assert (analysis["corrections_due"], corrections.owed(history.load(conn))) == ([], [])
 
 
 def test_enrich_solution_now_keeps_a_demoted_central_pattern_canonical(tmp_path, monkeypatch):
@@ -918,7 +918,7 @@ def test_last_7_days_covers_the_same_window_the_weekly_report_collects(tmp_path,
         service.log_solve(conn, 1, "clean", CODE, today=today - timedelta(days=days_ago))
 
     counted = service.stats_summary(conn, today)["last_7_days"]
-    week = weekly_collect.collect(conn, today)
+    week = weekly_collect.window(history.load(conn), today)
 
     assert counted == weekly_collect.WINDOW_DAYS == 7
     assert counted == len(week["attempts"])

@@ -143,8 +143,3 @@ def owed(attempts: Sequence[history.Attempt]) -> list[Correction]:
         if correction:
             found.append(correction)
     return sorted(found, key=lambda c: (c.due, c.problem["number"]))
-
-
-def outstanding(conn: sqlite3.Connection) -> list[Correction]:
-    """Every problem still owing approach practice, the soonest due first."""
-    return owed(history.load(conn))

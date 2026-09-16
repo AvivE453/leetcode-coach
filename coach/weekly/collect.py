@@ -1,4 +1,3 @@
-import sqlite3
 from collections.abc import Sequence
 from datetime import date, timedelta
 
@@ -37,8 +36,3 @@ def window(attempts: Sequence[history.Attempt], today: date) -> dict:
         "attempts": rows,
         "distinct_problems": len({r["problem_number"] for r in rows}),
     }
-
-
-def collect(conn: sqlite3.Connection, today: date) -> dict:
-    """window() over the whole practice history."""
-    return window(history.load(conn), today)

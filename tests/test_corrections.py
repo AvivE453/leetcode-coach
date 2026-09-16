@@ -235,7 +235,7 @@ def store_review(conn, solution_id, review):
 
 
 def owed(conn):
-    return [(c.problem["number"], c.reason, c.due) for c in corrections.outstanding(conn)]
+    return [(c.problem["number"], c.reason, c.due) for c in corrections.owed(history.load(conn))]
 
 
 def test_load_reads_each_attempt_with_its_tags_and_review_oldest_first(tmp_path):
@@ -256,7 +256,7 @@ def test_load_reads_each_attempt_with_its_tags_and_review_oldest_first(tmp_path)
     assert corrections.load(conn, 70) == []
 
 
-def test_outstanding_reads_the_store_the_way_evaluate_reads_attempts(tmp_path):
+def test_owed_reads_the_store_the_way_evaluate_reads_attempts(tmp_path):
     conn = make_db(tmp_path)
     enrich.save_intended(conn, 121, "dp-1d", ["greedy"])
     enrich.save_intended(conn, 70, "dp-1d")
@@ -264,7 +264,7 @@ def test_outstanding_reads_the_store_the_way_evaluate_reads_attempts(tmp_path):
     bugged, _ = solve(conn, 121, D2, main=DP, review=BUG)
     solve(conn, 70, D1, "failed", main=DP)  # failed with the accepted approach: ordinary SM-2
 
-    [correction] = corrections.outstanding(conn)
+    [correction] = corrections.owed(history.load(conn))
 
     assert correction.problem["number"] == 121
     assert (correction.accepted, correction.reason, correction.evidence) == (
@@ -286,7 +286,7 @@ def test_a_solution_without_an_attempt_owes_nothing(tmp_path):
     ).lastrowid
     tag_solution(conn, solution_id, *BRUTE)
 
-    assert corrections.outstanding(conn) == []
+    assert corrections.owed(history.load(conn)) == []
 
 
 def test_a_review_can_reopen_it_and_a_refreshed_one_close_it_again(tmp_path):
@@ -365,7 +365,7 @@ def test_owed_judges_each_problem_on_its_own_attempts():
     assert corrections.owed([]) == []
 
 
-def test_outstanding_lists_the_soonest_due_first_then_by_number(tmp_path):
+def test_owed_reads_the_database_soonest_due_first_then_by_number(tmp_path):
     conn = make_db(tmp_path)
     for number in (53, 70, 121):
         enrich.save_intended(conn, number, "dp-1d")
@@ -373,4 +373,4 @@ def test_outstanding_lists_the_soonest_due_first_then_by_number(tmp_path):
     solve(conn, 121, D1, main=BRUTE)
     solve(conn, 70, D1, main=BRUTE)
 
-    assert [c.problem["number"] for c in corrections.outstanding(conn)] == [70, 121, 53]
+    assert [c.problem["number"] for c in corrections.owed(history.load(conn))] == [70, 121, 53]

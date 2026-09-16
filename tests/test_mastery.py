@@ -12,6 +12,12 @@ def issues(*categories):
     return [{"category": c, "description": "..."} for c in categories]
 
 
+def scored_history(conn):
+    """mastery.scored() over the real database - the composition service.py uses,
+    now that mastery keeps no conn-taking wrapper of its own."""
+    return mastery.scored(history.load(conn))
+
+
 @pytest.mark.parametrize(
     "verdict,found,expected",
     [
@@ -286,7 +292,7 @@ def test_scored_gives_every_main_pattern_the_whole_solve():
     ]
 
 
-def test_load_history_scores_each_solve_oldest_first(tmp_path):
+def test_scored_history_orders_each_solve_oldest_first(tmp_path):
     """Date first, then logging order - so a same-day pair folds as it was logged."""
     conn = make_db(tmp_path)
     add_solve(conn, "2026-08-02", "failed", "hashmap")
@@ -295,19 +301,19 @@ def test_load_history_scores_each_solve_oldest_first(tmp_path):
     )
     add_solve(conn, "2026-08-01", "struggled", "dp-1d")
 
-    assert [(a.pattern, a.day, a.outcome, a.score) for a in mastery.load_history(conn)] == [
+    assert [(a.pattern, a.day, a.outcome, a.score) for a in scored_history(conn)] == [
         ("hashmap", date(2026, 8, 1), "clean", pytest.approx(4.4)),  # 0.7*5 + 0.3*3
         ("dp-1d", date(2026, 8, 1), "struggled", 3.0),
         ("hashmap", date(2026, 8, 2), "failed", 1.0),
     ]
 
 
-def test_load_history_leaves_out_solves_that_were_never_tagged(tmp_path):
+def test_scored_history_leaves_out_solves_that_were_never_tagged(tmp_path):
     """No pattern means nothing to attribute the solve to."""
     conn = make_db(tmp_path)
     add_solve(conn, "2026-08-01", "failed", None)
 
-    assert mastery.load_history(conn) == []
+    assert scored_history(conn) == []
 
 
 def test_pattern_stats_takes_every_field_from_the_same_attempts(tmp_path):
@@ -316,7 +322,7 @@ def test_pattern_stats_takes_every_field_from_the_same_attempts(tmp_path):
     add_solve(conn, "2026-08-02", "failed", "hashmap")
     add_solve(conn, "2026-08-03", "struggled", "dp-1d")
 
-    assert mastery.pattern_stats(mastery.load_history(conn)) == [
+    assert mastery.pattern_stats(scored_history(conn)) == [
         {"pattern": "dp-1d", "solved": 1, "attempts": 1, "rough": 1, "struggle_rate": 1.0,
          "score": 3.0, "last_date": date(2026, 8, 3)},
         {"pattern": "hashmap", "solved": 1, "attempts": 2, "rough": 1, "struggle_rate": 0.5,
@@ -335,7 +341,7 @@ def test_pattern_stats_counts_distinct_problems(tmp_path):
     add_solve(conn, "2026-08-02", "failed", "two-pointers")
     add_solve(conn, "2026-08-03", "clean", "two-pointers", problem=15)
 
-    [stats] = mastery.pattern_stats(mastery.load_history(conn))
+    [stats] = mastery.pattern_stats(scored_history(conn))
 
     assert (stats["solved"], stats["attempts"]) == (2, 3)
 
@@ -347,14 +353,14 @@ def test_a_solve_with_two_main_patterns_scores_each_in_full(tmp_path):
     solution_id = add_solve(conn, "2026-08-01", "struggled", None)
     tag_solution(conn, solution_id, "dfs", "dp-knapsack")
 
-    history = mastery.load_history(conn)
+    both = scored_history(conn)
 
-    assert [(a.pattern, a.problem, a.score) for a in history] == [
+    assert [(a.pattern, a.problem, a.score) for a in both] == [
         ("dfs", 1, 3.0),
         ("dp-knapsack", 1, 3.0),
     ]
     assert [
-        (p["pattern"], p["solved"], p["attempts"], p["score"]) for p in mastery.pattern_stats(history)
+        (p["pattern"], p["solved"], p["attempts"], p["score"]) for p in mastery.pattern_stats(both)
     ] == [("dfs", 1, 1, 3.0), ("dp-knapsack", 1, 1, 3.0)]
 
 
@@ -363,9 +369,9 @@ def test_a_late_review_counts_the_moment_it_is_saved(tmp_path):
     conn = make_db(tmp_path)
     add_solve(conn, "2026-08-01", "clean", "hashmap")
     solution_id = add_solve(conn, "2026-08-02", "clean", "hashmap")
-    assert mastery.pattern_stats(mastery.load_history(conn))[0]["score"] == 5.0
+    assert mastery.pattern_stats(scored_history(conn))[0]["score"] == 5.0
 
     add_review(conn, solution_id, "needs-work", ("bug",), day="2026-08-09")
 
     # the reported bug holds the second solve at 1, folded onto the 5.0 seed
-    assert mastery.pattern_stats(mastery.load_history(conn))[0]["score"] == pytest.approx(4.2)
+    assert mastery.pattern_stats(scored_history(conn))[0]["score"] == pytest.approx(4.2)
