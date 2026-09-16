@@ -25,13 +25,13 @@ def cache(tmp_path, monkeypatch):
     return run_evals.CallCache("reviews", "review-v9", "test-model")
 
 
-def item(name, code):
+def item(name, code, statement=None):
     """The shape both key functions read: a slug/id pair and the code they scored."""
-    return {"slug": name, "id": "canonical", "code": code}
+    return {"slug": name, "id": "canonical", "code": code, "statement": statement}
 
 
 def keyed(*items):
-    return [(run_evals.review_key(i), i) for i in items]
+    return [(run_evals.review_key(i, i["statement"]), i) for i in items]
 
 
 def recorder(answer="ok"):
@@ -40,7 +40,7 @@ def recorder(answer="ok"):
 
     def run_one(entry):
         called.append(entry["slug"])
-        return run_evals.review_key(entry), answer
+        return run_evals.review_key(entry, entry["statement"]), answer
 
     return run_one, called
 
@@ -138,7 +138,59 @@ def test_both_evals_key_by_the_code_they_scored():
 
     assert run_evals.enrich_key(entry) != run_evals.enrich_key(edited)
     assert run_evals.enrich_key(entry).startswith("two-sum@")
-    assert run_evals.review_key(item("a", "x")) != run_evals.review_key(item("a", "y"))
+    assert run_evals.review_key(item("a", "x"), None) != run_evals.review_key(item("a", "y"), None)
+
+
+def test_the_statement_is_part_of_the_key(cache):
+    """It is part of the prompt, so an answer bought under one must not be served for another.
+
+    Two ways this matters: LeetCode rewords a statement and the stale answer has to
+    miss, and a with/without pair of runs has to stay two measurements rather than
+    silently becoming one.
+    """
+    with_statement = item("a", "code-a", "1 <= n <= 10^4")
+    without = item("a", "code-a")
+    reworded = item("a", "code-a", "1 <= n <= 10^5")
+
+    keys = {run_evals.review_key(i, i["statement"]) for i in (with_statement, without, reworded)}
+
+    assert len(keys) == 3
+    run_one, _ = recorder()
+    cache.fill(keyed(with_statement), run_one, "buying")
+    assert [i["slug"] for i in cache.pending(keyed(without))] == ["a"]
+
+
+def test_a_run_refuses_rather_than_mixing_statemented_and_bare_fixtures(monkeypatch):
+    """Half a bank scoring one prompt and half the other is a number describing neither."""
+    monkeypatch.setattr(run_evals, "statements", lambda slugs, refresh: {"a": "1 <= n <= 10"})
+    fixtures = [item("a", "code-a"), item("b", "code-b")]
+
+    with pytest.raises(run_evals.MissingStatements) as caught:
+        run_evals.bank_statements(fixtures, refresh=False)
+
+    assert caught.value.args[0] == ["b"], "it names what is missing, before any money moves"
+
+
+def test_the_report_heading_says_which_branch_it_measured():
+    """One prompt version, two prompts - paid-only problems get no statement.
+
+    Two tables both headed `review-v5` and disagreeing is the confusion this whole
+    change exists to remove, so the variant is not optional in the heading.
+    """
+    scores = run_evals.score_feedback([control_fixture()], [{"issues": [], "verdict": "optimal"}])
+
+    with_text = "\n".join(run_evals.feedback_lines(
+        {"prompt_version": "review-v9", "statements": True, "splits": scores}))
+    without = "\n".join(run_evals.feedback_lines(
+        {"prompt_version": "review-v9", "statements": False, "splits": scores}))
+
+    assert "(with problem statements)" in with_text
+    assert "(without problem statements)" in without
+
+
+def control_fixture():
+    return {"slug": "two-sum", "id": "canonical", "category": None, "split": "dev",
+            "control": "representative", "origin": "authored", "code": "..."}
 
 
 def test_the_cache_file_stays_readable_json(cache):

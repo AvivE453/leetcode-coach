@@ -110,7 +110,8 @@ def test_a_hidden_test_split_reports_its_numbers_but_not_what_it_got_wrong():
     scores = run_evals.score_feedback(fixtures, [FLAGGED, FLAGGED])
     scores["test"] = run_evals.hide_details(scores["test"])
 
-    report = "\n".join(run_evals.feedback_lines({"prompt_version": "review-v9", "splits": scores}))
+    report = "\n".join(run_evals.feedback_lines(
+        {"prompt_version": "review-v9", "statements": True, "splits": scores}))
     dev_part, test_part = report.split("split `test`")
 
     assert "two-sum/canonical" in dev_part

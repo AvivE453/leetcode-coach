@@ -71,8 +71,18 @@ Report:
 
 
 def review_solution(
-    problem: sqlite3.Row, code: str, content: str | None = None, model: str | None = None
+    problem: sqlite3.Row, code: str, content: str | None, model: str | None = None
 ) -> Review:
+    """One review of one solve. `content` is the problem statement, or None for none.
+
+    None has no default on purpose. It is a real answer for a fifth of the catalog -
+    the public API withholds the statement for paid-only problems - so both branches
+    of the prompt run for good and both have to be measured. A default let the eval
+    harness take the second branch without ever saying so, which meant `review-v5`
+    named the prompt the coach sends *and* a different one the evals scored, with the
+    cache file, the RESULTS.md heading and the reported version unable to tell them
+    apart. A caller that has no statement now has to say so at the call site.
+    """
     statement = f"\nProblem statement:\n{content}\n" if content else ""
     prompt = PROMPT.format(
         number=problem["number"],

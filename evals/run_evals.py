@@ -23,9 +23,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx
 import numpy as np
 
-from coach import config, embed, enrich, llm, review
+from coach import catalog, config, embed, enrich, llm, review
 from evals import corpus, pairs
 from evals.bank import controls, oracle
 from evals.bank.problems import load_all
@@ -56,8 +57,17 @@ def digest(code: str) -> str:
     return hashlib.sha256(code.encode()).hexdigest()[:8]
 
 
-def review_key(fixture) -> str:
-    return f"{fixture['slug']}/{fixture['id']}@{digest(fixture['code'])}"
+def review_key(fixture, statement: str | None) -> str:
+    """One review's cache key: the fixture, the code it scored, and the statement it saw.
+
+    The statement is part of the prompt, so it is part of the key, for the same reason
+    the code digest is. Two things turn on it. A reworded LeetCode statement misses its
+    stale entry instead of being scored against an answer computed under different
+    constraints. And a with-statement and a without-statement run of the same fixture
+    cannot collide - which is what makes the without branch (everything paid-only takes
+    it, since the public API withholds the statement) measurable at all.
+    """
+    return f"{fixture['slug']}/{fixture['id']}@{digest(fixture['code'])}+{digest(statement or '')}"
 
 
 def enrich_key(entry) -> str:
@@ -123,6 +133,64 @@ def review_cache(model: str) -> CallCache:
 
 def enrichment_cache(model: str) -> CallCache:
     return CallCache("enrichment", enrich.PROMPT_VERSION, model)
+
+
+def statements_path() -> Path:
+    """Resolved on each call, like CallCache.path, so a redirected CACHE_DIR is honoured."""
+    return CACHE_DIR / "statements.json"
+
+
+class MissingStatements(Exception):
+    """Some fixture in a with-statements run has no statement to send.
+
+    Not recoverable by letting those fixtures through: they would score the
+    without-statement prompt while the rest scored the with, and the single recall and
+    false-positive rate that came out would describe neither. Better to refuse than to
+    append a number to RESULTS.md that cannot be read.
+    """
+
+
+def statements(slugs: list[str], refresh: bool = False) -> dict[str, str]:
+    """Each bank problem's LeetCode statement, fetched once and cached by slug.
+
+    Fetched rather than committed. `evals/bank/problems/*.py` is tracked and this repo
+    is public, and a statement is LeetCode's text, not ours - the same line the bank
+    already draws around third-party code. `evals/cache/` is gitignored.
+
+    Free: this is leetcode.com, not the Anthropic API. So --dry-run resolves statements
+    too, and the number it reports stays the number of calls that cost money.
+    """
+    path = statements_path()
+    cached = {}
+    if not refresh and path.exists():
+        cached = json.loads(path.read_text())
+    todo = [slug for slug in slugs if slug not in cached]
+    if not todo:
+        print(f"  statements: all {len(slugs)} cached, nothing fetched")
+        return cached
+
+    def fetch_one(slug):
+        try:
+            return slug, catalog.fetch_content(slug)
+        except httpx.HTTPError as exc:
+            print(f"    !! {slug}: {exc}")
+            return slug, None
+
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    for slug, text in parallel(fetch_one, todo, "fetching statements from leetcode.com (free)"):
+        if text:
+            cached[slug] = text
+    path.write_text(json.dumps(cached, indent=2, sort_keys=True))
+    return cached
+
+
+def bank_statements(fixtures, refresh: bool) -> dict[str, str]:
+    """The statement for every fixture's problem, or MissingStatements naming the gaps."""
+    texts = statements(sorted({f["slug"] for f in fixtures}), refresh)
+    missing = sorted({f["slug"] for f in fixtures if not texts.get(f["slug"])})
+    if missing:
+        raise MissingStatements(missing)
+    return texts
 
 
 # ---------------------------------------------------------------- feedback
@@ -261,7 +329,9 @@ def hide_details(scores: dict) -> dict:
     return {**{key: value for key, value in scores.items() if key not in DETAILS}, "details_hidden": True}
 
 
-def run_feedback(refresh: bool, model: str, split: str | None, reveal_test: bool) -> dict:
+def run_feedback(
+    refresh: bool, model: str, split: str | None, reveal_test: bool, with_statements: bool
+) -> dict:
     print("\n[feedback] labelling fixtures by execution ...")
     fixtures = build_bank(split)
     for name in sorted({f["split"] for f in fixtures}):
@@ -270,6 +340,10 @@ def run_feedback(refresh: bool, model: str, split: str | None, reveal_test: bool
         regression = sum(not f["category"] and f["control"] == "regression" for f in in_split)
         print(f"  {name}: {flawed} flawed + {len(in_split) - flawed - regression} clean controls"
               f" + {regression} regression controls")
+
+    # The coach sends the problem statement, so the bank does too, or this scores a
+    # prompt nothing runs. --no-statements scores the other branch on purpose.
+    texts = bank_statements(fixtures, refresh) if with_statements else {}
 
     # Cached per prompt version and fixture, so correcting a LABEL (which changes
     # scoring, not the model's answer) costs nothing to re-score.
@@ -280,9 +354,10 @@ def run_feedback(refresh: bool, model: str, split: str | None, reveal_test: bool
             "title": problem.TITLE,
             "difficulty": problem.DIFFICULTY,
         }
-        key = review_key(fixture)
+        statement = texts.get(fixture["slug"])
+        key = review_key(fixture, statement)
         try:
-            result = review.review_solution(row, fixture["code"], model=model)
+            result = review.review_solution(row, fixture["code"], statement, model=model)
         except llm.LLMUnavailable as exc:
             print(f"    !! {fixture['slug']}/{fixture['id']}: {exc}")
             return key, None
@@ -292,13 +367,14 @@ def run_feedback(refresh: bool, model: str, split: str | None, reveal_test: bool
             "verdict": result.verdict,
         }
 
-    keyed = [(review_key(f), f) for f in fixtures]
+    keyed = [(review_key(f, texts.get(f["slug"])), f) for f in fixtures]
     cached = review_cache(model).fill(keyed, review_one, "reviewing", refresh)
     scores = score_feedback(fixtures, [cached.get(key) for key, _ in keyed])
     if "test" in scores and not reveal_test:
         scores["test"] = hide_details(scores["test"])
     return {
         "prompt_version": review.PROMPT_VERSION,
+        "statements": with_statements,
         "fixtures": len(fixtures),
         "splits": scores,
     }
@@ -425,8 +501,14 @@ def run_retrieval(cached: dict) -> dict:
 def feedback_lines(feedback: dict) -> list[str]:
     """The run-log lines for one feedback run: a table per split, then what it missed and flagged."""
     lines = []
+    # The variant is in the heading because one prompt version has two of them: the
+    # coach sends a statement when there is one to send, and nothing at all for a
+    # paid-only problem. Two runs that did not say which is which are two tables
+    # claiming to measure `review-v5` and disagreeing.
+    variant = "with" if feedback["statements"] else "without"
     for split, f in feedback["splits"].items():
-        heading = f"### Feedback quality — prompt `{feedback['prompt_version']}` · split `{split}`"
+        heading = (f"### Feedback quality — prompt `{feedback['prompt_version']}`"
+                   f" ({variant} problem statements) · split `{split}`")
         if split == "test":
             heading += " · details " + ("hidden" if f.get("details_hidden") else "revealed")
         lines.append(heading + "\n")
@@ -514,6 +596,14 @@ def append_results(sections: dict, model: str) -> None:
     print(f"\nAppended to {RESULTS_PATH.relative_to(config.PROJECT_ROOT)}")
 
 
+def report_missing(exc: MissingStatements) -> int:
+    """Refuse the run and say which problems have no statement, before any money moves."""
+    print(f"\nNo statement for: {', '.join(exc.args[0])}")
+    print("leetcode.com may be unreachable, or the slug may have changed. Retry, or pass")
+    print("--no-statements to score the without-statement branch on purpose.")
+    return 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--feedback", action="store_true")
@@ -524,6 +614,10 @@ def main() -> int:
                         help="Build and score one split of the feedback bank (default: both)")
     parser.add_argument("--reveal-test", action="store_true",
                         help="Show the test split's misses and false positives - this spends it for prompt work")
+    parser.add_argument("--no-statements", dest="statements", action="store_false",
+                        help="Review without the problem statement - the branch every paid-only"
+                             " problem takes, which no bank fixture can reach any other way."
+                             " Run it against the default to measure what the statement bought.")
     parser.add_argument("--refresh-cache", action="store_true")
     parser.add_argument("--model", default=config.EVAL_MODEL,
                         help=f"Model to score (default: {config.EVAL_MODEL}). Pass"
@@ -545,13 +639,22 @@ def main() -> int:
         reviews = enrichments = 0
         if want_feedback:
             print("labelling fixtures by execution to count them ...", flush=True)
-            keyed = [(review_key(f), f) for f in build_bank(args.split)]
+            fixtures = build_bank(args.split)
+            # Resolved here too, not assumed: the statement is in the cache key, so a
+            # count taken without it would be a count for a different set of keys.
+            try:
+                texts = bank_statements(fixtures, args.refresh_cache) if args.statements else {}
+            except MissingStatements as exc:
+                return report_missing(exc)
+            keyed = [(review_key(f, texts.get(f["slug"])), f) for f in fixtures]
             reviews = len(review_cache(args.model).pending(keyed, args.refresh_cache))
         if want_enrichment or want_retrieval:
             keyed = [(enrich_key(e), e) for e in corpus.load()]
             enrichments = len(enrichment_cache(args.model).pending(keyed, args.refresh_cache))
         total = reviews + enrichments
         print(f"model: {args.model}")
+        print(f"statements: {'sent' if args.statements else 'not sent'}"
+              f" (leetcode.com, 0 API calls)")
         print(f"feedback: {reviews} review call(s) not already cached")
         print(f"enrichment: {enrichments} enrichment call(s) not already cached")
         print("retrieval: 0 API calls (local embeddings, reuses the enrichment cache)")
@@ -565,7 +668,12 @@ def main() -> int:
 
     sections = {}
     if want_feedback:
-        sections["feedback"] = run_feedback(args.refresh_cache, args.model, args.split, args.reveal_test)
+        try:
+            sections["feedback"] = run_feedback(
+                args.refresh_cache, args.model, args.split, args.reveal_test, args.statements
+            )
+        except MissingStatements as exc:
+            return report_missing(exc)
     if want_enrichment or want_retrieval:
         print("\n[enrichment] corpus ...")
         cached = enrich_corpus(args.refresh_cache, args.model)
