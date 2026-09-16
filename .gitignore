@@ -10,3 +10,4 @@ evals/bank/private/
 *.partial
 CLAUDE.md
 data/coach.db
+data/backups/

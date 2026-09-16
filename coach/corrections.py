@@ -21,11 +21,10 @@ that way is due three days after the practice itself - often already past - neve
 days after the evidence was read.
 """
 
-import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Literal, NamedTuple
+from typing import Literal
 
 from coach import enrich, history, scheduler
 
@@ -34,14 +33,6 @@ CORRECTION_INTERVAL_DAYS = 3
 
 # Why a problem still owes approach practice, read off its latest tagged practice day.
 Reason = Literal["wrong-approach", "failed", "assisted", "review-finding"]
-
-
-class History(NamedTuple):
-    """One attempted problem with a canonical set, and its attempts, oldest first."""
-
-    problem: dict  # number, slug, title, difficulty
-    canonical: enrich.Canonical
-    attempts: list[history.Attempt]
 
 
 @dataclass(frozen=True)
@@ -68,22 +59,6 @@ def problem_dict(problem: history.Problem) -> dict:
         "title": problem.title,
         "difficulty": problem.difficulty,
     }
-
-
-def load(conn: sqlite3.Connection, number: int | None = None) -> list[History]:
-    """Every attempted problem that has a canonical set, with its attempts, by number.
-
-    The read is history.load(): attempts drive its join, so a solution never linked to an
-    attempt is no dated practice, and a problem with a canonical set but no attempt has no
-    attempts to group. A problem never enriched is dropped here - unknown, not wrong.
-    `number` narrows to one problem.
-    """
-    grouped = history.by_problem(history.load(conn, number))
-    return [
-        History(problem_dict(attempts[0].problem), attempts[0].problem.canonical, attempts)
-        for _, attempts in sorted(grouped.items())
-        if attempts[0].problem.canonical.intended is not None
-    ]
 
 
 def evaluate(

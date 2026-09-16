@@ -341,16 +341,19 @@ def practice_dates(
     """
     stored = stored_review_state(conn, number)
     review_due = stored.next_due if stored else None
-    histories = corrections.load(conn, number)
-    if not histories:
+    attempts = history.load(conn, number)
+    if not attempts:
         return PracticeDates(review_due, correction=None)
 
-    [history] = histories
-    correction = corrections.evaluate(history.problem, history.canonical, history.attempts)
+    # A problem never enriched needs no guard of its own: with no canonical set,
+    # off_pattern is False for every attempt, so evaluate() owes nothing.
+    problem = corrections.problem_dict(attempts[0].problem)
+    canonical = attempts[0].problem.canonical
+    correction = corrections.evaluate(problem, canonical, attempts)
     if logged_attempt is None:
         return PracticeDates(review_due, correction)
-    earlier = [a for a in history.attempts if a.id != logged_attempt]
-    owed_before = corrections.evaluate(history.problem, history.canonical, earlier)
+    earlier = [a for a in attempts if a.id != logged_attempt]
+    owed_before = corrections.evaluate(problem, canonical, earlier)
     return PracticeDates(
         review_due, correction, completed=owed_before is not None and correction is None
     )
@@ -622,9 +625,10 @@ def stats_summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
         "SELECT COUNT(*) FROM attempts WHERE date >= ?",
         ((today - timedelta(days=weekly_collect.WINDOW_DAYS - 1)).isoformat(),),
     ).fetchone()[0]
-    due_count = conn.execute(
-        "SELECT COUNT(*) FROM review_state WHERE next_due <= ?", (today.isoformat(),)
-    ).fetchone()[0]
+    # The same call the Daily Plan's Due heading counts, not a second copy of the
+    # predicate: a filter added to due_reviews reaches the home page rather than
+    # drifting from it. lookahead_days defaults to 0 - owed today or overdue.
+    due_count = len(scheduler.due_reviews(conn, today))
 
     # The same distinct set `solved` counts, split by difficulty - so the two always add up.
     by_difficulty = dict.fromkeys(DIFFICULTIES, 0)

@@ -997,6 +997,21 @@ def test_stats_summary_counts_distinct_problems_and_curriculum(tmp_path, monkeyp
     }
 
 
+def test_home_counts_reviews_due_today_not_the_week_ahead(tmp_path, monkeypatch):
+    """Home shares scheduler.due_reviews with the Daily Plan and must keep its horizon at 0.
+
+    weekly/analyze.py passes PLAN_LOOKAHEAD_DAYS=6, so a call here that lost the argument
+    would count a review owed six days out as due now - and the home page would disagree
+    with the Daily Plan about the same reviews.
+    """
+    conn = seed_db(tmp_path, monkeypatch)
+    logged = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 12))
+    assert logged.next_due == date(2026, 9, 19)
+
+    assert service.stats_summary(conn, date(2026, 9, 13))["due_today"] == 0  # six days out
+    assert service.stats_summary(conn, date(2026, 9, 19))["due_today"] == 1
+
+
 def test_last_7_days_covers_the_same_window_the_weekly_report_collects(tmp_path, monkeypatch):
     """One definition of "the last week", not two.
 

@@ -238,24 +238,6 @@ def owed(conn):
     return [(c.problem["number"], c.reason, c.due) for c in corrections.owed(history.load(conn))]
 
 
-def test_load_reads_each_attempt_with_its_tags_and_review_oldest_first(tmp_path):
-    conn = make_db(tmp_path)
-    enrich.save_intended(conn, 121, "dp-1d", ["greedy"])
-    enrich.save_intended(conn, 70, "dp-1d")  # a canonical set, but never attempted
-    later, _ = solve(conn, 121, D2, main=DP, secondary=["greedy"], review=BUG)
-    earlier, _ = solve(conn, 121, D1, "struggled")
-
-    [loaded] = corrections.load(conn)
-
-    assert loaded.problem["title"] == "Best Time to Buy and Sell Stock"
-    assert loaded.canonical == ("dp-1d", ["greedy"])
-    assert loaded.attempts == [
-        attempt(earlier, D1, "struggled"),
-        attempt(later, D2, main=DP, secondary=["greedy"], review=BUG),
-    ]
-    assert corrections.load(conn, 70) == []
-
-
 def test_owed_reads_the_store_the_way_evaluate_reads_attempts(tmp_path):
     conn = make_db(tmp_path)
     enrich.save_intended(conn, 121, "dp-1d", ["greedy"])
