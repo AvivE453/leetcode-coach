@@ -34,6 +34,12 @@ def no_api_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def no_catalog_fetch(monkeypatch):
+    """Tests must never hit the real LeetCode API for a problem's statement either."""
+    monkeypatch.setattr("coach.catalog.fetch_content", lambda slug: None)
+
+
 def seed_db(tmp_path, monkeypatch, problems=None) -> sqlite3.Connection:
     """A fresh database wired into config and seeded with a catalog, left open.
 

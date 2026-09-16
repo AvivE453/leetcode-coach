@@ -1,6 +1,7 @@
 import importlib
 from datetime import date, timedelta
 
+import httpx
 import numpy as np
 import pytest
 from conftest import CODE, TWO_SUM, seed_db, tag_solution
@@ -359,6 +360,63 @@ def test_a_solve_logged_while_the_review_runs_is_in_the_schedule(tmp_path, monke
 
     assert stored_schedule(conn) == (date(2026, 9, 15), 1, 1)
     assert result.effect.latest_attempt_date == date(2026, 9, 8)
+
+
+def test_problem_content_is_fetched_once_and_cached_in_the_row(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        "coach.catalog.fetch_content",
+        lambda slug: calls.append(slug) or "2 <= nums.length <= 10^4",
+    )
+
+    first = service.problem_content(conn, service.get_problem(conn, 1))
+    second = service.problem_content(conn, service.get_problem(conn, 1))
+
+    assert first == second == "2 <= nums.length <= 10^4"
+    assert calls == ["two-sum"]  # fetched once - the second call read the cached row
+
+
+def test_problem_content_is_never_fetched_for_a_paid_only_problem(tmp_path, monkeypatch):
+    conn = seed_db(
+        tmp_path,
+        monkeypatch,
+        problems=[{**TWO_SUM[0], "paid_only": 1}],
+    )
+    monkeypatch.setattr(
+        "coach.catalog.fetch_content", lambda slug: pytest.fail("paid-only content was fetched")
+    )
+
+    assert service.problem_content(conn, service.get_problem(conn, 1)) is None
+
+
+def test_problem_content_degrades_to_none_when_the_fetch_fails(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+
+    def unreachable(slug):
+        raise httpx.ConnectError("no route to leetcode.com")
+
+    monkeypatch.setattr("coach.catalog.fetch_content", unreachable)
+
+    assert service.problem_content(conn, service.get_problem(conn, 1)) is None
+    assert service.get_problem(conn, 1)["content"] is None
+
+
+def test_a_review_prompt_includes_the_fetched_problem_statement(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+    logged = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+    monkeypatch.setattr(
+        "coach.catalog.fetch_content", lambda slug: "2 <= nums.length <= 10^4"
+    )
+    seen_prompts = []
+    monkeypatch.setattr(
+        "coach.llm.parse",
+        lambda prompt, output_format, **kw: seen_prompts.append(prompt) or FEEDBACK,
+    )
+
+    service.review_solution_now(conn, logged.solution_id, service.get_problem(conn, 1), CODE)
+
+    assert "2 <= nums.length <= 10^4" in seen_prompts[0]
 
 
 def test_a_late_bug_review_puts_the_problem_on_the_plan_with_its_reason(tmp_path, monkeypatch):

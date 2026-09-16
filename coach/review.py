@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from coach import config, llm
 
-PROMPT_VERSION = "review-v4"
+PROMPT_VERSION = "review-v5"
 
 
 class Issue(BaseModel):
@@ -30,7 +30,7 @@ You are reviewing a LeetCode solution for an interview-prep tracker. The author 
 honest, specific feedback they can act on before re-solving the problem.
 
 Problem: {number}. {title} (difficulty: {difficulty})
-
+{statement}
 Solution code:
 ```python
 {code}
@@ -44,7 +44,9 @@ Report:
   list when the solution is broken enough that nothing stands out.
 - issues: only genuine problems, judged against this problem's stated LeetCode
   constraints and guarantees - input sizes, value ranges, a non-empty input, a
-  guaranteed answer, the allowed characters. An input the constraints exclude is not a
+  guaranteed answer, the allowed characters. Read them from the problem statement
+  above when it is given; otherwise use what you know of this problem's actual
+  constraints, never a generic worst case. An input the constraints exclude is not a
   flaw, and code that relies on a guarantee the problem gives is not a flaw. The three
   categories are mutually exclusive - decide which one applies by asking what kind of
   input breaks the code:
@@ -68,11 +70,15 @@ Report:
 """
 
 
-def review_solution(problem: sqlite3.Row, code: str, model: str | None = None) -> Review:
+def review_solution(
+    problem: sqlite3.Row, code: str, content: str | None = None, model: str | None = None
+) -> Review:
+    statement = f"\nProblem statement:\n{content}\n" if content else ""
     prompt = PROMPT.format(
         number=problem["number"],
         title=problem["title"],
         difficulty=problem["difficulty"],
+        statement=statement,
         code=code,
     )
     return llm.parse(prompt, Review, model=model)

@@ -11,8 +11,11 @@ from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 
+import httpx
+
 from coach import (
     assessment,
+    catalog,
     config,
     corrections,
     curriculum,
@@ -446,6 +449,30 @@ def enrich_solution_now(
     return replace(tagged, neighbors=neighbor_details(conn, hits))
 
 
+def problem_content(conn: sqlite3.Connection, problem: sqlite3.Row) -> str | None:
+    """This problem's statement, cached in `problems.content` after the first fetch.
+
+    A None cell means never fetched, or the fetch failed - the next review for this
+    problem tries again, since LeetCode being briefly unreachable shouldn't ban it
+    from constraints text for good. Paid-only problems are never attempted, since the
+    public API has nothing to give for them.
+    """
+    if problem["content"]:
+        return problem["content"]
+    if problem["paid_only"]:
+        return None
+    try:
+        content = catalog.fetch_content(problem["slug"])
+    except httpx.HTTPError:
+        return None
+    if content:
+        with conn:
+            conn.execute(
+                "UPDATE problems SET content = ? WHERE number = ?", (content, problem["number"])
+            )
+    return content
+
+
 def review_solution_now(
     conn: sqlite3.Connection,
     solution_id: int,
@@ -468,8 +495,9 @@ def review_solution_now(
         if stored is not None:
             return ReviewResult(review=stored, cached=True)
 
+    content = problem_content(conn, problem)
     try:
-        r = review_llm.review_solution(problem, code)
+        r = review_llm.review_solution(problem, code, content=content)
     except llm.LLMUnavailable as exc:
         return ReviewResult(skipped=str(exc))
 

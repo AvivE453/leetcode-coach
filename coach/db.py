@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS problems (
     in_blind75 INTEGER NOT NULL DEFAULT 0,
     in_neetcode150 INTEGER NOT NULL DEFAULT 0,
     intended_pattern TEXT,
-    intended_secondary_patterns TEXT NOT NULL DEFAULT '[]'
+    intended_secondary_patterns TEXT NOT NULL DEFAULT '[]',
+    content TEXT
 );
 
 CREATE TABLE IF NOT EXISTS attempts (
@@ -100,6 +101,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE problems ADD COLUMN intended_secondary_patterns TEXT NOT NULL DEFAULT '[]'"
         )
+    if "content" not in columns:
+        conn.execute("ALTER TABLE problems ADD COLUMN content TEXT")
     # The weekly review is recomputed on every read now, so the rows that froze one
     # week's numbers (and the LLM note beside them) have no reader left.
     conn.execute("DROP TABLE IF EXISTS weekly_runs")
