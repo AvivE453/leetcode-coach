@@ -32,22 +32,26 @@ flowchart TB
     end
 
     api{{"Claude API<br/>structured outputs"}}
+    lc{{"LeetCode GraphQL<br/>problem statement"}}
 
     sm2 --> db
     enr --> db
     emb --> db
-    db --> ta
-    db --> c
+    db --> hist["history.py<br/>one read: every attempt,<br/>its tags, its review"]
+    hist --> ta
+    hist --> c
 
     enr -.-> api
 
     db --> sim["coach similar<br/>numpy cosine, top-5"]
     db --> rev["review a solve<br/>(Solutions)"]
     rev -.-> api
+    rev -.-> lc
 ```
 
-Solid arrows are local; dotted arrows are the only places an LLM is involved. Every one
-of them degrades to a working non-LLM path when the API is unavailable.
+Solid arrows stay on the machine; dotted arrows leave it — the Claude API for enrichment
+and reviews, LeetCode for a problem's statement. Every one of them degrades to a working
+local path when the network or the key is unavailable.
 
 The web UI is the daily interface; the CLI keeps only the jobs with no page (`init`,
 `enrich`, `similar`). Both are thin layers over one implementation
@@ -169,6 +173,26 @@ On the Daily Plan that problem reads "re-solve: review reported a bug" rather th
 date, judged by its last practice day, so a clean retry the same afternoon hides the reason
 no more than it undoes the lapse.
 
+**The reviewer reads the problem statement, fetched once per problem.**
+`review-v4` fixed a class of false positives by telling the model to judge issues against
+the problem's stated constraints and guarantees — an input the constraints exclude is not
+a flaw, and a faster algorithm that makes no difference at the allowed sizes is not an
+improvement. But it was given only a number and a title to recall those constraints from,
+so the rule pointed at text the prompt never contained. `review-v5` supplies it: LeetCode's
+statement, cleaned to plain text and cached in `problems.content`. The fetch is one GraphQL
+call made by the first review that needs it, not part of the bulk catalog fetch, so a
+problem never reviewed never costs a request. An empty cell means never fetched *or* the
+fetch failed, so an unreachable LeetCode does not ban a problem from constraints text for
+good, and paid-only problems are never attempted, because the public API withholds the
+field for them — answering 200 with it null, which is why a malformed answer reads as
+absent rather than raising. The statement is an input the prompt can do without: with none,
+`review-v5` tells the model to fall back on what it knows of this problem's actual
+constraints rather than a generic worst case, so a failed fetch costs one review some
+precision instead of the review itself. The column arrives through the guarded
+`ALTER TABLE` in `init_schema`, so a database carried over from before it needs one
+`coach init`. **The eval numbers below do not measure this**: they were bought under
+`review-v4`, and the fixture bank's test split was already spent on it.
+
 **The Daily Plan is three headings of ten, not one list of fifteen.**
 It used to be one ranked list sharing fifteen slots: due reviews, then due approach practice,
 then weak-pattern picks, then curriculum progression. A heavy review day pushed everything
@@ -215,6 +239,25 @@ rebuilds them all, because the card names the solve's main patterns.
 Brute-force numpy cosine over float32 blobs in SQLite. At a few hundred solutions this
 takes microseconds; a vector DB would be infrastructure bought to solve a problem this
 project does not have.
+
+**One read of the practice history, and pure functions over it.**
+Four things ask the database the same question — what mastery folds, what approach practice
+is owed, what SM-2 replays, and why a problem came back — and each used to ask it with its
+own join, its own JSON decoding and its own choice of inner or left join. The grade formula
+already had one owner ([`coach/assessment.py`](../coach/assessment.py)), but the *evidence*
+it graded did not, so a change to how a review attaches to an attempt meant editing four
+queries in four modules, and missing one brought back exactly the disagreement assessment.py
+was written to end — silently, with nothing to fail. The join now lives once, in
+[`coach/history.py`](../coach/history.py). An attempt is the whole row: the attempt as
+logged, the solve's tags when it has been tagged, and the review of that solve when one was
+bought, with its grade and its correctness finding derived through assessment.py rather than
+stored. Attempts drive the join and everything else is left-joined, because a solve logged
+before enrichment ran is still practice that happened and dropping it would quietly change
+what the schedule replays; an untagged solve reads as unknown, which is never evidence, and
+not as an empty list. Mastery, approach practice, findings and the weekly window are then
+pure functions over the attempts, and one request loads them once and hands the same list to
+all four. Nothing is cached, for the reason nothing else here is: a review saved days after
+the solve it judges, or a tag backfilled by `coach enrich`, counts on the next read.
 
 **One copy of everything.**
 `coach.db` is the only place a solve lives. Two mirrors have been removed for the same
@@ -274,9 +317,12 @@ defend or iterate against. Full numbers and methodology:
 | By category | bug 75% · complexity 90% · edge-case 100% |
 | The same prompt on the 13 problems it was written against | 97% recall · 0% false positives (0/35) |
 
-Measured on `review-v4` with `claude-sonnet-5`, the prompt and model the coach ships, on
-the held-out `test` split of the fixture bank: 3 Easy, 14 Medium and 8 Hard problems, with
-every correct solution written outside this repo.
+Measured on `review-v4` with `claude-sonnet-5`, on the held-out `test` split of the fixture
+bank: 3 Easy, 14 Medium and 8 Hard problems, with every correct solution written outside
+this repo. The model is the one the coach ships; the prompt is one version behind it.
+`review-v5` adds the problem statement (above) and has no number of its own, because
+reading this split's misses is what spent it — scoring v5 honestly needs new test problems,
+so until they exist these are v4's numbers and are quoted as such.
 
 The false-positive rate matters as much as recall: a reviewer that reports five issues
 on every solution scores perfect recall and is useless, because it would send you
@@ -302,9 +348,12 @@ elsewhere.** A control must pass every test, agree with the brute force, time wi
 the canonical, and not need megabytes where the canonical needs almost none. The test
 split's come from NeetCode's and walkccc's published solutions, copied unmodified at pinned
 commits - one that breaks a rule is rejected with its reason, never fixed (67 accepted, 50
-rejected) - and from the author's own clean solves, kept out of git. Controls written in
-this repo count only on `dev`, where six that probe false positives an earlier run showed
-are scored apart so they cannot flatter the rate.
+rejected) - and from the author's own clean solves, kept out of git. A false-positive line
+in the report quotes the model's claim, because on code proven correct the claim is the part
+worth arguing with - but on the author's own solves that claim can quote the solution, so
+those lines keep only their categories and the words stay in the gitignored cache. Controls
+written in this repo count only on `dev`, where six that probe false positives an earlier
+run showed are scored apart so they cannot flatter the rate.
 
 **The test split is held out by construction.** The 47 problems added for it were divided
 mechanically - within each difficulty, sorted by number, alternating - and the whole bank,
@@ -400,6 +449,7 @@ Published solutions enter through `python -m evals.bank.import_external fetch <n
 
 ```
 coach/          CLI, service layer, SQLite schema, scheduler, LLM wrapper, enrichment, embeddings
+coach/history.py  the one read of practice history; mastery, corrections, assessment are pure over it
 coach/weekly/   collect → analyze (plan.py builds the daily list)
 coach/web/      FastAPI app + the static Home, Solutions, Daily Plan and Weekly Review pages
 evals/          execution oracle, fixture bank, corpus, scorers, RESULTS.md
