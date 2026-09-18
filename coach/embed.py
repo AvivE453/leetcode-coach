@@ -8,7 +8,8 @@ from coach import config
 
 
 class EmbeddingsUnavailable(Exception):
-    """sentence-transformers isn't installed (it lives in the optional `embed` extra)."""
+    """No model to embed with: sentence-transformers isn't installed (it lives in the
+    optional `embed` extra), or its model can't be loaded."""
 
 
 def card_text(title: str, main_patterns: list[str], key_trick: str, code: str) -> str:
@@ -27,7 +28,11 @@ def encode(texts: list[str]) -> np.ndarray:
             raise EmbeddingsUnavailable(
                 "sentence-transformers not installed - run: uv sync --extra embed"
             ) from e
-        _model = SentenceTransformer(config.EMBED_MODEL)
+        # A failed download and a missing or corrupt cached copy are all OSErrors.
+        try:
+            _model = SentenceTransformer(config.EMBED_MODEL)
+        except OSError as e:
+            raise EmbeddingsUnavailable(f"could not load {config.EMBED_MODEL}: {e}") from e
     return np.asarray(_model.encode(texts, normalize_embeddings=True), dtype=np.float32)
 
 
@@ -36,6 +41,26 @@ def store(conn: sqlite3.Connection, solution_id: int, vector: np.ndarray) -> Non
         "INSERT OR REPLACE INTO embeddings (solution_id, vector) VALUES (?, ?)",
         (solution_id, vector.astype(np.float32).tobytes()),
     )
+
+
+def discard(conn: sqlite3.Connection, solution_id: int) -> None:
+    conn.execute("DELETE FROM embeddings WHERE solution_id = ?", (solution_id,))
+
+
+def to_embed(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Tagged solutions with no vector: tagged while the model was unavailable, or
+    re-tagged since, because saving new tags discards the vector of the old ones."""
+    return conn.execute(
+        """
+        SELECT s.id AS solution_id, s.code, p.title, en.main_patterns, en.key_trick
+        FROM solutions s
+        JOIN problems p ON p.number = s.problem_number
+        JOIN enrichments en ON en.solution_id = s.id
+        LEFT JOIN embeddings em ON em.solution_id = s.id
+        WHERE em.solution_id IS NULL
+        ORDER BY s.id
+        """
+    ).fetchall()
 
 
 class Hit(NamedTuple):

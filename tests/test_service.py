@@ -510,7 +510,7 @@ BEST_TIME = {
 }
 
 
-def store_embedded_solve(conn, number, vector, pattern, key_trick):
+def store_embedded_solve(conn, number, vector, pattern, key_trick) -> int:
     """A tagged, embedded solve stored directly, as logging and `coach enrich` leave one."""
     solution_id = conn.execute(
         "INSERT INTO solutions (problem_number, code, created_at) VALUES (?, 'c', '2026-09-01')",
@@ -518,6 +518,7 @@ def store_embedded_solve(conn, number, vector, pattern, key_trick):
     ).lastrowid
     tag_solution(conn, solution_id, pattern, key_trick=key_trick)
     embed.store(conn, solution_id, np.array(vector, dtype=np.float32))
+    return solution_id
 
 
 def test_a_neighbor_is_described_by_the_solve_that_matched(tmp_path, monkeypatch):
@@ -594,6 +595,34 @@ def test_enrich_solution_now_carries_both_signals_when_embedding_fails(tmp_path,
     assert e.off_pattern is True
     assert e.also_solvable_with == ["dp-1d", "two-pointers"]
     assert e.intended_secondary_patterns == ["two-pointers"]
+
+
+def test_tagging_discards_the_solves_stored_vector(tmp_path, monkeypatch):
+    """The card names a solve's patterns, so new tags leave its vector describing tags it no
+    longer has. It goes in the tags' own commit - read back here through a second connection -
+    so no crash can leave the two apart, and the next `coach enrich` rebuilds it."""
+    conn = seed_db(tmp_path, monkeypatch, [*TWO_SUM, BEST_TIME])
+    retagged = store_embedded_solve(conn, 1, [1.0, 0.0, 0.0], "two-pointers", "Sort, then pinch.")
+    other = store_embedded_solve(conn, 121, [0.0, 1.0, 0.0], "greedy", "Track the running minimum.")
+    conn.commit()
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: ENRICHMENT)
+
+    service.tag_solution_now(conn, retagged, service.get_problem(conn, 1), "c")
+
+    committed = db.connect()
+    assert [row[0] for row in committed.execute("SELECT solution_id FROM embeddings")] == [other]
+
+
+def test_tagging_that_fails_keeps_the_vector(tmp_path, monkeypatch):
+    """No answer from the model means the tags did not change, so the vector still describes them."""
+    conn = seed_db(tmp_path, monkeypatch)
+    solution_id = store_embedded_solve(conn, 1, [1.0, 0.0, 0.0], "hashmap", "Store complements.")
+    conn.commit()
+
+    tagged = service.tag_solution_now(conn, solution_id, service.get_problem(conn, 1), "c")
+
+    assert "ANTHROPIC_API_KEY" in tagged.skipped
+    assert conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0] == 1
 
 
 def enrich_against_stored_canonical(conn, monkeypatch, **answer):

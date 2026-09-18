@@ -64,6 +64,30 @@ def answer(monkeypatch, **overrides):
     monkeypatch.setattr("coach.embed.encode", fake_encode)
 
 
+def answer_once(monkeypatch, **overrides):
+    """The model answers one solve, then is rate limited, so the run stops partway."""
+    answers = iter([ENRICHMENT.model_copy(update=overrides)])
+
+    def parse_once(prompt, output_format, **kw):
+        try:
+            return next(answers)
+        except StopIteration:
+            raise llm.LLMUnavailable("rate limited") from None
+
+    monkeypatch.setattr("coach.llm.parse", parse_once)
+
+
+def no_embeddings(texts):
+    raise embed.EmbeddingsUnavailable("sentence-transformers not installed")
+
+
+def record_cards(monkeypatch) -> list[str]:
+    """Encode as usual, and return the list every card sent to the encoder lands in."""
+    cards = []
+    monkeypatch.setattr("coach.embed.encode", lambda texts: cards.extend(texts) or fake_encode(texts))
+    return cards
+
+
 def count(table):
     conn = db.connect()
     try:
@@ -115,9 +139,6 @@ def test_enrich_embeds_on_a_later_run_what_an_earlier_run_only_tagged(tmp_path, 
     log_unenriched(tmp_path, monkeypatch).close()
     answer(monkeypatch)
 
-    def no_embeddings(texts):
-        raise embed.EmbeddingsUnavailable("sentence-transformers not installed")
-
     monkeypatch.setattr("coach.embed.encode", no_embeddings)
     first = runner.invoke(app, ["enrich"])
     assert "Enriched 1/1" in first.output
@@ -134,15 +155,7 @@ def test_enrich_embeds_on_a_later_run_what_an_earlier_run_only_tagged(tmp_path, 
 def test_enrich_resumes_a_backfill_that_stopped_partway(tmp_path, monkeypatch):
     log_unenriched(tmp_path, monkeypatch, solves=2).close()
     answer(monkeypatch)
-    answers = iter([ENRICHMENT])
-
-    def parse_once(prompt, output_format, **kw):
-        try:
-            return next(answers)
-        except StopIteration:
-            raise llm.LLMUnavailable("rate limited") from None
-
-    monkeypatch.setattr("coach.llm.parse", parse_once)
+    answer_once(monkeypatch)
     first = runner.invoke(app, ["enrich"])
     assert "Stopped at #1: rate limited" in first.output
     assert "Enriched 1/2" in first.output
@@ -165,8 +178,7 @@ def test_enrich_retag_re_tags_and_re_embeds_tagged_solves(tmp_path, monkeypatch)
     assert "Enriched 0/0" in runner.invoke(app, ["enrich"]).output
 
     answer(monkeypatch, main_patterns=["hashmap", "two-pointers"])
-    cards = []
-    monkeypatch.setattr("coach.embed.encode", lambda texts: cards.extend(texts) or fake_encode(texts))
+    cards = record_cards(monkeypatch)
     result = runner.invoke(app, ["enrich", "--retag"])
 
     assert result.exit_code == 0, result.output
@@ -177,6 +189,44 @@ def test_enrich_retag_re_tags_and_re_embeds_tagged_solves(tmp_path, monkeypatch)
     assert json.loads(stored) == ["hashmap", "two-pointers"]
     assert (count("enrichments"), count("embeddings")) == (1, 1)
     assert len(cards) == 1 and "\npattern: hashmap, two-pointers\n" in cards[0]
+
+
+def test_enrich_rebuilds_the_vector_a_failed_retag_discarded(tmp_path, monkeypatch):
+    """A retag whose embedding fails used to keep the old vector under the new tags, and
+    plain `enrich` only looked for solves with no vector, so it never noticed. The retag
+    now drops the vector with the tags it described, and plain `enrich` rebuilds it from
+    the stored tags without asking the model again."""
+    log_unenriched(tmp_path, monkeypatch).close()
+    answer(monkeypatch)
+    runner.invoke(app, ["enrich"])
+
+    answer(monkeypatch, main_patterns=["dp-1d"])
+    monkeypatch.setattr("coach.embed.encode", no_embeddings)
+    retag = runner.invoke(app, ["enrich", "--retag"])
+    assert "Embeddings skipped" in retag.output
+    assert (count("enrichments"), count("embeddings")) == (1, 0)
+
+    cards = record_cards(monkeypatch)
+    retry = runner.invoke(app, ["enrich"])
+
+    assert "Enriched 0/0" in retry.output  # nothing sent to the model
+    assert "Embedded 1" in retry.output
+    assert len(cards) == 1 and "\npattern: dp-1d\n" in cards[0]
+
+
+def test_enrich_retag_stopped_partway_re_embeds_only_what_it_re_tagged(tmp_path, monkeypatch):
+    """A solve the retag never reached keeps its tags, so its vector still describes them."""
+    log_unenriched(tmp_path, monkeypatch, solves=2).close()
+    answer(monkeypatch)
+    runner.invoke(app, ["enrich"])
+
+    answer_once(monkeypatch, main_patterns=["dp-1d"])
+    cards = record_cards(monkeypatch)
+    result = runner.invoke(app, ["enrich", "--retag"])
+
+    assert "Enriched 1/2" in result.output
+    assert len(cards) == 1 and "\npattern: dp-1d\n" in cards[0]
+    assert count("embeddings") == 2
 
 
 def test_enrich_no_longer_offers_missing(tmp_path, monkeypatch):

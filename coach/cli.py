@@ -134,21 +134,8 @@ def enrich_cmd(
     typer.echo(f"Enriched {done}/{len(todo)} solution(s).")
 
     # Read from the database rather than from this run's results, so a solution
-    # tagged by an earlier run that stopped before embedding is picked up too. A
-    # re-tag re-embeds every tagged solve: the card names its patterns, so a vector
-    # kept from before would describe tags the solve no longer has.
-    pending = conn.execute(
-        """
-        SELECT s.id AS solution_id, s.code, p.title, en.main_patterns, en.key_trick
-        FROM solutions s
-        JOIN problems p ON p.number = s.problem_number
-        JOIN enrichments en ON en.solution_id = s.id
-        LEFT JOIN embeddings em ON em.solution_id = s.id
-        WHERE ? OR em.solution_id IS NULL
-        ORDER BY s.id
-        """,
-        (retag,),
-    ).fetchall()
+    # tagged by an earlier run that stopped before embedding is picked up too.
+    pending = embed.to_embed(conn)
     if pending:
         try:
             vectors = embed.encode(
@@ -162,7 +149,7 @@ def enrich_cmd(
         except embed.EmbeddingsUnavailable as exc:
             typer.echo(f"Embeddings skipped ({exc})")
             return
-        for row, vector in zip(pending, vectors):
+        for row, vector in zip(pending, vectors, strict=True):
             embed.store(conn, row["solution_id"], vector)
         conn.commit()
         typer.echo(f"Embedded {len(pending)} solution(s).")

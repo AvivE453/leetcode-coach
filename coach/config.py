@@ -34,7 +34,11 @@ MODEL = "claude-sonnet-5"
 # the coach runs on, without either default dragging the other along.
 EVAL_MODEL = "claude-sonnet-5"
 
+# Vectors from two models are not comparable, and search would compare them without
+# a word if their lengths matched: after changing this, empty the `embeddings` table
+# and run `coach enrich`, which rebuilds every missing vector (locally, no API calls).
 EMBED_MODEL = "all-MiniLM-L6-v2"
+
 # The most problems each Daily Plan heading lists: Due, Approach practice, Weak patterns.
 SECTION_LIMIT = 10
 # How many problems /solutions lists before you search; a search shows every match.

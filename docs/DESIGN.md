@@ -232,8 +232,12 @@ through the DP solve as greedy. The asking side works the same way — `coach si
 relatives of both approaches instead of only the latest one's. Keeping a single vector per problem — the latest solve's, or an average
 of all of them — would leave it findable through one approach at most, which throws away
 exactly the variety that re-solving a problem a new way is meant to build. A stored vector
-changes only when its own solve is re-embedded: `coach enrich --retag` is the one path that
-rebuilds them all, because the card names the solve's main patterns.
+changes only when its own solve is re-tagged. The card names the solve's main patterns, so
+saving new tags discards the vector in the same commit, and the next `coach enrich` rebuilds
+every missing one. The rebuild used to be the re-tag's own job, and a re-tag whose embedding
+failed left the old vector searchable under the new tags, where a plain `coach enrich` —
+looking only for solves with no vector — never found it. A missing vector is a state that
+repairs itself; a stale one was not.
 
 **No vector database.**
 Brute-force numpy cosine over float32 blobs in SQLite. At a few hundred solutions this

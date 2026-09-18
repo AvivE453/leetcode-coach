@@ -399,6 +399,10 @@ def tag_solution_now(
     and `coach enrich` runs it per solution before embedding everything in one batch.
     It never embeds, so `neighbors` and `embed_skipped` on its result mean "not
     attempted". No API key -> `skipped`, and the stored solve is untouched.
+
+    It does discard the solve's vector, in the new tags' own commit: the card names the
+    patterns, so the vector would describe tags the solve no longer has. Whoever embeds
+    next - enrich_solution_now(), or `coach enrich` through embed.to_embed() - rebuilds it.
     """
     try:
         e = enrich.enrich_solution(problem, code)
@@ -406,6 +410,7 @@ def tag_solution_now(
         return EnrichResult(skipped=str(exc))
 
     enrich.save(conn, solution_id, e)
+    embed.discard(conn, solution_id)
     canonical = enrich.save_intended(
         conn, problem["number"], e.intended_pattern, list(e.intended_secondary_patterns)
     )

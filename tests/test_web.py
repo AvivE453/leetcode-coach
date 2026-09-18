@@ -3,7 +3,7 @@ from datetime import date, timedelta
 
 import numpy as np
 import pytest
-from conftest import CODE, seed_db
+from conftest import CODE, fake_sentence_transformers, seed_db, unreachable_model
 from fastapi.testclient import TestClient
 
 from coach import config, db, enrich, mastery, review, service
@@ -183,6 +183,23 @@ def test_log_endpoint_degrades_without_an_api_key(client):
     conn = db.connect()
     assert conn.execute("SELECT COUNT(*) FROM solutions").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM enrichments").fetchone()[0] == 0
+
+
+def test_log_endpoint_degrades_when_the_embedding_model_fails_to_load(client, monkeypatch):
+    """The solve is committed before embedding runs, so an error here would report a saved
+    solve as failed - and invite a resubmit that logs it twice."""
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: ENRICHMENT)
+    fake_sentence_transformers(monkeypatch, unreachable_model)
+
+    res = client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
+
+    assert res.status_code == 200, res.text
+    enrichment = res.json()["enrichment"]
+    assert enrichment["status"] == "ok"
+    assert "couldn't connect" in enrichment["embedding_skipped"]
+    conn = db.connect()
+    assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0] == 0
 
 
 def test_log_endpoint_withholds_a_standing_on_a_first_solve(client, monkeypatch):

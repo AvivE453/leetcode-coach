@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from conftest import tag_solution
+from conftest import fake_sentence_transformers, tag_solution, unreachable_model
 
 from coach import db, embed
 
@@ -34,6 +34,50 @@ def add_embedded_solution(conn, number, vector, patterns=("test-pattern",)) -> i
     tag_solution(conn, solution_id, *patterns)
     embed.store(conn, solution_id, vector)
     return solution_id
+
+
+class Model:
+    """A SentenceTransformer that loads and encodes every card as the same unit vector."""
+
+    def __init__(self, name):
+        pass
+
+    def encode(self, texts, normalize_embeddings):
+        return np.tile(unit(1, 0), (len(texts), 1))
+
+
+def test_encode_reports_a_model_that_fails_to_load(monkeypatch):
+    """No model to load is the same situation as no package: the solve is saved and a
+    later `coach enrich` embeds it, so the caller hears it as unavailable, not as an error."""
+    fake_sentence_transformers(monkeypatch, unreachable_model)
+
+    with pytest.raises(embed.EmbeddingsUnavailable, match="couldn't connect"):
+        embed.encode(["card"])
+
+
+def test_encode_retries_the_model_after_a_failed_load(monkeypatch):
+    """coach-web runs for days, so one failed download must not turn embedding off until
+    it is restarted."""
+    package = fake_sentence_transformers(monkeypatch, unreachable_model)
+    with pytest.raises(embed.EmbeddingsUnavailable):
+        embed.encode(["card"])
+
+    package.SentenceTransformer = Model
+
+    assert embed.encode(["card"]).shape == (1, 2)
+
+
+def test_encode_excuses_only_loading_the_model(monkeypatch):
+    """A loaded model that fails to encode is a bug, not a missing model: it stays loud."""
+
+    class Failing(Model):
+        def encode(self, texts, normalize_embeddings):
+            raise OSError("out of memory")
+
+    fake_sentence_transformers(monkeypatch, Failing)
+
+    with pytest.raises(OSError, match="out of memory"):
+        embed.encode(["card"])
 
 
 def test_card_text_contains_all_parts():

@@ -6,10 +6,12 @@ pytest puts this directory on sys.path (there is no tests/__init__.py), so
 
 import json
 import sqlite3
+import sys
+from types import SimpleNamespace
 
 import pytest
 
-from coach import config, db
+from coach import config, db, embed
 
 # The solution every suite logs: real Python, deliberately wrong, so a review
 # fixture has something to find and the tagger has something to read.
@@ -84,3 +86,21 @@ def tag_solution(conn, solution_id, *main_patterns, secondary=(), key_trick=None
         """,
         (solution_id, json.dumps(list(main_patterns)), json.dumps(list(secondary)), key_trick),
     )
+
+
+def fake_sentence_transformers(monkeypatch, model) -> SimpleNamespace:
+    """Stand in for the optional package, with `model` as its SentenceTransformer class.
+
+    Every other test replaces embed.encode() whole; this one runs its real load, so how
+    it treats a model that fails to load is tested without torch or a download. Returns
+    the stand-in, so a test can swap its model between two calls.
+    """
+    package = SimpleNamespace(SentenceTransformer=model)
+    monkeypatch.setitem(sys.modules, "sentence_transformers", package)
+    monkeypatch.setattr(embed, "_model", None)
+    return package
+
+
+def unreachable_model(name):
+    """What loading a model raises offline, with no copy of it cached."""
+    raise OSError(f"We couldn't connect to 'https://huggingface.co' to load {name}")
