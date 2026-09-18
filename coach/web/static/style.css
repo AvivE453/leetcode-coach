@@ -272,7 +272,7 @@ th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: u
 .form-card { margin-top: 14px; }
 
 .field { margin-bottom: 16px; }
-/* Each field of the log form names its tone: its label is written in it, its box framed in it. */
+/* A field inherits its card's tone, so the whole log form is written and framed in one colour. */
 .field label, .fieldset-label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 6px; color: var(--tone); }
 
 input[type="search"], input[type="text"], textarea {
