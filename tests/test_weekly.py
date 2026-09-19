@@ -2,7 +2,7 @@ import json
 from datetime import date, timedelta
 
 import pytest
-from conftest import tag_solution
+from conftest import store_solution, tag_solution
 
 from coach import config, corrections, db, enrich, history
 from coach.weekly import analyze as weekly_analyze
@@ -32,14 +32,7 @@ def add_problem(conn, number, slug, title, difficulty="Easy", tags=(), blind75=T
 
 
 def add_attempt(conn, number, day, outcome="clean", pattern=None, minutes=None):
-    attempt_id = conn.execute(
-        "INSERT INTO attempts (problem_number, date, outcome, minutes) VALUES (?, ?, ?, ?)",
-        (number, day.isoformat(), outcome, minutes),
-    ).lastrowid
-    solution_id = conn.execute(
-        "INSERT INTO solutions (problem_number, attempt_id, code, created_at) VALUES (?, ?, 'c', ?)",
-        (number, attempt_id, day.isoformat()),
-    ).lastrowid
+    solution_id = store_solution(conn, number, day, outcome, minutes)
     if pattern:
         tag_solution(conn, solution_id, pattern)
     return solution_id

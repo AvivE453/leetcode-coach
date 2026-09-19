@@ -128,7 +128,7 @@ def unsolved_curriculum(conn: sqlite3.Connection) -> list[sqlite3.Row]:
         FROM problems p
         WHERE p.{curriculum.FLAG_COLUMNS[config.CURRICULUM]} = 1
           AND p.paid_only = 0
-          AND NOT EXISTS (SELECT 1 FROM attempts a WHERE a.problem_number = p.number)
+          AND NOT EXISTS (SELECT 1 FROM solutions s WHERE s.problem_number = p.number)
         """
     ).fetchall()
     return sorted(rows, key=lambda r: order.get(r["slug"], len(order)))

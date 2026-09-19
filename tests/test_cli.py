@@ -2,7 +2,7 @@ import json
 
 import numpy as np
 import pytest
-from conftest import CODE, seed_db, tag_solution
+from conftest import CODE, seed_db, store_solution, tag_solution
 from typer.testing import CliRunner
 
 from coach import db, embed, enrich, llm, service
@@ -265,10 +265,7 @@ def test_similar_by_number(tmp_path, monkeypatch):
 
 def store_embedded_solve(conn, number, vector, pattern="hashmap"):
     """A tagged, embedded solve stored directly - `similar` by number needs no model to read it."""
-    solution_id = conn.execute(
-        "INSERT INTO solutions (problem_number, code, created_at) VALUES (?, 'c', '2026-01-01')",
-        (number,),
-    ).lastrowid
+    solution_id = store_solution(conn, number)
     tag_solution(conn, solution_id, pattern)
     embed.store(conn, solution_id, np.array(vector, dtype=np.float32))
 
@@ -324,9 +321,7 @@ def test_init_reschedules_problems_from_their_attempts(tmp_path, monkeypatch, da
     again, so `coach init` re-derives each one from its attempts."""
     conn = seed_db(tmp_path, monkeypatch)
     for day in days:
-        conn.execute(
-            "INSERT INTO attempts (problem_number, date, outcome) VALUES (1, ?, 'clean')", (day,)
-        )
+        store_solution(conn, 1, day)
     # what counting every solve as a review stored after those three
     conn.execute(
         """

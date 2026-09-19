@@ -35,6 +35,7 @@ Pattern = Literal[
     "tree",
     "graph",
     "hashmap",
+    "set",
 ]
 
 PATTERNS: tuple[str, ...] = get_args(Pattern)

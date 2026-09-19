@@ -24,8 +24,8 @@ def progress(conn: sqlite3.Connection) -> dict[str, dict[str, int]]:
         total = conn.execute(f"SELECT COUNT(*) FROM problems WHERE {column} = 1").fetchone()[0]
         done = conn.execute(
             f"""
-            SELECT COUNT(DISTINCT a.problem_number)
-            FROM attempts a JOIN problems p ON p.number = a.problem_number
+            SELECT COUNT(DISTINCT s.problem_number)
+            FROM solutions s JOIN problems p ON p.number = s.problem_number
             WHERE p.{column} = 1
             """
         ).fetchone()[0]

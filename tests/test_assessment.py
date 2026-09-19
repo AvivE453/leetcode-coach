@@ -2,6 +2,7 @@ import json
 from datetime import date
 
 import pytest
+from conftest import store_solution
 
 from coach import assessment, db, enrich, history
 
@@ -73,15 +74,8 @@ def make_db(tmp_path):
 
 
 def add_solve(conn, day, review=None, problem=1):
-    """One clean attempt and its solution, reviewed as (verdict, categories) when given."""
-    attempt_id = conn.execute(
-        "INSERT INTO attempts (problem_number, date, outcome) VALUES (?, ?, 'clean')",
-        (problem, day),
-    ).lastrowid
-    solution_id = conn.execute(
-        "INSERT INTO solutions (problem_number, attempt_id, code, created_at) VALUES (?, ?, 'c', ?)",
-        (problem, attempt_id, day),
-    ).lastrowid
+    """One clean solve, reviewed as (verdict, categories) when given."""
+    solution_id = store_solution(conn, problem, day)
     if review:
         verdict, found = review
         conn.execute(

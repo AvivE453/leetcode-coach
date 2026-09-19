@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from conftest import store_solution
 from pydantic import ValidationError
 
 from coach import db, enrich
@@ -27,10 +28,7 @@ def make_db(tmp_path):
 
 
 def add_solution(conn, code="code"):
-    return conn.execute(
-        "INSERT INTO solutions (problem_number, code, created_at) VALUES (1, ?, '2026-01-01')",
-        (code,),
-    ).lastrowid
+    return store_solution(conn, 1, code=code)
 
 
 def answer_with(**fields):
@@ -39,8 +37,8 @@ def answer_with(**fields):
 
 
 def test_pattern_vocabulary_is_unique_and_kebab_case():
-    assert len(enrich.PATTERNS) == 26
-    assert len(set(enrich.PATTERNS)) == 26
+    assert len(enrich.PATTERNS) == 27
+    assert len(set(enrich.PATTERNS)) == 27
     for pattern in enrich.PATTERNS:
         assert pattern == pattern.lower()
         assert " " not in pattern

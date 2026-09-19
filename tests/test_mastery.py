@@ -2,7 +2,7 @@ import json
 from datetime import date
 
 import pytest
-from conftest import tag_solution
+from conftest import store_solution, tag_solution
 
 from coach import db, enrich, history, mastery, service
 from coach.weekly import analyze as weekly_analyze
@@ -93,15 +93,8 @@ def make_db(tmp_path):
 
 
 def add_solve(conn, day, outcome, pattern, review=None, secondary=(), problem=1):
-    """One attempt and its solution; tagged when `pattern` is given, reviewed when `review` is."""
-    attempt_id = conn.execute(
-        "INSERT INTO attempts (problem_number, date, outcome) VALUES (?, ?, ?)",
-        (problem, day, outcome),
-    ).lastrowid
-    solution_id = conn.execute(
-        "INSERT INTO solutions (problem_number, attempt_id, code, created_at) VALUES (?, ?, 'c', ?)",
-        (problem, attempt_id, day),
-    ).lastrowid
+    """One solve; tagged when `pattern` is given, reviewed when `review` is."""
+    solution_id = store_solution(conn, problem, day, outcome)
     if pattern:
         tag_solution(conn, solution_id, pattern, secondary=secondary)
     if review:

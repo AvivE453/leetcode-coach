@@ -46,7 +46,6 @@ class LogResult:
     title: str
     outcome: str
     minutes: int | None
-    attempt_id: int
     solution_id: int
     next_due: date
     counted_as_review: bool  # False when the schedule stayed as it was: early, or a day already counted
@@ -259,7 +258,7 @@ def rebuild_review_states(conn: sqlite3.Connection) -> int:
     A schedule is otherwise recomputed only when its problem is next logged, so this is
     what `coach init` runs to bring schedules stored under an older rule up to date.
     """
-    rows = conn.execute("SELECT DISTINCT problem_number FROM attempts").fetchall()
+    rows = conn.execute("SELECT DISTINCT problem_number FROM solutions").fetchall()
     for row in rows:
         update_review_state(conn, row["problem_number"])
     conn.commit()
@@ -292,7 +291,7 @@ def log_solve(
     note: str | None = None,
     today: date | None = None,
 ) -> LogResult:
-    """Store an attempt + solution and reschedule its review.
+    """Store the solve and reschedule its review.
 
     Whether the solve counted as a review is read off the schedule itself: every day that
     counts moves reps or lapses, so a replay that leaves the stored state as it was is a
@@ -307,13 +306,12 @@ def log_solve(
 
     today = today or date.today()
     before = stored_review_state(conn, number)
-    attempt_id = conn.execute(
-        "INSERT INTO attempts (problem_number, date, outcome, minutes, note) VALUES (?, ?, ?, ?, ?)",
-        (number, today.isoformat(), outcome, minutes, note),
-    ).lastrowid
     solution_id = conn.execute(
-        "INSERT INTO solutions (problem_number, attempt_id, code, created_at) VALUES (?, ?, ?, ?)",
-        (number, attempt_id, code, today.isoformat()),
+        """
+        INSERT INTO solutions (problem_number, date, outcome, minutes, note, code)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (number, today.isoformat(), outcome, minutes, note, code),
     ).lastrowid
     state = update_review_state(conn, number)
     conn.commit()
@@ -323,7 +321,6 @@ def log_solve(
         title=problem["title"],
         outcome=outcome,
         minutes=minutes,
-        attempt_id=attempt_id,
         solution_id=solution_id,
         next_due=state.next_due,
         counted_as_review=state != before,
@@ -545,9 +542,9 @@ def review_effect(
     """The finding a just-saved review reports, the attempt it judges, and how the date moved."""
     dates = conn.execute(
         """
-        SELECT a.date,
-               (SELECT MAX(b.date) FROM attempts b WHERE b.problem_number = a.problem_number) AS latest
-        FROM solutions s JOIN attempts a ON a.id = s.attempt_id
+        SELECT s.date,
+               (SELECT MAX(b.date) FROM solutions b WHERE b.problem_number = s.problem_number) AS latest
+        FROM solutions s
         WHERE s.id = ?
         """,
         (solution_id,),
@@ -621,13 +618,13 @@ def stats_summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
     """
     today = today or date.today()
     total = conn.execute("SELECT COUNT(*) FROM problems").fetchone()[0]
-    solved = conn.execute("SELECT COUNT(DISTINCT problem_number) FROM attempts").fetchone()[0]
-    attempts = conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0]
+    solved = conn.execute("SELECT COUNT(DISTINCT problem_number) FROM solutions").fetchone()[0]
+    attempts = conn.execute("SELECT COUNT(*) FROM solutions").fetchone()[0]
     # The same window the weekly report collects, not a second definition of it:
     # `days=7` counted today and the seven days before it - eight - so the home
     # page said 8 where the report said 7 for the same solves.
     week = conn.execute(
-        "SELECT COUNT(*) FROM attempts WHERE date >= ?",
+        "SELECT COUNT(*) FROM solutions WHERE date >= ?",
         ((today - timedelta(days=weekly_collect.WINDOW_DAYS - 1)).isoformat(),),
     ).fetchone()[0]
     # The same call the Daily Plan's Due heading counts, not a second copy of the
@@ -642,8 +639,8 @@ def stats_summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
             r["difficulty"]: r["n"]
             for r in conn.execute(
                 """
-                SELECT p.difficulty, COUNT(DISTINCT a.problem_number) AS n
-                FROM attempts a JOIN problems p ON p.number = a.problem_number
+                SELECT p.difficulty, COUNT(DISTINCT s.problem_number) AS n
+                FROM solutions s JOIN problems p ON p.number = s.problem_number
                 GROUP BY p.difficulty
                 """
             )
@@ -664,7 +661,7 @@ def stats_summary(conn: sqlite3.Connection, today: date | None = None) -> dict:
 def solved_problems(conn: sqlite3.Connection) -> list[dict]:
     """One row per problem with stored code, the last one logged first.
 
-    `created_at` is a date, so solves from the same day tie on it. `MAX(s.id)`
+    `date` is a day, so solves from the same day tie on it. `MAX(s.id)`
     breaks the tie in logging order - the problem number used to, which listed
     #1 above a #15 logged after it.
     """
@@ -672,10 +669,9 @@ def solved_problems(conn: sqlite3.Connection) -> list[dict]:
         """
         SELECT p.number, p.title, p.difficulty, p.slug,
                COUNT(s.id) AS solves,
-               MAX(s.created_at) AS last_solved,
+               MAX(s.date) AS last_solved,
                (
-                   SELECT a.outcome FROM solutions s2
-                   JOIN attempts a ON a.id = s2.attempt_id
+                   SELECT s2.outcome FROM solutions s2
                    WHERE s2.problem_number = p.number ORDER BY s2.id DESC LIMIT 1
                ) AS last_outcome,
                (
@@ -737,12 +733,10 @@ def solution_history(conn: sqlite3.Connection, number: int) -> dict:
         raise ProblemNotFound(number)
     rows = conn.execute(
         """
-        SELECT s.id, s.code, s.created_at,
-               a.outcome, a.minutes, a.note,
+        SELECT s.id, s.code, s.date, s.outcome, s.minutes, s.note,
                en.main_patterns, en.secondary_patterns, en.key_trick,
                en.time_complexity, en.space_complexity
         FROM solutions s
-        LEFT JOIN attempts a ON a.id = s.attempt_id
         LEFT JOIN enrichments en ON en.solution_id = s.id
         WHERE s.problem_number = ?
         ORDER BY s.id DESC

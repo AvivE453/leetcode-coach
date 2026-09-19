@@ -117,7 +117,7 @@ def api_log(body: LogRequest) -> dict:
         )
         e = service.enrich_solution_now(conn, result.solution_id, problem, body.code.strip())
         standings = service.pattern_standings(conn, e.main_patterns)
-        practice = service.practice_dates(conn, body.number, result.attempt_id)
+        practice = service.practice_dates(conn, body.number, result.solution_id)
 
     return {
         "number": result.number,

@@ -32,7 +32,7 @@ def test_the_log_form_offers_exactly_those_outcomes():
     assert set(offered) == OUTCOMES
 
 
-def test_the_attempts_table_accepts_exactly_those_outcomes():
+def test_the_solutions_table_accepts_exactly_those_outcomes():
     """A name the app accepts but the CHECK rejects fails at INSERT, after the LLM spend."""
     clause = re.search(r"outcome IN \(([^)]*)\)", db.SCHEMA).group(1)
     assert {value.strip().strip("'") for value in clause.split(",")} == OUTCOMES

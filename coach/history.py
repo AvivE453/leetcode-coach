@@ -9,8 +9,8 @@ four modules, and missing one brought back exactly the disagreement assessment.p
 written to end - silently, with nothing to fail.
 
 So the join lives here once and the readers are pure functions over what it returns.
-An `Attempt` is the whole row: the attempt as logged, the solve's tags when it has
-been tagged, and the review of that solve when one was bought. `grade` and `finding`
+An `Attempt` is one solve seen as practice: its `solutions` row as logged, its tags
+when it has been tagged, and its review when one was bought. `grade` and `finding`
 are derived rather than stored, so assessment.py stays the single owner of what a
 review does to an attempt.
 
@@ -78,28 +78,27 @@ class Attempt:
 
 
 QUERY = """
-SELECT a.id, a.date, a.outcome, a.minutes,
+SELECT s.id, s.date, s.outcome, s.minutes,
        p.number, p.slug, p.title, p.difficulty,
        p.intended_pattern, p.intended_secondary_patterns,
        en.main_patterns, en.secondary_patterns,
        rv.verdict, rv.issues
-FROM attempts a
-JOIN problems p ON p.number = a.problem_number
-LEFT JOIN solutions s ON s.attempt_id = a.id
+FROM solutions s
+JOIN problems p ON p.number = s.problem_number
 LEFT JOIN enrichments en ON en.solution_id = s.id
 LEFT JOIN reviews rv ON rv.solution_id = s.id
 WHERE :number IS NULL OR p.number = :number
-ORDER BY a.date, a.id
+ORDER BY s.date, s.id
 """
 
 
 def load(conn: sqlite3.Connection, number: int | None = None) -> list[Attempt]:
-    """Every attempt ever logged, oldest first. `number` narrows to one problem.
+    """Every solve ever logged, oldest first. `number` narrows to one problem.
 
-    Attempts drive the join, and the solve, its tags and its review are all left-joined:
-    an attempt logged before enrichment ran is still practice that happened, and dropping
-    it would quietly change what the schedule replays. Two attempts on the same day keep
-    the order they were logged in.
+    Solves drive the join, and their tags and reviews are left-joined: a solve logged
+    before enrichment ran is still practice that happened, and dropping it would quietly
+    change what the schedule replays. Two solves on the same day keep the order they
+    were logged in.
     """
     rows = conn.execute(QUERY, {"number": number}).fetchall()
     return [attempt_of(row) for row in rows]

@@ -11,7 +11,7 @@ import json
 from datetime import date
 
 import pytest
-from conftest import TWO_SUM, seed_db, tag_solution
+from conftest import TWO_SUM, seed_db, store_solution, tag_solution
 
 from coach import enrich, history
 
@@ -43,19 +43,12 @@ def conn(tmp_path, monkeypatch):
 
 
 def solve(conn, number, day, outcome="clean", minutes=None, main=None, secondary=(), review=None):
-    """One attempt, its solution, and optionally its tags and its review.
+    """One solve, and optionally its tags and its review.
 
     `main=None` leaves the solve untagged, which is what a solve logged while the API
     was unavailable looks like until `coach enrich` backfills it.
     """
-    attempt_id = conn.execute(
-        "INSERT INTO attempts (problem_number, date, outcome, minutes) VALUES (?, ?, ?, ?)",
-        (number, day.isoformat(), outcome, minutes),
-    ).lastrowid
-    solution_id = conn.execute(
-        "INSERT INTO solutions (problem_number, attempt_id, code, created_at) VALUES (?, ?, 'c', ?)",
-        (number, attempt_id, day.isoformat()),
-    ).lastrowid
+    solution_id = store_solution(conn, number, day, outcome, minutes)
     if main is not None:
         tag_solution(conn, solution_id, *main, secondary=secondary)
     if review is not None:
@@ -64,7 +57,7 @@ def solve(conn, number, day, outcome="clean", minutes=None, main=None, secondary
             "INSERT INTO reviews (solution_id, verdict, issues, created_at) VALUES (?, ?, ?, ?)",
             (solution_id, verdict, json.dumps(issues(*found)), day.isoformat()),
         )
-    return attempt_id
+    return solution_id
 
 
 def test_loads_every_attempt_oldest_first_across_problems(conn):
@@ -102,19 +95,6 @@ def test_a_tagged_solve_carries_both_pattern_lists(conn):
     assert attempt.tagged is True
     assert attempt.main_patterns == ("dfs", "dp-knapsack")
     assert attempt.secondary_patterns == ("hashmap",)
-
-
-def test_an_attempt_with_no_solution_still_loads(conn):
-    """The solve is left-joined, so an attempt logged without stored code is still
-    practice that happened - and still a day the SM-2 replay has to grade."""
-    conn.execute(
-        "INSERT INTO attempts (problem_number, date, outcome) VALUES (1, ?, 'failed')",
-        (D1.isoformat(),),
-    )
-
-    [attempt] = history.load(conn)
-    assert attempt.outcome == "failed"
-    assert attempt.tagged is False
 
 
 def test_a_review_lands_only_on_the_attempt_it_judges(conn):

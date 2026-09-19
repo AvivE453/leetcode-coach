@@ -114,7 +114,7 @@ def test_log_endpoint_stores_and_enriches(client, monkeypatch):
     assert body["enrichment"]["off_pattern"] is False
 
     conn = db.connect()
-    assert conn.execute("SELECT outcome FROM attempts").fetchone()["outcome"] == "struggled"
+    assert conn.execute("SELECT outcome FROM solutions").fetchone()["outcome"] == "struggled"
     assert conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0] == 1
     assert client.get("/api/stats").json()["solved"] == 1
 
@@ -198,7 +198,7 @@ def test_log_endpoint_degrades_when_the_embedding_model_fails_to_load(client, mo
     assert enrichment["status"] == "ok"
     assert "couldn't connect" in enrichment["embedding_skipped"]
     conn = db.connect()
-    assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM solutions").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0] == 0
 
 
@@ -285,7 +285,7 @@ def test_log_endpoint_rejects_unknown_problem_and_empty_code(client):
     assert bad_outcome.status_code == 422
 
     conn = db.connect()
-    assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM solutions").fetchone()[0] == 0
 
 
 def test_patterns_endpoint_feeds_the_pattern_table(client, monkeypatch):

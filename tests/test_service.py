@@ -4,7 +4,7 @@ from datetime import date, timedelta
 import httpx
 import numpy as np
 import pytest
-from conftest import CODE, TWO_SUM, drop_column, seed_db, tag_solution
+from conftest import CODE, TWO_SUM, drop_column, seed_db, store_solution, tag_solution
 
 from coach import (
     config,
@@ -57,8 +57,9 @@ def test_log_solve_stores_attempt_solution_and_schedule(tmp_path, monkeypatch):
 
     assert result.title == "Two Sum"
     assert result.next_due == date(2026, 9, 8)
-    assert conn.execute("SELECT minutes FROM attempts").fetchone()["minutes"] == 25
-    assert conn.execute("SELECT code FROM solutions").fetchone()["code"].startswith("class Solution")
+    stored = conn.execute("SELECT * FROM solutions").fetchone()
+    assert (stored["date"], stored["outcome"], stored["minutes"]) == ("2026-09-01", "struggled", 25)
+    assert stored["code"].startswith("class Solution")
 
 
 def test_log_solve_rejects_unknown_problem_and_empty_code(tmp_path, monkeypatch):
@@ -68,7 +69,7 @@ def test_log_solve_rejects_unknown_problem_and_empty_code(tmp_path, monkeypatch)
         service.log_solve(conn, 99999, "clean", CODE)
     with pytest.raises(service.EmptySolution):
         service.log_solve(conn, 1, "clean", "   \n ")
-    assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM solutions").fetchone()[0] == 0
 
 
 def test_second_log_advances_the_schedule(tmp_path, monkeypatch):
@@ -97,7 +98,7 @@ def test_relogging_a_problem_the_same_day_keeps_its_review_date(tmp_path, monkey
     state = conn.execute("SELECT reps, interval_days FROM review_state").fetchone()
     assert (state["reps"], state["interval_days"]) == (1, 7.0)
     # every attempt is still kept - only the schedule counts the day once
-    assert conn.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 3
+    assert conn.execute("SELECT COUNT(*) FROM solutions").fetchone()[0] == 3
 
 
 def test_a_failed_retry_the_same_day_still_brings_the_review_forward(tmp_path, monkeypatch):
@@ -512,10 +513,7 @@ BEST_TIME = {
 
 def store_embedded_solve(conn, number, vector, pattern, key_trick) -> int:
     """A tagged, embedded solve stored directly, as logging and `coach enrich` leave one."""
-    solution_id = conn.execute(
-        "INSERT INTO solutions (problem_number, code, created_at) VALUES (?, 'c', '2026-09-01')",
-        (number,),
-    ).lastrowid
+    solution_id = store_solution(conn, number)
     tag_solution(conn, solution_id, pattern, key_trick=key_trick)
     embed.store(conn, solution_id, np.array(vector, dtype=np.float32))
     return solution_id
@@ -927,7 +925,7 @@ def test_practice_dates_keep_the_review_and_approach_practice_apart(tmp_path, mo
     conn = seed_db(tmp_path, monkeypatch)
     logged = log_on(conn, monkeypatch, date(2026, 9, 12), "clean", "prefix-sum")
 
-    dates = service.practice_dates(conn, 1, logged.attempt_id)
+    dates = service.practice_dates(conn, 1, logged.solution_id)
 
     assert dates.review_due == date(2026, 9, 19)
     assert (dates.correction.due, dates.correction.reason) == (date(2026, 9, 15), "wrong-approach")
@@ -942,7 +940,7 @@ def test_practice_dates_say_which_log_completed_approach_practice(tmp_path, monk
 
     def after(day, outcome, *patterns):
         logged = log_on(conn, monkeypatch, day, outcome, *patterns)
-        return service.practice_dates(conn, 1, logged.attempt_id)
+        return service.practice_dates(conn, 1, logged.solution_id)
 
     after(date(2026, 9, 12), "clean", "prefix-sum")
     failed = after(date(2026, 9, 15), "failed", "dp-1d")
@@ -965,7 +963,7 @@ def test_approach_practice_completes_without_advancing_the_review(tmp_path, monk
     log_on(conn, monkeypatch, date(2026, 9, 12), "clean", "prefix-sum")
 
     logged = log_on(conn, monkeypatch, date(2026, 9, 15), "clean", "dp-1d")
-    dates = service.practice_dates(conn, 1, logged.attempt_id)
+    dates = service.practice_dates(conn, 1, logged.solution_id)
 
     assert (dates.correction, dates.completed) == (None, True)
     assert (dates.review_due, logged.counted_as_review) == (date(2026, 9, 19), False)
@@ -1130,7 +1128,7 @@ def listed(rows):
 
 
 def test_solved_problems_puts_the_last_logged_first_on_the_same_day(tmp_path, monkeypatch):
-    """created_at is a date, so same-day solves tie on it - and the problem number
+    """A solve's date is a day, so same-day solves tie on it - and the problem number
     used to break the tie, listing #1 above a #15 logged after it."""
     conn = seed_db(tmp_path, monkeypatch, TWO_SUM + [THREE_SUM])
     day = date(2026, 9, 7)
@@ -1178,14 +1176,7 @@ WEEK_TODAY = date(2026, 9, 7)
 
 def scored_attempt(conn, day, outcome, pattern="hashmap", number=1):
     """One enriched solve, scored - the history a mastery number folds over."""
-    attempt_id = conn.execute(
-        "INSERT INTO attempts (problem_number, date, outcome) VALUES (?, ?, ?)",
-        (number, day.isoformat(), outcome),
-    ).lastrowid
-    solution_id = conn.execute(
-        "INSERT INTO solutions (problem_number, attempt_id, code, created_at) VALUES (?, ?, 'c', ?)",
-        (number, attempt_id, day.isoformat()),
-    ).lastrowid
+    solution_id = store_solution(conn, number, day, outcome)
     if pattern:
         tag_solution(conn, solution_id, pattern)
     conn.commit()
@@ -1260,7 +1251,7 @@ def test_weekly_review_standing_tracks_the_analysis_verdict(tmp_path, monkeypatc
     assert review.patterns[0].standing == "weak"
 
     # Five struggled-but-solved attempts are the same struggle rate and not weak.
-    conn.execute("UPDATE attempts SET outcome = 'struggled'")
+    conn.execute("UPDATE solutions SET outcome = 'struggled'")
     assert service.weekly_review(conn, WEEK_TODAY).patterns[0].standing == "on-track"
 
 

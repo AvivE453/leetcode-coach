@@ -1,4 +1,5 @@
-"""Shared test setup. Test modules import CODE / TWO_SUM / seed_db / tag_solution from here.
+"""Shared test setup. Test modules import CODE / TWO_SUM / seed_db / store_solution /
+tag_solution from here.
 
 pytest puts this directory on sys.path (there is no tests/__init__.py), so
 `from conftest import ...` reaches the module pytest has already loaded.
@@ -70,6 +71,19 @@ def drop_column(conn: sqlite3.Connection, table: str, column: str) -> None:
     """
     conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
     conn.commit()
+
+
+def store_solution(conn, number, day="2026-09-01", outcome="clean", minutes=None, code="c") -> int:
+    """Store one logged solve directly, as log_solve would, without rescheduling it.
+
+    The one copy of the solutions insert for every suite that builds history by hand,
+    so the next change to that table's columns is one edit here. `day` is a date or
+    its ISO string - str() gives the same text for both.
+    """
+    return conn.execute(
+        "INSERT INTO solutions (problem_number, date, outcome, minutes, code) VALUES (?, ?, ?, ?, ?)",
+        (number, str(day), outcome, minutes, code),
+    ).lastrowid
 
 
 def tag_solution(conn, solution_id, *main_patterns, secondary=(), key_trick=None) -> None:

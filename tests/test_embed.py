@@ -1,6 +1,11 @@
 import numpy as np
 import pytest
-from conftest import fake_sentence_transformers, tag_solution, unreachable_model
+from conftest import (
+    fake_sentence_transformers,
+    store_solution,
+    tag_solution,
+    unreachable_model,
+)
 
 from coach import db, embed
 
@@ -27,10 +32,7 @@ def add_embedded_solution(conn, number, vector, patterns=("test-pattern",)) -> i
             "INSERT INTO problems (number, slug, title, difficulty) VALUES (?, ?, ?, 'Easy')",
             (number, f"p{number}", f"Problem {number}"),
         )
-    solution_id = conn.execute(
-        "INSERT INTO solutions (problem_number, code, created_at) VALUES (?, 'c', '2026-01-01')",
-        (number,),
-    ).lastrowid
+    solution_id = store_solution(conn, number)
     tag_solution(conn, solution_id, *patterns)
     embed.store(conn, solution_id, vector)
     return solution_id

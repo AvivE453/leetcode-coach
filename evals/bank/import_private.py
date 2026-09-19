@@ -2,9 +2,9 @@
 
     uv run python -m evals.bank.import_private --db /path/to/snapshot.db
 
-Reads a snapshot of the coach's database, never data/coach.db itself. Every solve whose
-attempt was logged clean, for a problem the bank has, is judged exactly as an external
-solution is (controls.judge) - so a solve that was clean to Aviv but is wrong, slow, or
+Reads a snapshot of the coach's database, never data/coach.db itself. Every solve logged
+clean, for a problem the bank has, is judged exactly as an external solution is
+(controls.judge) - so a solve that was clean to Aviv but is wrong, slow, or
 heavy on memory is rejected with the reason. The verdicts go to evals/bank/private/solves.json,
 which .gitignore keeps out of the public repository: RESULTS.md reports only numbers from it.
 """
@@ -22,8 +22,7 @@ def clean_solves(db_path: Path, numbers: set[int]) -> list[dict]:
     connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
         rows = connection.execute(
-            "SELECT s.id, s.problem_number, s.code FROM solutions s JOIN attempts a ON a.id = s.attempt_id"
-            " WHERE a.outcome = 'clean' ORDER BY s.id"
+            "SELECT id, problem_number, code FROM solutions WHERE outcome = 'clean' ORDER BY id"
         ).fetchall()
     finally:
         connection.close()

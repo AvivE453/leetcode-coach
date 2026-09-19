@@ -10,7 +10,7 @@ from dataclasses import replace
 from datetime import date, timedelta
 
 import pytest
-from conftest import tag_solution
+from conftest import store_solution, tag_solution
 
 from coach import corrections, db, enrich, history
 
@@ -209,20 +209,13 @@ def make_db(tmp_path):
 
 
 def solve(conn, number, day, outcome="clean", main=(), secondary=(), review=None):
-    """Store one attempt and its solution, tagged when `main` is given. Returns both ids."""
-    attempt_id = conn.execute(
-        "INSERT INTO attempts (problem_number, date, outcome) VALUES (?, ?, ?)",
-        (number, day.isoformat(), outcome),
-    ).lastrowid
-    solution_id = conn.execute(
-        "INSERT INTO solutions (problem_number, attempt_id, code, created_at) VALUES (?, ?, 'c', ?)",
-        (number, attempt_id, day.isoformat()),
-    ).lastrowid
+    """Store one solve, tagged when `main` is given. Returns its id."""
+    solution_id = store_solution(conn, number, day, outcome)
     if main:
         tag_solution(conn, solution_id, *main, secondary=secondary)
     if review:
         store_review(conn, solution_id, review)
-    return attempt_id, solution_id
+    return solution_id
 
 
 def store_review(conn, solution_id, review):
@@ -243,7 +236,7 @@ def test_owed_reads_the_store_the_way_evaluate_reads_attempts(tmp_path):
     enrich.save_intended(conn, 121, "dp-1d", ["greedy"])
     enrich.save_intended(conn, 70, "dp-1d")
     solve(conn, 121, D1, main=BRUTE)
-    bugged, _ = solve(conn, 121, D2, main=DP, review=BUG)
+    bugged = solve(conn, 121, D2, main=DP, review=BUG)
     solve(conn, 70, D1, "failed", main=DP)  # failed with the accepted approach: ordinary SM-2
 
     [correction] = corrections.owed(history.load(conn))
@@ -257,27 +250,13 @@ def test_owed_reads_the_store_the_way_evaluate_reads_attempts(tmp_path):
     assert (correction.latest_attempt, correction.due) == (D2, D2 + INTERVAL)
 
 
-def test_a_solution_without_an_attempt_owes_nothing(tmp_path):
-    """Only a logged attempt is a dated practice event, so a stored solution with no attempt
-    is neither evidence of the wrong approach nor a success."""
-    conn = make_db(tmp_path)
-    enrich.save_intended(conn, 121, "dp-1d")
-    solution_id = conn.execute(
-        "INSERT INTO solutions (problem_number, code, created_at) VALUES (121, 'c', ?)",
-        (D1.isoformat(),),
-    ).lastrowid
-    tag_solution(conn, solution_id, *BRUTE)
-
-    assert corrections.owed(history.load(conn)) == []
-
-
 def test_a_review_can_reopen_it_and_a_refreshed_one_close_it_again(tmp_path):
     """Revised evidence counts on the next read. Reopened, it is due three days after the
     practice itself - usually past by the time a review is read - so it is owed at once."""
     conn = make_db(tmp_path)
     enrich.save_intended(conn, 121, "dp-1d")
     solve(conn, 121, D1, main=BRUTE)
-    _, dp_solve = solve(conn, 121, D2, main=DP)
+    dp_solve = solve(conn, 121, D2, main=DP)
     assert owed(conn) == []
 
     store_review(conn, dp_solve, BUG)
@@ -291,7 +270,7 @@ def test_another_qualifying_solve_keeps_it_closed_when_one_is_found_buggy(tmp_pa
     conn = make_db(tmp_path)
     enrich.save_intended(conn, 121, "dp-1d", ["greedy"])
     solve(conn, 121, D1, main=BRUTE)
-    _, dp_solve = solve(conn, 121, D2, main=DP)
+    dp_solve = solve(conn, 121, D2, main=DP)
     solve(conn, 121, D2 + timedelta(days=1), main=["greedy"])
 
     store_review(conn, dp_solve, BUG)
@@ -326,7 +305,7 @@ def test_a_late_tag_judges_the_attempt_on_the_day_it_was_logged(tmp_path, tags, 
     conn = make_db(tmp_path)
     enrich.save_intended(conn, 121, "dp-1d")
     solve(conn, 121, D1, main=BRUTE)
-    _, pending = solve(conn, 121, D2)
+    pending = solve(conn, 121, D2)
     assert owed(conn) == [(121, "wrong-approach", D2 + INTERVAL)]
 
     tag_solution(conn, pending, *tags)

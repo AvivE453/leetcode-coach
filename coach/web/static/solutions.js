@@ -123,7 +123,7 @@ async function requestReview(box, number, solutionId, button, refresh) {
 }
 
 function renderSolve(s, number) {
-  const meta = [s.created_at, s.outcome];
+  const meta = [s.date, s.outcome];
   if (s.minutes) meta.push(`${s.minutes}m`);
   const block = el("div", { class: "solve" }, [
     el("p", { class: "solve-meta", text: meta.join(" · ") }),
