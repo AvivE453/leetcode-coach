@@ -321,7 +321,7 @@ NO_CACHE = {"Cache-Control": "no-cache"}
 
 
 def page(name: str) -> FileResponse:
-    """One of the four HTML pages, revalidated on every load like its script."""
+    """One of the HTML pages, revalidated on every load like its script."""
     return FileResponse(STATIC_DIR / name, headers=NO_CACHE)
 
 
@@ -337,6 +337,11 @@ class RevalidatedStaticFiles(StaticFiles):
 @app.get("/", include_in_schema=False)
 def home() -> FileResponse:
     return page("index.html")
+
+
+@app.get("/log", include_in_schema=False)
+def log_page() -> FileResponse:
+    return page("log.html")
 
 
 @app.get("/plan", include_in_schema=False)

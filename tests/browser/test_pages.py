@@ -17,7 +17,7 @@ from playwright.sync_api import Page, expect
 PAGES = {
     "/": "Loading your numbers",
     "/solutions": "Loading your solutions",
-    # Home's "Go to review" link, which takes a different path through solutions.js.
+    # The log page's "Go to review" link, which takes a different path through solutions.js.
     "/solutions?number=1": "Loading your solutions",
     "/plan": "Loading the plan",
     "/weekly": "Loading this week",
@@ -36,5 +36,28 @@ def test_every_page_runs_its_script_and_renders(page: Page, base_url):
         # paragraph. The assertion also retries, which is what waits out the
         # fetch - there is no explicit wait anywhere in this test.
         expect(page.get_by_text(placeholder)).not_to_be_visible()
+
+    assert problems == []
+
+
+def test_the_log_page_runs_its_script(page: Page, base_url):
+    """The log page fetches nothing on load, so it has no placeholder to outlive -
+    its script focusing the number field is the sign that it ran."""
+    problems: list[str] = []
+    page.on("console", lambda msg: problems.append(msg.text) if msg.type == "error" else None)
+    page.on("pageerror", lambda err: problems.append(str(err)))
+
+    page.goto(base_url + "/log")
+    expect(page.locator("#number")).to_be_focused()
+
+    # The Daily Plan's problem links, which take a different path through log.js. A fresh
+    # database's plan is curriculum progression, so there is always a first problem.
+    page.goto(base_url + "/plan")
+    first = page.locator(".problems a.title").first
+    number = first.locator(".num").inner_text().strip("() ")
+    first.click()
+    expect(page).to_have_url(f"{base_url}/log?number={number}")
+    expect(page.locator("#number")).to_have_value(number)
+    expect(page.locator("#code")).to_be_focused()
 
     assert problems == []

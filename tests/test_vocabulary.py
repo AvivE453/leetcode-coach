@@ -27,7 +27,7 @@ def test_the_api_accepts_exactly_the_outcomes_the_scheduler_scores():
 def test_the_log_form_offers_exactly_those_outcomes():
     """The form's radios are the copy people actually click. A missing one can never
     be logged; an extra one is a 422 after the solution is already typed in."""
-    offered = re.findall(r'name="outcome" value="([^"]+)"', (STATIC_DIR / "index.html").read_text())
+    offered = re.findall(r'name="outcome" value="([^"]+)"', (STATIC_DIR / "log.html").read_text())
     assert offered, "no outcome radios found - the pattern no longer matches the form"
     assert set(offered) == OUTCOMES
 

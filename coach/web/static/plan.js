@@ -21,11 +21,11 @@ function renderTopics(data) {
 }
 
 /* One problem, drawn like a row on Solutions: its name, difficulty and reasons, with the
-   LeetCode link underneath. */
+   LeetCode link underneath. The name opens the log page with the number filled in. */
 function planItem(item) {
   return el("li", {}, [
     el("div", { class: "problem-head" }, [
-      el("span", { class: "title" }, [
+      el("a", { class: "title", href: `/log?number=${item.number}` }, [
         el("span", { class: "num", text: `(${item.number}) ` }),
         el("span", { text: item.title }),
       ]),

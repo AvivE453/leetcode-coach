@@ -748,11 +748,12 @@ def test_weekly_endpoint_serves_the_thresholds_the_page_quotes(client):
 
 
 def test_pages_are_served(client):
-    for path in ("/", "/plan", "/solutions", "/weekly"):
+    for path in ("/", "/log", "/plan", "/solutions", "/weekly"):
         res = client.get(path)
         assert res.status_code == 200
         assert "text/html" in res.headers["content-type"]
     assert client.get("/static/home.js").status_code == 200
+    assert client.get("/static/log.js").status_code == 200
     assert client.get("/static/solutions.js").status_code == 200
     assert client.get("/static/weekly.js").status_code == 200
 
@@ -764,6 +765,6 @@ def test_pages_and_scripts_are_revalidated(client):
     text with nothing rendered and no message. Revalidating both prevents the pair
     from ever being mismatched; the 304 it usually gets back costs nothing here.
     """
-    for path in ("/", "/plan", "/solutions", "/weekly",
+    for path in ("/", "/log", "/plan", "/solutions", "/weekly",
                  "/static/weekly.js", "/static/plan.js", "/static/style.css"):
         assert client.get(path).headers["cache-control"] == "no-cache", path

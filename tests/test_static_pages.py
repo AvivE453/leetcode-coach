@@ -61,7 +61,7 @@ def test_the_page_scan_finds_the_pages_and_their_scripts():
     matching - the rest are only meaningful while this holds.
     """
     found = pages()
-    assert len(found) == 4, [name for name, _, _ in found]
+    assert len(found) == 5, [name for name, _, _ in found]
 
     for name, markup, scripts in found:
         assert DECLARED_ID.findall(markup), f"{name}: no ids found - has the markup changed?"

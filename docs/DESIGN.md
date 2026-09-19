@@ -9,7 +9,7 @@ For installing and running it, see the [README](../README.md).
 
 ```mermaid
 flowchart TB
-    subgraph daily ["Daily loop — I solved a question (Home)"]
+    subgraph daily ["Daily loop — I solved a question (Log a solve)"]
         direction LR
         paste["paste solution<br/>(log form)"] --> sm2["scheduler.py<br/>SM-2 spaced repetition"]
         paste --> enr["enrich.py<br/>pattern tagging"]
@@ -455,7 +455,7 @@ Published solutions enter through `python -m evals.bank.import_external fetch <n
 coach/          CLI, service layer, SQLite schema, scheduler, LLM wrapper, enrichment, embeddings
 coach/history.py  the one read of practice history; mastery, corrections, assessment are pure over it
 coach/weekly/   collect → analyze (plan.py builds the daily list)
-coach/web/      FastAPI app + the static Home, Solutions, Daily Plan and Weekly Review pages
+coach/web/      FastAPI app + the static Home, Log a solve, Solutions, Daily Plan and Weekly Review pages
 evals/          execution oracle, fixture bank, corpus, scorers, RESULTS.md
 tests/          the whole suite, no network
 docs/DESIGN.md  this file

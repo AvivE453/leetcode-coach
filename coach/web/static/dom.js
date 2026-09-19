@@ -1,6 +1,6 @@
 /* Shared by every page's own script. No build step, so this is a plain global
-   loaded via <script> before the page script - see index.html/plan.html/
-   solutions.html/weekly.html. */
+   loaded via <script> before the page script - see index.html/log.html/
+   plan.html/solutions.html/weekly.html. */
 
 function el(tag, props = {}, children = []) {
   const node = document.createElement(tag);
@@ -44,7 +44,7 @@ function leetcodeLink(slug) {
 }
 
 /* One badge per main pattern of a solve, space-separated. Main patterns are equal,
-   so none is drawn as the lead - Home's log result and Solutions show the same. */
+   so none is drawn as the lead - the log page's result and Solutions show the same. */
 function patternBadges(patterns) {
   return patterns.flatMap((pattern, i) => [
     ...(i ? [" "] : []),
@@ -68,7 +68,7 @@ function animateDots(button, word) {
 }
 
 /* Why a problem still owes approach practice, keyed by the reason codes coach/corrections.py
-   sends. Home and Solutions word the same codes, so they share this copy. */
+   sends. The log page and Solutions word the same codes, so they share this copy. */
 const APPROACH_REASON = {
   "wrong-approach": "your last practice used none of the accepted approaches",
   failed: "your last practice day included a failed attempt",

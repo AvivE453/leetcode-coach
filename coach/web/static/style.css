@@ -315,7 +315,7 @@ fieldset { border: 0; padding: 0; margin: 0 0 16px; }
   padding-left: 10px;
 }
 
-.result { border-left: 3px solid var(--tone); }
+.result { border-left: 3px solid var(--tone); margin-top: 14px; }
 /* The title shares a row with its link to the review, which sits in the top-right corner. */
 .result-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .result h3 { margin: 0; font-size: 1.3rem; color: var(--tone); }
@@ -390,6 +390,8 @@ fieldset { border: 0; padding: 0; margin: 0 0 16px; }
 }
 .problem-head .title { flex: 1 1 240px; font-weight: 600; }
 .problem-head .num { color: var(--muted); font-variant-numeric: tabular-nums; }
+/* The Daily Plan's names link to the log page, dressed as the plain titles they replace. */
+.problem-head a.title { color: inherit; text-decoration: none; }
 .problems > li:hover .problem-head .title { color: var(--tone); }
 /* A problem can be on the plan for two reasons at once: a chip each, wrapping together. */
 .problem-head .reasons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }

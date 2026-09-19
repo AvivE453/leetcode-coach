@@ -251,7 +251,7 @@ async function load(query = "") {
   }
 }
 
-/* Home's "Go to review" lands here as /solutions?number=N. Opening the problem and
+/* The log page's "Go to review" lands here as /solutions?number=N. Opening the problem and
    scrolling to a review box is free; the review itself still waits for a click, so a
    refresh, a back button or a bookmark never pays for an API call. */
 async function openLinked(number) {
