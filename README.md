@@ -14,7 +14,7 @@ Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync --extra embed          # omit --extra embed to skip torch (no local embeddings)
-cp .env.example .env           # then add your Anthropic API key; .env is gitignored
+cp .env.example .env           # then add an OpenRouter or Anthropic API key; .env is gitignored
 uv run coach init              # download the problem catalog, create the database
 ```
 
@@ -50,6 +50,15 @@ the tags later.
 
 ## Notes
 
+`COACH_MODEL` in `.env` picks the model that tags and reviews your solves; restart
+`coach-web` after changing it. Two kinds work, and you need a key only for the one you
+pick: a free `vendor/model` name, like the default `nex-agi/nex-n2.5-pro:free`, goes
+through [OpenRouter](https://openrouter.ai) on `OPENROUTER_API_KEY`; a paid Claude name
+like `claude-sonnet-5` goes to Anthropic on `ANTHROPIC_API_KEY`. The eval numbers below
+are Sonnet's; the free default has not been scored yet. A free OpenRouter account
+allows 50 requests a day across all free models (1000 once it has bought $10 of credit);
+past that, solves still save and `coach enrich` tags them the next day.
+
 `COACH_DB=/tmp/scratch.db` points any command, `coach-web` included, at a throwaway
 database.
 
@@ -58,7 +67,7 @@ gitignored on purpose — it holds your practice history, not the tool — so it
 copy of that history, and nothing in git backs it up for you.
 
 ```bash
-uv run pytest          # every LLM call mocked, API key stripped
+uv run pytest          # every LLM call mocked, API keys stripped
 uv run ruff check .
 ```
 
@@ -76,7 +85,8 @@ Without it that test skips and the rest of the suite still passes.
 
 ## How it works
 
-Everything the LLM does here is **measured**, not assumed. On 25 problems the review prompt
+Everything the LLM does here is **measured**, not assumed - on Sonnet 5; the free default
+model is not scored yet. On 25 problems the review prompt
 was never tuned on, 8 of them Hard, review feedback catches 82% of planted flaws (59/72)
 and reports an issue on 20% of correct solutions (10/49). Ground truth comes from
 *executing* the code rather than from opinion, and every correct solution in that set was

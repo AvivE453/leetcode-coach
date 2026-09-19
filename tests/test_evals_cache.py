@@ -127,6 +127,19 @@ def test_the_path_names_the_prompt_version_and_model(tmp_path, monkeypatch):
     assert len(v10.pending(keyed(item("a", "code-a")))) == 1
 
 
+def test_an_openrouter_model_name_is_one_flat_file(tmp_path, monkeypatch):
+    """The regression: `vendor/model` put a slash in the file name, so saving a paid-for
+    run crashed on a missing directory and every answer it had bought was lost."""
+    monkeypatch.setattr(run_evals, "CACHE_DIR", tmp_path)
+    cache = run_evals.CallCache("enrichment", "enrich-v5", "nex-agi/nex-n2.5-pro:free")
+
+    run_one, _ = recorder()
+    cache.fill(keyed(item("a", "code-a")), run_one, "buying")
+
+    assert cache.path.parent == tmp_path
+    assert len(cache.load()) == 1
+
+
 def test_both_evals_key_by_the_code_they_scored():
     """Reviews always did; enrichment gained it here, and the retrieval eval needs it
     - it builds a card from a cached pattern beside the current code."""

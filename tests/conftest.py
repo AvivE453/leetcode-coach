@@ -33,8 +33,9 @@ TWO_SUM = [
 @pytest.fixture(autouse=True)
 def no_api_key(monkeypatch):
     """Tests must never hit the real API: config.py loads .env at import,
-    so strip the key from the environment for every test."""
+    so strip both keys from the environment for every test."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
 
 
 @pytest.fixture(autouse=True)

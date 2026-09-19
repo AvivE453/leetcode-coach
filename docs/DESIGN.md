@@ -31,7 +31,7 @@ flowchart TB
         c["collect<br/>last 7 days"] --> a["analyze<br/>mastery now vs<br/>a week ago"]
     end
 
-    api{{"Claude API<br/>structured outputs"}}
+    api{{"Claude API or OpenRouter<br/>structured outputs"}}
     lc{{"LeetCode GraphQL<br/>problem statement"}}
 
     sm2 --> db
@@ -49,9 +49,9 @@ flowchart TB
     rev -.-> lc
 ```
 
-Solid arrows stay on the machine; dotted arrows leave it — the Claude API for enrichment
-and reviews, LeetCode for a problem's statement. Every one of them degrades to a working
-local path when the network or the key is unavailable.
+Solid arrows stay on the machine; dotted arrows leave it — the model's API (Anthropic's,
+or OpenRouter's) for enrichment and reviews, LeetCode for a problem's statement. Every one
+of them degrades to a working local path when the network or the key is unavailable.
 
 The web UI is the daily interface; the CLI keeps only the jobs with no page (`init`,
 `enrich`, `similar`). Both are thin layers over one implementation
@@ -296,6 +296,16 @@ No API key, rate limit, refusal, or network failure ever loses a logged solve. L
 stores the solution and queues enrichment, then `coach enrich` backfills the tags and
 embeddings later. Only enrichment and reviews ever call the API at all.
 
+**The model's name picks the API.**
+Two APIs are supported: Anthropic's own, and OpenRouter, which serves many vendors'
+models (free ones among them) behind one key. Which one a call goes to is read off the
+model's name - OpenRouter's are all `vendor/model`, Anthropic's have no slash - so
+switching is one `COACH_MODEL` line in `.env`, and the key that matters is the one that
+model needs. There is deliberately no fallback from one to the other: a free model's
+daily limit would quietly start billing a paid one, and the solves tagged that day would
+come from a model nobody chose. Every enrichment and review stores the model that wrote
+it, so a history tagged by two models stays readable.
+
 ---
 
 ## No automation, by design
@@ -330,7 +340,8 @@ defend or iterate against. Full numbers and methodology:
 
 Measured on `review-v4` with `claude-sonnet-5`, on the held-out `test` split of the fixture
 bank: 3 Easy, 14 Medium and 8 Hard problems, with every correct solution written outside
-this repo. The model is the one the coach ships; the prompt is one version behind it.
+this repo. The model was the coach's default until 2026-09-19 (the free default since then
+is unscored); the prompt is one version behind the one the coach ships.
 `review-v5` adds the problem statement (above) and has no number of its own, because
 reading this split's misses is what spent it — scoring v5 honestly needs new test problems,
 so until they exist these are v4's numbers and are quoted as such.

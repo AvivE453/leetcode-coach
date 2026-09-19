@@ -94,7 +94,9 @@ class CallCache:
 
     @property
     def path(self) -> Path:
-        return CACHE_DIR / f"{self.name}-{self.prompt_version}-{self.model}.json"
+        # An OpenRouter name is vendor/model, and a slash here would be a directory.
+        model = self.model.replace("/", "__")
+        return CACHE_DIR / f"{self.name}-{self.prompt_version}-{model}.json"
 
     def load(self, refresh: bool = False) -> dict:
         if refresh or not self.path.exists():
@@ -662,8 +664,8 @@ def main() -> int:
               if args.model in COST_PER_CALL else f"\ntotal: {total} call(s)")
         return 0
 
-    if not llm.have_api_key():
-        print("ANTHROPIC_API_KEY is not set - add it to .env at the project root.")
+    if not llm.have_api_key(args.model):
+        print(f"{llm.key_name(args.model)} is not set - add it to .env at the project root.")
         return 1
 
     sections = {}

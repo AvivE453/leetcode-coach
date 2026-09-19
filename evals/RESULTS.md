@@ -99,7 +99,7 @@ corrected (below); `bank-v3` adds 22 clean controls and 6 regression controls to
 Regression controls, `bank-v3` only and scored apart: `review-v3` 50% (3/6), `review-v4`
 0% (0/6).
 
-`review-v4` on `claude-sonnet-5` is what the coach ships. `review-v3` added a `strengths`
+`review-v4` on `claude-sonnet-5` was what the coach shipped when this was measured. `review-v3` added a `strengths`
 field so a review also reports what the solution got right; `review-v4` added the
 constraints rule described below. The category definitions are otherwise v2's.
 
@@ -197,6 +197,11 @@ The one `enrich-v5` disagreement is Unique Paths, tagged `dp-1d` where the corpu
 `dp-2d`. The corpus solution computes it with a single rolling row, so the tag describes
 that code; it still counts as a miss, since `intended_pattern` is a question about the
 problem, not the code.
+
+The corpus has since grown to 50: `bank-v4` brought 21 more problems with a NeetCode
+section to score against (and 15 without one, which the loader crashed on until
+2026-09-19 and now skips). A run from then on is scored on 50 and is not comparable to
+the 29 above; Sonnet 5's 29 answers are cached, so re-scoring it on 50 costs 21 calls.
 
 > `enrich-v3` added `intended_secondary_patterns`, a problem's *other* canonical
 > approaches. It is **not evaluated**: the corpus labels one canonical section per

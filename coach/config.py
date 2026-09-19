@@ -26,9 +26,13 @@ DATA_DIR = PROJECT_ROOT / "data"
 DB_PATH = Path(os.environ["COACH_DB"]).expanduser() if os.environ.get("COACH_DB") else DATA_DIR / "coach.db"
 CATALOG_PATH = DATA_DIR / "catalog.json"
 
-# Sonnet ($2/$10 per Mtok against Opus's $5/$25) - the enrichment eval scored
-# 100% on it, so the extra spend bought nothing this tool can measure.
-MODEL = "claude-sonnet-5"
+# The model that tags and reviews solves; COACH_MODEL in .env switches it without
+# touching code. The name picks the API (llm.on_openrouter): `vendor/model` goes
+# through OpenRouter on OPENROUTER_API_KEY, any other name to Anthropic on
+# ANTHROPIC_API_KEY. The default is free, enforces structured outputs on its free
+# endpoint, and answered a review in 5 s where the free DeepSeek took over a minute, but
+# the evals have not scored it: RESULTS.md's numbers are Sonnet 5's.
+MODEL = os.environ.get("COACH_MODEL", "nex-agi/nex-n2.5-pro:free")
 
 # Kept separate from MODEL so the evals can score a different model than the one
 # the coach runs on, without either default dragging the other along.

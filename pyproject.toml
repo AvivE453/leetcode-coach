@@ -13,6 +13,7 @@ dependencies = [
     # `uv sync` would uninstall it.
     "fastapi>=0.115",
     "uvicorn>=0.30",
+    "openai>=3.16.2",
 ]
 
 [project.optional-dependencies]

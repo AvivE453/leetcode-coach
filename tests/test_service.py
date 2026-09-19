@@ -478,7 +478,7 @@ def test_enrich_solution_now_reports_llm_degradation(tmp_path, monkeypatch):
     e = service.enrich_solution_now(conn, result.solution_id, problem, CODE)
 
     assert e.main_patterns == []
-    assert "ANTHROPIC_API_KEY" in e.skipped
+    assert llm.key_name(config.MODEL) in e.skipped
     assert conn.execute("SELECT COUNT(*) FROM enrichments").fetchone()[0] == 0
 
 
@@ -619,7 +619,7 @@ def test_tagging_that_fails_keeps_the_vector(tmp_path, monkeypatch):
 
     tagged = service.tag_solution_now(conn, solution_id, service.get_problem(conn, 1), "c")
 
-    assert "ANTHROPIC_API_KEY" in tagged.skipped
+    assert llm.key_name(config.MODEL) in tagged.skipped
     assert conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0] == 1
 
 
@@ -1371,8 +1371,9 @@ def test_approach_practice_waits_three_days_after_the_solve_that_opened_it(tmp_p
 def test_coach_db_env_var_redirects_the_database(tmp_path, monkeypatch):
     """COACH_DB is the documented way to run against a scratch database."""
     monkeypatch.setenv("COACH_DB", str(tmp_path / "scratch.db"))
-    # config.load_env() runs on import; keep it from re-seeding a real key from .env
+    # config.load_env() runs on import; keep it from re-seeding real keys from .env
     monkeypatch.setenv("ANTHROPIC_API_KEY", "not-a-real-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "not-a-real-key")
     try:
         importlib.reload(config)
         assert config.DB_PATH == tmp_path / "scratch.db"
@@ -1380,3 +1381,16 @@ def test_coach_db_env_var_redirects_the_database(tmp_path, monkeypatch):
         monkeypatch.delenv("COACH_DB")
         importlib.reload(config)
     assert config.DB_PATH == config.DATA_DIR / "coach.db"
+
+
+def test_coach_model_env_var_switches_the_model(monkeypatch):
+    """COACH_MODEL in .env is the documented way to change models without touching code."""
+    monkeypatch.setenv("COACH_MODEL", "claude-sonnet-5")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "not-a-real-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "not-a-real-key")
+    try:
+        importlib.reload(config)
+        assert config.MODEL == "claude-sonnet-5"
+    finally:
+        monkeypatch.delenv("COACH_MODEL")
+        importlib.reload(config)

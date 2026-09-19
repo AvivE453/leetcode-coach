@@ -6,7 +6,7 @@ import pytest
 from conftest import CODE, fake_sentence_transformers, seed_db, unreachable_model
 from fastapi.testclient import TestClient
 
-from coach import config, db, enrich, mastery, review, service
+from coach import config, db, enrich, llm, mastery, review, service
 from coach.web.app import app
 from coach.weekly import analyze as weekly_analyze
 
@@ -178,7 +178,7 @@ def test_log_endpoint_degrades_without_an_api_key(client):
     assert res.status_code == 200, res.text
     enrichment = res.json()["enrichment"]
     assert enrichment["status"] == "skipped"
-    assert "ANTHROPIC_API_KEY" in enrichment["reason"]
+    assert llm.key_name(config.MODEL) in enrichment["reason"]
 
     conn = db.connect()
     assert conn.execute("SELECT COUNT(*) FROM solutions").fetchone()[0] == 1
@@ -655,7 +655,7 @@ def test_review_endpoint_degrades_without_an_api_key(client):
 
     assert body["status"] == "skipped"
     assert body["review"] is None
-    assert "ANTHROPIC_API_KEY" in body["reason"]
+    assert llm.key_name(config.MODEL) in body["reason"]
 
 
 def test_review_endpoint_rejects_unknown_problem_and_solution(client, monkeypatch):

@@ -396,6 +396,10 @@ def load() -> list[Entry]:
 
     entries = []
     for slug, code in sorted(code_by_slug.items()):
+        # The feedback bank grew past Blind 75 (bank-v4), and only a problem NeetCode's
+        # sections label has an answer to score a tag against.
+        if slug not in truth:
+            continue
         problem = catalog[slug]
         entries.append(
             Entry(
