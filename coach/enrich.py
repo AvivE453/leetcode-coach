@@ -36,6 +36,7 @@ Pattern = Literal[
     "graph",
     "hashmap",
     "set",
+    "bucket-sort",
 ]
 
 PATTERNS: tuple[str, ...] = get_args(Pattern)

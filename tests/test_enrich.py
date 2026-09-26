@@ -37,8 +37,8 @@ def answer_with(**fields):
 
 
 def test_pattern_vocabulary_is_unique_and_kebab_case():
-    assert len(enrich.PATTERNS) == 27
-    assert len(set(enrich.PATTERNS)) == 27
+    assert len(enrich.PATTERNS) == 28
+    assert len(set(enrich.PATTERNS)) == 28
     for pattern in enrich.PATTERNS:
         assert pattern == pattern.lower()
         assert " " not in pattern

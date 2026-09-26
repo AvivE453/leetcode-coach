@@ -206,11 +206,16 @@ never takes a problem a weak pattern would have picked. Due claims every review 
 that does not fit. That review stays overdue, comes first tomorrow, and the heading says how
 many it left out, instead of letting it resurface under Approach practice without its review.
 
-**A controlled vocabulary of 26 patterns, enforced as a type.**
+**A controlled vocabulary of 28 patterns, enforced as a type.**
 The model picks from an enum, so tags can never fragment into `dp`/`DP`/`dynamic
 programming` and make coverage analytics meaningless. LeetCode's own tags are kept too,
 but for the opposite job — they are coarse enough to *find new problems*, while our
-vocabulary is fine enough to *diagnose weaknesses*.
+vocabulary is fine enough to *diagnose weaknesses*. The price of an enum is that a
+missing pattern is not a missing tag but a wrong one: before `bucket-sort` joined the list,
+an O(n) bucket-sort solve of Top K Frequent Elements — the one its review called optimal —
+could only be tagged `hashmap`, missed the problem's `heap`, and was sent to approach
+practice for using the wrong approach. A solve flagged off-pattern that its review calls
+optimal is the sign to look for.
 
 **Embed an enriched card, not raw code.**
 Each solution is embedded as `title + main patterns + key trick + code`, so two problems
