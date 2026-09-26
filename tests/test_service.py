@@ -453,6 +453,24 @@ def test_a_review_still_runs_on_a_database_that_has_not_been_migrated(tmp_path, 
     assert "Problem statement:" not in seen_prompts[0]
 
 
+def test_a_review_prompt_never_claims_the_code_is_python(tmp_path, monkeypatch):
+    """A Java solve fenced as ```python drew a review reporting "not valid Python" as a bug,
+    which capped a correct solve's grade at 1 and lapsed it."""
+    conn = seed_db(tmp_path, monkeypatch)
+    java = "class Solution { public int maxDepth(TreeNode root) { return 0; } }"
+    logged = service.log_solve(conn, 1, "clean", java, today=date(2026, 9, 1))
+    seen_prompts = []
+    monkeypatch.setattr(
+        "coach.llm.parse",
+        lambda prompt, output_format, **kw: seen_prompts.append(prompt) or FEEDBACK,
+    )
+
+    service.review_solution_now(conn, logged.solution_id, service.get_problem(conn, 1), java)
+
+    assert java in seen_prompts[0]
+    assert "python" not in seen_prompts[0].lower()
+
+
 def test_a_late_bug_review_puts_the_problem_on_the_plan_with_its_reason(tmp_path, monkeypatch):
     """Reviewed days after a clean solve due 09-08: the lapse fell due on 09-04, so on 09-06
     the problem is already owed - and the plan says why instead of a bare date."""

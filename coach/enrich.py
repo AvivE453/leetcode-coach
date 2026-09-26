@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from coach import config, llm
 
-PROMPT_VERSION = "enrich-v5"
+PROMPT_VERSION = "enrich-v6"
 
 Pattern = Literal[
     "two-pointers",
@@ -69,8 +69,8 @@ solution works - not the problem's official topic labels.
 Problem: {number}. {title} (difficulty: {difficulty})
 Official topic tags (coarse, for reference only): {tags}
 
-Solution code:
-```python
+Solution code (any language):
+```
 {code}
 ```
 

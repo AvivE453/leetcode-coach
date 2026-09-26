@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from coach import config, llm
 
-PROMPT_VERSION = "review-v5"
+PROMPT_VERSION = "review-v6"
 
 
 class Issue(BaseModel):
@@ -31,8 +31,9 @@ honest, specific feedback they can act on before re-solving the problem.
 
 Problem: {number}. {title} (difficulty: {difficulty})
 {statement}
-Solution code:
-```python
+Solution code, in whatever language the author chose. Judge it as code in that
+language; the choice of language is never an issue:
+```
 {code}
 ```
 

@@ -189,3 +189,4 @@ def test_enrich_solution_builds_prompt_and_parses(monkeypatch):
     assert "Two Sum" in captured["prompt"]
     assert "def twoSum" in captured["prompt"]
     assert "Array, Hash Table" in captured["prompt"]
+    assert "python" not in captured["prompt"].lower(), "a solve can be in any language"
