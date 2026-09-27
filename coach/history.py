@@ -25,7 +25,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 
-from coach import assessment, enrich
+from coach import assessment, db, enrich
 
 
 @dataclass(frozen=True)
@@ -61,6 +61,7 @@ class Attempt:
     secondary_patterns: tuple[str, ...]
     verdict: str | None
     issues: tuple[dict, ...]
+    due_when_logged: bool = False
 
     @property
     def tagged(self) -> bool:
@@ -78,7 +79,7 @@ class Attempt:
 
 
 QUERY = """
-SELECT s.id, s.date, s.outcome, s.minutes,
+SELECT s.id, s.date, s.outcome, s.minutes, {due_when_logged} AS due_when_logged,
        p.number, p.slug, p.title, p.difficulty,
        p.intended_pattern, p.intended_secondary_patterns,
        en.main_patterns, en.secondary_patterns,
@@ -99,8 +100,12 @@ def load(conn: sqlite3.Connection, number: int | None = None) -> list[Attempt]:
     before enrichment ran is still practice that happened, and dropping it would quietly
     change what the schedule replays. Two solves on the same day keep the order they
     were logged in.
+
+    `due_when_logged` reads as NULL - not recorded, like every solve logged before the
+    column - on a database `coach init` has not migrated yet, rather than failing the read.
     """
-    rows = conn.execute(QUERY, {"number": number}).fetchall()
+    due = "s.due_when_logged" if db.has_column(conn, "solutions", "due_when_logged") else "NULL"
+    rows = conn.execute(QUERY.format(due_when_logged=due), {"number": number}).fetchall()
     return [attempt_of(row) for row in rows]
 
 
@@ -124,6 +129,7 @@ def attempt_of(row: sqlite3.Row) -> Attempt:
         secondary_patterns=tuple(json.loads(row["secondary_patterns"])) if tagged else (),
         verdict=row["verdict"],
         issues=tuple(json.loads(row["issues"])) if row["issues"] else (),
+        due_when_logged=bool(row["due_when_logged"]),
     )
 
 

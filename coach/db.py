@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS solutions (
     outcome TEXT NOT NULL CHECK (outcome IN ('clean', 'struggled', 'hints', 'failed')),
     minutes INTEGER,
     note TEXT,
-    code TEXT NOT NULL
+    code TEXT NOT NULL,
+    due_when_logged INTEGER
 );
 """
 
@@ -96,7 +97,13 @@ def init_schema(conn: sqlite3.Connection) -> None:
         )
     if "content" not in columns:
         conn.execute("ALTER TABLE problems ADD COLUMN content TEXT")
+    if not has_column(conn, "solutions", "due_when_logged"):
+        conn.execute("ALTER TABLE solutions ADD COLUMN due_when_logged INTEGER")
     conn.commit()
+
+
+def has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    return any(row["name"] == column for row in conn.execute(f"PRAGMA table_info({table})"))
 
 
 def merge_attempts_into_solutions(conn: sqlite3.Connection) -> None:

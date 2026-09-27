@@ -316,7 +316,7 @@ def test_a_reschedule_that_fails_rolls_back_the_review(tmp_path, monkeypatch, re
         review_with(conn, monkeypatch, logged.solution_id, FEEDBACK)
     before = (review.load(conn, logged.solution_id), stored_schedule(conn))
 
-    def fail(graded):
+    def fail(graded, due_days):
         raise RuntimeError("replay failed")
 
     monkeypatch.setattr("coach.scheduler.replay", fail)
@@ -486,6 +486,50 @@ def test_a_late_bug_review_puts_the_problem_on_the_plan_with_its_reason(tmp_path
     assert [(i.number, [(r.kind, r.text) for r in i.reasons]) for i in due] == [
         (1, [("review", "re-solve: review reported a bug")])
     ]
+
+
+def test_a_solve_the_plan_asked_for_still_counts_once_the_review_that_asked_is_cleared(
+    tmp_path, monkeypatch
+):
+    """Problem 104, 2026-09-27. A clean solve on 09-24 drew a false bug, which lapsed it to
+    09-27, and solved clean that day it was due in a week. Then its old review was re-run
+    and came back clean, the replay found 09-27 three days after a clean solve - early, so
+    it moved nothing - and the problem came back on 10-01. The plan asked for that solve,
+    so a later verdict on an older one cannot take it back: a week from the day it was done."""
+    conn = seed_db(tmp_path, monkeypatch)
+    first = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 24))
+    review_with(conn, monkeypatch, first.solution_id, FEEDBACK)
+    assert service.stored_review_state(conn, 1).next_due == date(2026, 9, 27)
+
+    asked = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 27))
+    assert asked.next_due == date(2026, 10, 4)
+
+    clean = FEEDBACK.model_copy(update={"issues": [], "verdict": "optimal"})
+    review_with(conn, monkeypatch, first.solution_id, clean, refresh=True)
+
+    assert service.stored_review_state(conn, 1).next_due == date(2026, 10, 4)
+
+
+def test_an_early_solve_the_plan_did_not_ask_for_still_moves_nothing(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+    service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 24))
+
+    early = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 27))
+
+    assert early.next_due == date(2026, 10, 1)
+    assert not early.counted_as_review
+
+
+def test_logging_and_scheduling_work_before_due_when_logged_is_migrated(tmp_path, monkeypatch):
+    """`db.connect()` never adds schema, so the column is missing until `coach init` runs."""
+    conn = seed_db(tmp_path, monkeypatch)
+    drop_column(conn, "solutions", "due_when_logged")
+
+    service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 24))
+    again = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 10, 1))
+
+    assert again.counted_as_review
+    assert again.next_due == date(2026, 10, 15)
 
 
 def test_enrich_solution_now_reports_llm_degradation(tmp_path, monkeypatch):

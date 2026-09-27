@@ -1,5 +1,5 @@
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
 QUALITY = {"clean": 5, "struggled": 3, "hints": 2, "failed": 1}
@@ -54,7 +54,9 @@ def review(state: ReviewState | None, quality: int, today: date) -> ReviewState:
     )
 
 
-def replay(graded: list[tuple[date, int]]) -> ReviewState | None:
+def replay(
+    graded: list[tuple[date, int]], due_days: frozenset[date] = frozenset()
+) -> ReviewState | None:
     """The review state one problem's (day, grade) attempts add up to.
 
     A day is one review, graded by its worst attempt. Solving a problem again in the
@@ -72,6 +74,13 @@ def replay(graded: list[tuple[date, int]]) -> ReviewState | None:
     saved days later changes the grade of the attempt it judges, and the replay puts
     that lapse on the day the attempt happened, never on the day the review arrived.
     Which later days were early is judged again in the same pass.
+
+    That re-judging must not take back a solve the plan asked for. `due_days` are the
+    days a solve was logged while the problem was due: a false bug lapses a clean solve,
+    the plan brings it back and it is solved clean, and re-running the old review clean
+    would leave that solve three days after a clean one - early, moving nothing. A
+    passing day in `due_days` that the replay finds early restarts the clock instead,
+    at the interval it has, so it cannot stretch the interval either.
     """
     by_day: dict[date, list[int]] = {}
     for day, quality in graded:
@@ -82,6 +91,8 @@ def replay(graded: list[tuple[date, int]]) -> ReviewState | None:
         quality = min(by_day[day])
         if counts_as_review(state, quality, day):
             state = review(state, quality, day)
+        elif day in due_days:
+            state = replace(state, next_due=day + timedelta(days=round(state.interval_days)))
     return state
 
 

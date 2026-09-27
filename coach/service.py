@@ -19,6 +19,7 @@ from coach import (
     config,
     corrections,
     curriculum,
+    db,
     embed,
     enrich,
     history,
@@ -235,7 +236,10 @@ def update_review_state(conn: sqlite3.Connection, number: int) -> scheduler.Revi
     untagged attempt counts at its logged outcome.
     """
     attempts = history.load(conn, number)
-    new = scheduler.replay([(a.day, a.grade) for a in attempts])
+    new = scheduler.replay(
+        [(a.day, a.grade) for a in attempts],
+        due_days=frozenset(a.day for a in attempts if a.due_when_logged),
+    )
     conn.execute(
         """
         INSERT INTO review_state (problem_number, ease, interval_days, next_due, reps, lapses)
@@ -296,6 +300,10 @@ def log_solve(
     Whether the solve counted as a review is read off the schedule itself: every day that
     counts moves reps or lapses, so a replay that leaves the stored state as it was is a
     solve the schedule did not count - early, or on a day already counted.
+
+    It also records whether the problem was due as it was logged (scheduler.replay's
+    `due_days`), a fact of that moment no later replay can recover: a review re-run
+    afterwards can make the same day look early.
     """
     problem = get_problem(conn, number)
     if problem is None:
@@ -313,6 +321,11 @@ def log_solve(
         """,
         (number, today.isoformat(), outcome, minutes, note, code),
     ).lastrowid
+    if db.has_column(conn, "solutions", "due_when_logged"):
+        conn.execute(
+            "UPDATE solutions SET due_when_logged = ? WHERE id = ?",
+            (before is not None and before.next_due <= today, solution_id),
+        )
     state = update_review_state(conn, number)
     conn.commit()
 

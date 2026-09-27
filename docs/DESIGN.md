@@ -160,6 +160,19 @@ reviews taken on their due dates schedule exactly as before. The stored schedule
 running total stepped once per solve, so the rule has one owner, and `coach init` re-derives
 every stored schedule when the rule changes.
 
+A replay re-judges which days were early, and that must not take back a solve the plan
+asked for. A clean Java solve drew a false bug (the prompt had fenced it as Python), which
+lapsed it; the Daily Plan brought it back three days later and it was solved clean, due in
+a week. Re-running the old review came back clean, and the replay then found that solve
+three days after a clean one - early, so it moved nothing, and the problem came back
+three days sooner than the week that solve had earned. Nothing in the attempts could tell
+it apart from a genuinely early solve, because whether the problem was due is a fact of
+the moment it was logged, and a later review changes what the replay thinks that moment
+was. So `log_solve` records it (`solutions.due_when_logged`), and a passing day the plan
+asked for that the replay finds early restarts the clock at the interval it has: a week
+from that day, not a longer interval. Every other early day still changes nothing, and
+solves logged before the column are treated as not due.
+
 **A review re-grades the attempt it judges; it is never a review of its own.**
 The schedule used to ignore reviews, so a clean solve whose review reported a bug stayed a
 week away while its pattern's mastery counted the bug. Now each attempt is scheduled by the

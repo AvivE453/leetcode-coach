@@ -163,7 +163,9 @@ CREATE TABLE solutions (
 );
 """
 
-MERGED_COLUMNS = ["id", "problem_number", "date", "outcome", "minutes", "note", "code"]
+MERGED_COLUMNS = [
+    "id", "problem_number", "date", "outcome", "minutes", "note", "code", "due_when_logged"
+]
 
 
 def table_exists(conn, name) -> bool:
@@ -224,8 +226,8 @@ def test_init_schema_merges_each_attempt_into_its_solution(tmp_path):
     assert not table_exists(conn, "attempts")
     assert columns_of(conn, "solutions") == MERGED_COLUMNS
     assert [tuple(row) for row in conn.execute("SELECT * FROM solutions ORDER BY id")] == [
-        (7, 15, "2026-09-02", "clean", None, None, "b"),
-        (8, 1, "2026-09-01", "struggled", 25, "off by one", "a"),
+        (7, 15, "2026-09-02", "clean", None, None, "b", None),
+        (8, 1, "2026-09-01", "struggled", 25, "off by one", "a", None),
     ]
     # Every child row still names its solve, and the one reader of history sees them joined.
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []

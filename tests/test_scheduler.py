@@ -182,6 +182,15 @@ def test_a_passing_day_counts_from_its_due_date(offset, reps, due_offset):
     assert (s.reps, s.next_due) == (reps, TODAY + timedelta(days=due_offset))
 
 
+def test_an_early_success_the_plan_asked_for_restarts_the_clock_without_stretching():
+    """Due when it was logged, early by the time it is replayed: it moves the date to a
+    week from that day, and the interval stays the week it was."""
+    asked = TODAY + timedelta(days=3)
+    s = scheduler.replay([(TODAY, CLEAN), (asked, CLEAN)], due_days=frozenset({asked}))
+
+    assert (s.reps, s.interval_days, s.next_due) == (1, 7.0, asked + timedelta(days=7))
+
+
 def test_after_a_lapse_a_success_waits_for_the_lapse_interval():
     """A clean retry the next day, after reading the solution, is not the problem remembered:
     the lapse still brings it back on the third day, and only that solve restarts the ladder."""
