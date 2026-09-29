@@ -4,7 +4,7 @@ NUMBER = 417
 SLUG = "pacific-atlantic-water-flow"
 TITLE = "Pacific Atlantic Water Flow"
 DIFFICULTY = "Medium"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "pacificAtlantic"
 
 CANONICAL = external_code("neetcode", NUMBER)

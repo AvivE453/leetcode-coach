@@ -4,7 +4,7 @@ NUMBER = 435
 SLUG = "non-overlapping-intervals"
 TITLE = "Non-overlapping Intervals"
 DIFFICULTY = "Medium"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "eraseOverlapIntervals"
 
 CANONICAL = external_code("neetcode", NUMBER)

@@ -4,7 +4,7 @@ NUMBER = 128
 SLUG = "longest-consecutive-sequence"
 TITLE = "Longest Consecutive Sequence"
 DIFFICULTY = "Medium"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "longestConsecutive"
 
 CANONICAL = external_code("neetcode", NUMBER)

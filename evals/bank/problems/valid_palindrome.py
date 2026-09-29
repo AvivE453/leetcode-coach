@@ -4,7 +4,7 @@ NUMBER = 125
 SLUG = "valid-palindrome"
 TITLE = "Valid Palindrome"
 DIFFICULTY = "Easy"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "isPalindrome"
 
 CANONICAL = external_code("neetcode", NUMBER)

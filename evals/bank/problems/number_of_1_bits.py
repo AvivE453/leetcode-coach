@@ -4,7 +4,7 @@ NUMBER = 191
 SLUG = "number-of-1-bits"
 TITLE = "Number of 1 Bits"
 DIFFICULTY = "Easy"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "hammingWeight"
 
 CANONICAL = external_code("neetcode", NUMBER)

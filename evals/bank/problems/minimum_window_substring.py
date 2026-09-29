@@ -6,7 +6,7 @@ NUMBER = 76
 SLUG = "minimum-window-substring"
 TITLE = "Minimum Window Substring"
 DIFFICULTY = "Hard"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "minWindow"
 
 CANONICAL = external_code("neetcode", NUMBER)

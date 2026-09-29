@@ -4,7 +4,7 @@ NUMBER = 4
 SLUG = "median-of-two-sorted-arrays"
 TITLE = "Median of Two Sorted Arrays"
 DIFFICULTY = "Hard"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "findMedianSortedArrays"
 
 CANONICAL = external_code("neetcode", NUMBER)

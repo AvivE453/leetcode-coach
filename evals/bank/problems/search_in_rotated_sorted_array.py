@@ -4,7 +4,7 @@ NUMBER = 33
 SLUG = "search-in-rotated-sorted-array"
 TITLE = "Search in Rotated Sorted Array"
 DIFFICULTY = "Medium"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "search"
 
 CANONICAL = external_code("neetcode", NUMBER)

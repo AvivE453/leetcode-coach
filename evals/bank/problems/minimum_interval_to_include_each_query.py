@@ -4,7 +4,7 @@ NUMBER = 1851
 SLUG = "minimum-interval-to-include-each-query"
 TITLE = "Minimum Interval to Include Each Query"
 DIFFICULTY = "Hard"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "minInterval"
 
 CANONICAL = external_code("neetcode", NUMBER)

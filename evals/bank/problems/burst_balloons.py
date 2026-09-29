@@ -6,7 +6,7 @@ NUMBER = 312
 SLUG = "burst-balloons"
 TITLE = "Burst Balloons"
 DIFFICULTY = "Hard"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "maxCoins"
 
 CANONICAL = external_code("neetcode", NUMBER)

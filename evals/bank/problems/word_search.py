@@ -4,7 +4,7 @@ NUMBER = 79
 SLUG = "word-search"
 TITLE = "Word Search"
 DIFFICULTY = "Medium"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "exist"
 
 CANONICAL = external_code("neetcode", NUMBER)

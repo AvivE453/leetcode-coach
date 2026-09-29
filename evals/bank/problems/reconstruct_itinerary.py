@@ -4,7 +4,7 @@ NUMBER = 332
 SLUG = "reconstruct-itinerary"
 TITLE = "Reconstruct Itinerary"
 DIFFICULTY = "Hard"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "findItinerary"
 
 CANONICAL = external_code("neetcode", NUMBER)

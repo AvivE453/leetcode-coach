@@ -4,7 +4,7 @@ NUMBER = 11
 SLUG = "container-with-most-water"
 TITLE = "Container With Most Water"
 DIFFICULTY = "Medium"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "maxArea"
 
 CANONICAL = external_code("neetcode", NUMBER)

@@ -4,7 +4,7 @@ NUMBER = 338
 SLUG = "counting-bits"
 TITLE = "Counting Bits"
 DIFFICULTY = "Easy"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "countBits"
 
 CANONICAL = external_code("neetcode", NUMBER)

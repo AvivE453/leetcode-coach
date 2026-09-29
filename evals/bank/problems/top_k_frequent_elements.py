@@ -4,7 +4,7 @@ NUMBER = 347
 SLUG = "top-k-frequent-elements"
 TITLE = "Top K Frequent Elements"
 DIFFICULTY = "Medium"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "topKFrequent"
 
 CANONICAL = external_code("neetcode", NUMBER)

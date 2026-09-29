@@ -4,7 +4,7 @@ NUMBER = 57
 SLUG = "insert-interval"
 TITLE = "Insert Interval"
 DIFFICULTY = "Medium"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "insert"
 
 CANONICAL = external_code("neetcode", NUMBER)

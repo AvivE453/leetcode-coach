@@ -4,7 +4,7 @@ NUMBER = 1143
 SLUG = "longest-common-subsequence"
 TITLE = "Longest Common Subsequence"
 DIFFICULTY = "Medium"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "longestCommonSubsequence"
 
 CANONICAL = external_code("neetcode", NUMBER)

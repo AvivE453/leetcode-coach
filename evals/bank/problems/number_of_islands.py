@@ -2,7 +2,7 @@ NUMBER = 200
 SLUG = "number-of-islands"
 TITLE = "Number of Islands"
 DIFFICULTY = "Medium"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "numIslands"
 
 # NeetCode's file does not parse (an over-indented BFS class), so it was rejected and this

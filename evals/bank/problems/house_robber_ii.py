@@ -4,7 +4,7 @@ NUMBER = 213
 SLUG = "house-robber-ii"
 TITLE = "House Robber II"
 DIFFICULTY = "Medium"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "rob"
 
 CANONICAL = external_code("neetcode", NUMBER)

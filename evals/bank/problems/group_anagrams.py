@@ -2,7 +2,7 @@ NUMBER = 49
 SLUG = "group-anagrams"
 TITLE = "Group Anagrams"
 DIFFICULTY = "Medium"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "groupAnagrams"
 
 # NeetCode's solution defines groupAnagrams twice, so it was rejected, and this one is

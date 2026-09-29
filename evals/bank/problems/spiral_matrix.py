@@ -4,7 +4,7 @@ NUMBER = 54
 SLUG = "spiral-matrix"
 TITLE = "Spiral Matrix"
 DIFFICULTY = "Medium"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "spiralOrder"
 
 CANONICAL = external_code("neetcode", NUMBER)

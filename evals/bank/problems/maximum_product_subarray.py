@@ -4,7 +4,7 @@ NUMBER = 152
 SLUG = "maximum-product-subarray"
 TITLE = "Maximum Product Subarray"
 DIFFICULTY = "Medium"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "maxProduct"
 
 CANONICAL = external_code("neetcode", NUMBER)

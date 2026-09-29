@@ -4,7 +4,7 @@ NUMBER = 42
 SLUG = "trapping-rain-water"
 TITLE = "Trapping Rain Water"
 DIFFICULTY = "Hard"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "trap"
 
 CANONICAL = external_code("neetcode", NUMBER)

@@ -6,7 +6,7 @@ NUMBER = 115
 SLUG = "distinct-subsequences"
 TITLE = "Distinct Subsequences"
 DIFFICULTY = "Hard"
-SPLIT = "test"
+SPLIT = "dev"
 METHOD = "numDistinct"
 
 CANONICAL = external_code("neetcode", NUMBER)
