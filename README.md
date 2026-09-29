@@ -52,10 +52,11 @@ the tags later.
 
 `COACH_MODEL` in `.env` picks the model that tags and reviews your solves; restart
 `coach-web` after changing it. Two kinds work, and you need a key only for the one you
-pick: a free `vendor/model` name, like the default `nex-agi/nex-n2.5-pro:free`, goes
-through [OpenRouter](https://openrouter.ai) on `OPENROUTER_API_KEY`; a paid Claude name
-like `claude-sonnet-5` goes to Anthropic on `ANTHROPIC_API_KEY`. The eval numbers below
-are Sonnet's; the free default has not been scored yet. A free OpenRouter account
+pick: a paid Claude name, like the default `claude-sonnet-5`, goes to Anthropic on
+`ANTHROPIC_API_KEY`; a free `vendor/model` name goes through
+[OpenRouter](https://openrouter.ai) on `OPENROUTER_API_KEY` - any free model there that
+supports structured outputs, and `.env.example` lists a few. The eval numbers below are
+Sonnet's; no free model has been scored. A free OpenRouter account
 allows 50 requests a day across all free models (1000 once it has bought $10 of credit);
 past that, solves still save and `coach enrich` tags them the next day.
 
@@ -85,10 +86,10 @@ Without it that test skips and the rest of the suite still passes.
 
 ## How it works
 
-Everything the LLM does here is **measured**, not assumed - on Sonnet 5; the free default
-model is not scored yet. On 32 problems the review prompt
+Everything the LLM does here is **measured**, not assumed - on Sonnet 5, the default
+model; no free model is scored. On 32 problems the review prompt
 was never tuned on, 10 of them Hard and drawn by a fixed seed, review feedback catches 88%
-of planted flaws (74/84) and calls correct code wrong on 3% of correct solutions (2/58).
+of planted flaws (74/84) and calls correct code wrong on 3% of correct solutions (2/59).
 Ground truth comes from *executing* the code rather than from opinion, and every correct
 solution in that set was written outside this repo. An earlier prompt scored 97% and 0%
 on the problems it was tuned on and 82% on held-out ones: that gap is what a held-out set

@@ -362,16 +362,18 @@ defend or iterate against. Full numbers and methodology:
 | Metric | Result |
 |---|---|
 | Recall on planted flaws | **88%** (74/84; 95% CI 79–93%) |
-| False-positive rate: proven-correct code called wrong | **3%** (2/58; 95% CI 1–12%) |
+| False-positive rate: proven-correct code called wrong | **3%** (2/59; 95% CI 1–12%) |
 | By category | bug 84% · complexity 100% · edge-case 71% (of 7) |
-| Complexity remarks on correct code, scored neither way | 17% (10/58) |
+| Complexity remarks on correct code, scored neither way | 17% (10/59) |
 
 Measured on `review-v6`, the prompt the coach ships, with `claude-sonnet-5`, on `bank-v5`'s
 held-out `test` split: 4 Easy, 18 Medium and 10 Hard problems drawn by a fixed seed after
 the selection rules were fixed, every correct solution written outside this repo, and
-the bank committed before any review call on it. Three of 145 calls ran out of tokens
-twice and are left out. The model was the coach's default until 2026-09-19 (the free
-default since then is unscored).
+the bank committed before any review call on it. Two of 145 calls ran out of tokens and
+are left out: reviews think, thinking counts toward the limit, and on terse code whose
+correctness rests on an unexplained trick one review used 29,387 tokens before it could
+answer. Reviews therefore stream with room for 32,000. Sonnet 5 is the coach's default
+model; no free model has been scored.
 
 A false positive counts only a claim that correct code is wrong, which is exactly what
 caps a grade in the coach. It used to count any issue, and on `review-v4`'s split that

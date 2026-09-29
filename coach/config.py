@@ -29,10 +29,11 @@ CATALOG_PATH = DATA_DIR / "catalog.json"
 # The model that tags and reviews solves; COACH_MODEL in .env switches it without
 # touching code. The name picks the API (llm.on_openrouter): `vendor/model` goes
 # through OpenRouter on OPENROUTER_API_KEY, any other name to Anthropic on
-# ANTHROPIC_API_KEY. The default is free, enforces structured outputs on its free
-# endpoint, and answered a review in 5 s where the free DeepSeek took over a minute, but
-# the evals have not scored it: RESULTS.md's numbers are Sonnet 5's.
-MODEL = os.environ.get("COACH_MODEL", "nex-agi/nex-n2.5-pro:free")
+# ANTHROPIC_API_KEY. The default is the model RESULTS.md's numbers were measured on.
+# It used to be a free OpenRouter model, until OpenRouter withdrew its free endpoint
+# (2026-09-30); free models come and go, so .env.example lists some to choose from
+# rather than the code naming one.
+MODEL = os.environ.get("COACH_MODEL", "claude-sonnet-5")
 
 # Kept separate from MODEL so the evals can score a different model than the one
 # the coach runs on, without either default dragging the other along.
