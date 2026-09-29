@@ -110,14 +110,25 @@ def _complete(model: str, request):
 
 
 def _parse_anthropic(model, prompt, output_format, system, max_tokens):
+    """Streamed: the SDK refuses a large max_tokens without it, and a stream's timeout
+    bounds a silence rather than the whole answer, so a long review is not cut off."""
     kwargs = {"system": system} if system is not None else {}
-    response = anthropic_client().messages.parse(
-        model=model,
-        max_tokens=max_tokens,
-        messages=[{"role": "user", "content": prompt}],
-        output_format=output_format,
-        **kwargs,
-    )
+    try:
+        with anthropic_client().messages.stream(
+            model=model,
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+            output_format=output_format,
+            **kwargs,
+        ) as stream:
+            response = stream.get_final_message()
+    except ValidationError as e:
+        # The stream parses the answer before it reports why it stopped, and structured
+        # output is valid JSON unless it was cut off - so JSON that does not parse is a
+        # truncation, not a schema the model broke.
+        if any(error["type"] == "json_invalid" for error in e.errors()):
+            raise LLMUnavailable("response truncated at max_tokens") from e
+        raise
     if response.stop_reason == "refusal":
         raise LLMUnavailable("the model declined this request")
     if response.stop_reason == "max_tokens":

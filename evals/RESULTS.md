@@ -28,11 +28,11 @@ review call on it, and the run's details are still hidden: this split is not spe
 | · bug | 84% (42/50) | 71–92% |
 | · complexity | 100% (27/27) | 88–100% |
 | · edge-case | 71% (5/7) | 36–92% |
-| **false-positive rate** (proven-correct code called wrong) | **3%** (2/58) | 1–12% |
-| · NeetCode | 7% (2/29) | 2–22% |
+| **false-positive rate** (proven-correct code called wrong) | **3%** (2/59) | 1–12% |
+| · NeetCode | 7% (2/30) | 2–21% |
 | · walkccc | 0% (0/29) | 0–12% |
-| complexity remarks on clean controls (scored neither way) | 17% (10/58) | 10–29% |
-| any issue on clean controls (the old false-positive rate) | 19% (11/58) | 11–31% |
+| complexity remarks on clean controls (scored neither way) | 17% (10/59) | 9–28% |
+| any issue on clean controls (the old false-positive rate) | 19% (11/59) | 11–30% |
 
 **The false-positive rate changed meaning, not level.** Until this run it counted any
 issue on a clean control. It now counts only a claim that the code is wrong - a bug, an
@@ -48,10 +48,16 @@ prompts are level: `review-v4` on `bank-v4`'s test was 4% (2/49) by the new defi
 problems, and the intervals overlap (79–93% against 72–89%), so this run does not show
 that the problem statement (`review-v5`) or "any language" (`review-v6`) moved recall.
 
-**3 of the 145 calls have no answer.** Push Dominoes' canonical, and Find All Good
-Strings' canonical and its `leaves-out-s1` mutant, were truncated at `max_tokens` (16,000)
-in two runs out of two, and are left out: 58 clean controls and 84 flaws are scored. In
-the coach the same reviews would fail as `LLMUnavailable`, losing nothing but the review.
+**2 of the 145 calls have no answer.** Three were truncated at `max_tokens` (16,000) in
+two runs out of two: Push Dominoes' canonical, and Find All Good Strings' canonical and
+its `leaves-out-s1` mutant. Reviews now stream with a 32,000-token limit, and Push
+Dominoes' canonical then finished at 29,387 output tokens - nearly all of it thinking,
+about 30 cents, on a 22-line function whose correctness rests on an unexplained
+`q.popleft()` - and was answered clean. The other two were not bought again: Find All
+Good Strings' walkccc solution, the same algorithm in 57 clearly named lines, finished
+at 16,000, while NeetCode's terser 48 lines did not, so what they need looks like less
+thinking (`effort`, unmeasured) rather than more room. 59 clean controls and 84 flaws
+are scored. In the coach such a review fails as `LLMUnavailable`, losing only the review.
 
 Edge-case recall rests on 7 mutants, so its interval spans 36–92%: it says little. The
 draw's constraints leave few boundaries a natural mistake fails on alone, and a mutant
@@ -600,3 +606,27 @@ _Misses and false positives not shown: `--reveal-test` shows them, and spends th
 
 _Misses and false positives not shown: `--reveal-test` shows them, and spends this split for prompt work._
 
+
+## 2026-09-30 · model `claude-sonnet-5` · re-scored from the cache
+
+Push Dominoes' canonical, cut off at 16,000 tokens twice on 2026-09-29, was bought once
+more with reviews streaming at a 32,000-token limit (29,387 output tokens) and answered
+clean. Nothing else was re-bought: this table scores the 143 cached answers, and Find All
+Good Strings' canonical and `leaves-out-s1` stay unanswered.
+
+### Feedback quality — prompt `review-v6` (with problem statements) · split `test` · details hidden
+
+| Metric | Value | n |
+|---|---|---|
+| recall · bug | 84% | 50 |
+| recall · complexity | 100% | 27 |
+| recall · edge-case | 71% | 7 |
+| **recall · overall** | **88%** | 84 |
+| **false-positive rate** (proven-correct code called wrong) | **3%** | 59 |
+| false-positive rate · neetcode | 7% | 30 |
+| false-positive rate · walkccc | 0% | 29 |
+| complexity remarks on clean controls (not scored: clean is not proven optimal) | 17% | 59 |
+| any issue on clean controls (the false-positive rate until 2026-09-29) | 19% | 59 |
+| verdict `optimal` on clean controls | 81% | 59 |
+
+_Misses and false positives not shown: `--reveal-test` shows them, and spends this split for prompt work._

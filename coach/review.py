@@ -8,6 +8,10 @@ from pydantic import BaseModel
 from coach import config, llm
 
 PROMPT_VERSION = "review-v6"
+# Thinking counts toward the limit, and a review tracing code whose correctness rests on
+# an unexplained trick can think past 16,000 tokens: three of bank-v5's 145 test reviews
+# ran out there in two runs out of two. A cut-off answer is paid for and thrown away.
+MAX_TOKENS = 32_000
 
 
 class Issue(BaseModel):
@@ -92,7 +96,7 @@ def review_solution(
         statement=statement,
         code=code,
     )
-    return llm.parse(prompt, Review, model=model)
+    return llm.parse(prompt, Review, model=model, max_tokens=MAX_TOKENS)
 
 
 def save(

@@ -9,6 +9,7 @@ The autouse conftest fixture strips both API keys, so each test sets a fake one 
 past the have_api_key() guard and reach the call itself.
 """
 
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import anthropic
@@ -38,14 +39,22 @@ class FakeClient:
     def parse(self, **kwargs):
         raise self.exc
 
+    def stream(self, **kwargs):
+        raise self.exc
+
 
 class AnthropicAnswering:
+    """An Anthropic client whose stream ends with `out`, remembering what it was asked."""
+
     def __init__(self, out):
         self.messages = self
         self.out = out
+        self.asked = {}
 
-    def parse(self, **kwargs):
-        return SimpleNamespace(stop_reason="end_turn", parsed_output=self.out)
+    def stream(self, **kwargs):
+        self.asked = kwargs
+        final = SimpleNamespace(stop_reason="end_turn", parsed_output=self.out)
+        return nullcontext(SimpleNamespace(get_final_message=lambda: final))
 
 
 def with_client(monkeypatch, model, client):
@@ -98,6 +107,14 @@ def completion(content, finish_reason="stop", **choice):
 def validation_error():
     try:
         Out(x="not-an-int")
+    except pydantic.ValidationError as e:
+        return e
+    raise AssertionError("expected a ValidationError")
+
+
+def cut_off_json_error():
+    try:
+        Out.model_validate_json('{"x": 1')
     except pydantic.ValidationError as e:
         return e
     raise AssertionError("expected a ValidationError")
@@ -165,6 +182,25 @@ def test_a_malformed_model_answer_degrades(model, monkeypatch):
 
     with pytest.raises(llm.LLMUnavailable, match="did not fit the expected schema"):
         llm.parse("hi", Out, model=model)
+
+
+def test_an_answer_cut_off_mid_json_reads_as_truncated(monkeypatch):
+    """The stream parses the answer before it reports max_tokens, so a cut-off answer
+    arrives as invalid JSON. Called a schema mismatch, it would hide the one fact worth
+    knowing: the limit, not the model, ended it."""
+    with_client(monkeypatch, ANTHROPIC_MODEL, FakeClient(cut_off_json_error()))
+
+    with pytest.raises(llm.LLMUnavailable, match="truncated at max_tokens"):
+        llm.parse("hi", Out, model=ANTHROPIC_MODEL)
+
+
+def test_the_anthropic_call_is_streamed_with_the_callers_limit(monkeypatch):
+    """A review asks for 32,000 tokens, which the SDK refuses to send unstreamed."""
+    client = AnthropicAnswering(Out(x=1))
+    with_client(monkeypatch, ANTHROPIC_MODEL, client)
+
+    assert llm.parse("hi", Out, model=ANTHROPIC_MODEL, max_tokens=32_000) == Out(x=1)
+    assert client.asked["max_tokens"] == 32_000
 
 
 def test_the_free_daily_limit_says_so_in_one_sentence(monkeypatch):
