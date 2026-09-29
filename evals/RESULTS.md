@@ -10,7 +10,57 @@ Ground truth: feedback labels come from executing each mutant against a test har
 
 ## Feedback quality
 
-### Held out: 82% recall, 20% false positives
+### Held out, `review-v6`: 88% recall, 3% false positives
+
+`bank-v5` retired `bank-v4`'s spent test split into `dev` and drew a new one: 32 problems
+in both pinned repos, free, not already in the bank, and shaped for the harness, after
+two statement rules fixed first (no problem answered by mutating its input, none
+accepting any of several answers); then within each difficulty, sorted by number,
+`random.Random(20260929)` shuffled them and the first 4 Easy, 18 Medium and 10 Hard were
+taken. Every test, generated and scale input passes the problem's `valid`, its LeetCode
+Constraints section as code. Every clean control was written outside this repo (31
+NeetCode canonicals, 29 walkccc solutions). The bank was committed (`908fada`) before any
+review call on it, and the run's details are still hidden: this split is not spent.
+
+| `review-v6` · Sonnet 5 · `bank-v5` test | Result | 95% CI (Wilson) |
+|---|---|---|
+| **recall on planted flaws** | **88%** (74/84) | 79–93% |
+| · bug | 84% (42/50) | 71–92% |
+| · complexity | 100% (27/27) | 88–100% |
+| · edge-case | 71% (5/7) | 36–92% |
+| **false-positive rate** (proven-correct code called wrong) | **3%** (2/58) | 1–12% |
+| · NeetCode | 7% (2/29) | 2–22% |
+| · walkccc | 0% (0/29) | 0–12% |
+| complexity remarks on clean controls (scored neither way) | 17% (10/58) | 10–29% |
+| any issue on clean controls (the old false-positive rate) | 19% (11/58) | 11–31% |
+
+**The false-positive rate changed meaning, not level.** Until this run it counted any
+issue on a clean control. It now counts only a claim that the code is wrong - a bug, an
+edge case or a needs-work verdict, read through `assessment.correctness_finding`, which is
+also exactly what caps a grade in the coach - because the oracle proves a control correct
+and no slower than the canonical, but not optimal, so it cannot say a complexity remark is
+false (on `bank-v4`'s test, 8 of the 10 "false positives" were such remarks, most of them
+right). The definition was committed (`bdf313b`) before this run. Read both ways, the two
+prompts are level: `review-v4` on `bank-v4`'s test was 4% (2/49) by the new definition and
+20% by the old, `review-v6` here 3% and 19%. The drop from "20%" to "3%" is the definition.
+
+**Recall is not comparable either.** 88% against `review-v4`'s 82% is on different
+problems, and the intervals overlap (79–93% against 72–89%), so this run does not show
+that the problem statement (`review-v5`) or "any language" (`review-v6`) moved recall.
+
+**3 of the 145 calls have no answer.** Push Dominoes' canonical, and Find All Good
+Strings' canonical and its `leaves-out-s1` mutant, were truncated at `max_tokens` (16,000)
+in two runs out of two, and are left out: 58 clean controls and 84 flaws are scored. In
+the coach the same reviews would fail as `LLMUnavailable`, losing nothing but the review.
+
+Edge-case recall rests on 7 mutants, so its interval spans 36–92%: it says little. The
+draw's constraints leave few boundaries a natural mistake fails on alone, and a mutant
+that fails an ordinary input too is labelled a bug, so the split has fewer than hoped.
+
+### Held out, `review-v4` (`bank-v4`'s test split, since retired into dev): 82% recall, 20% false positives
+
+By the definition since 2026-09-29 (above), that 20% is 4% (2/49): only Group Anagrams'
+walkccc and Pacific Atlantic's canonical were called wrong.
 
 `bank-v4` holds 60 problems. The 13 that every row further down was measured on, and that
 `review-v4` was written against, sit in its `dev` split with 22 new ones. The other 25 new
@@ -529,4 +579,24 @@ _Misses and false positives not shown: `--reveal-test` shows them, and spends th
 - pacific-atlantic-water-flow/canonical — edge-case: The dfs is implemented with plain Python recursion and no sys.setrecursionlimit adjustment. On a grid near the maximum constraint (up to 200x200 = 40,000 cells) with a monotonically increasing height arrangement (e.g., a snake-like path of strictly increasing values), the recursion can chain through most of the cells in a single call stack, exceeding Python's default recursion limit (1000) and raising a RecursionError even though the algorithm itself is logically correct.
 - longest-common-subsequence/canonical — complexity: Uses a full (m+1) x (n+1) 2D array for space, i.e. O(m*n) space, when the recurrence only ever needs the current and next row, so it could be reduced to O(min(m,n)) with a rolling array.
 - longest-common-subsequence/walkccc — complexity: The full 2D dp table of size (m+1)x(n+1) is kept, but the LCS length recurrence only ever needs the previous row (or column) to compute the next one. This means space is O(m*n) when it could be reduced to O(min(m,n)) with a rolling 1D array, which matters when m and n approach the constraint limit of 1000 each (dp table of ~1,000,000 ints).
+
+
+## 2026-09-29 21:26 UTC · model `claude-sonnet-5`
+
+### Feedback quality — prompt `review-v6` (with problem statements) · split `test` · details hidden
+
+| Metric | Value | n |
+|---|---|---|
+| recall · bug | 84% | 50 |
+| recall · complexity | 100% | 27 |
+| recall · edge-case | 71% | 7 |
+| **recall · overall** | **88%** | 84 |
+| **false-positive rate** (proven-correct code called wrong) | **3%** | 58 |
+| false-positive rate · neetcode | 7% | 29 |
+| false-positive rate · walkccc | 0% | 29 |
+| complexity remarks on clean controls (not scored: clean is not proven optimal) | 17% | 58 |
+| any issue on clean controls (the false-positive rate until 2026-09-29) | 19% | 58 |
+| verdict `optimal` on clean controls | 81% | 58 |
+
+_Misses and false positives not shown: `--reveal-test` shows them, and spends this split for prompt work._
 

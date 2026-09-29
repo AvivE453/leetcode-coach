@@ -357,22 +357,28 @@ The point of the eval harness is that "the feedback looked good" is not a claim 
 defend or iterate against. Full numbers and methodology:
 **[evals/RESULTS.md](../evals/RESULTS.md)**.
 
-### Review feedback — 25 problems it was never tuned on
+### Review feedback — 32 problems it was never tuned on
 
 | Metric | Result |
 |---|---|
-| Recall on planted flaws | **82%** (59/72; 95% CI 72–89%) |
-| False-positive rate on clean controls | **20%** (10/49; 95% CI 12–34%) |
-| By category | bug 75% · complexity 90% · edge-case 100% |
-| The same prompt on the 13 problems it was written against | 97% recall · 0% false positives (0/35) |
+| Recall on planted flaws | **88%** (74/84; 95% CI 79–93%) |
+| False-positive rate: proven-correct code called wrong | **3%** (2/58; 95% CI 1–12%) |
+| By category | bug 84% · complexity 100% · edge-case 71% (of 7) |
+| Complexity remarks on correct code, scored neither way | 17% (10/58) |
 
-Measured on `review-v4` with `claude-sonnet-5`, on the held-out `test` split of the fixture
-bank: 3 Easy, 14 Medium and 8 Hard problems, with every correct solution written outside
-this repo. The model was the coach's default until 2026-09-19 (the free default since then
-is unscored); the prompt is one version behind the one the coach ships.
-`review-v5` adds the problem statement (above) and has no number of its own, because
-reading this split's misses is what spent it — scoring v5 honestly needs new test problems,
-so until they exist these are v4's numbers and are quoted as such.
+Measured on `review-v6`, the prompt the coach ships, with `claude-sonnet-5`, on `bank-v5`'s
+held-out `test` split: 4 Easy, 18 Medium and 10 Hard problems drawn by a fixed seed after
+the selection rules were fixed, every correct solution written outside this repo, and
+the bank committed before any review call on it. Three of 145 calls ran out of tokens
+twice and are left out. The model was the coach's default until 2026-09-19 (the free
+default since then is unscored).
+
+A false positive counts only a claim that correct code is wrong, which is exactly what
+caps a grade in the coach. It used to count any issue, and on `review-v4`'s split that
+read 20%; 8 of those 10 were remarks that code could use less space, which the oracle
+cannot call false, since it proves a control correct and no slower than the canonical,
+not optimal. By either definition the two prompts are level (4% and 20% for v4, 3% and
+19% for v6): the headline moved because the question did, not the prompt.
 
 The false-positive rate matters as much as recall: a reviewer that reports five issues
 on every solution scores perfect recall and is useless, because it would send you
@@ -456,6 +462,14 @@ only relatively, and recursion deeper than CPython's default limit, which the or
 raises. So "clean" has to mean optimal before that rate is the reviewer's alone. The
 misses are the reviewer's: eight bugs that fail one of LeetCode's own examples, each a
 small edit to a famous published solution, drew no comment at all.
+
+**Then the rate was narrowed to what the oracle can prove.** Making "clean" mean optimal
+would have meant rejecting most published canonicals, which are never edited. Instead a
+false positive became a claim that correct code is wrong, decided and committed before
+the next split was scored, with complexity remarks reported beside it and scored neither
+way. That split - 32 problems drawn by a fixed seed, every input checked against the
+problem's own constraints - gave `review-v6` 88% recall and 3% false positives, and by
+the new definition v4's 20% had been 4%.
 
 ### Pattern tagging and retrieval
 

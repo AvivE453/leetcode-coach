@@ -86,12 +86,13 @@ Without it that test skips and the rest of the suite still passes.
 ## How it works
 
 Everything the LLM does here is **measured**, not assumed - on Sonnet 5; the free default
-model is not scored yet. On 25 problems the review prompt
-was never tuned on, 8 of them Hard, review feedback catches 82% of planted flaws (59/72)
-and reports an issue on 20% of correct solutions (10/49). Ground truth comes from
-*executing* the code rather than from opinion, and every correct solution in that set was
-written outside this repo. On the problems the prompt was tuned on it scored 97% and 0%:
-that gap is what a held-out set is for.
+model is not scored yet. On 32 problems the review prompt
+was never tuned on, 10 of them Hard and drawn by a fixed seed, review feedback catches 88%
+of planted flaws (74/84) and calls correct code wrong on 3% of correct solutions (2/58).
+Ground truth comes from *executing* the code rather than from opinion, and every correct
+solution in that set was written outside this repo. An earlier prompt scored 97% and 0%
+on the problems it was tuned on and 82% on held-out ones: that gap is what a held-out set
+is for.
 
 The architecture, the design decisions behind it, and the full eval methodology are in
 **[docs/DESIGN.md](docs/DESIGN.md)**.
