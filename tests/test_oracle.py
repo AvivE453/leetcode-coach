@@ -89,6 +89,27 @@ def test_verify_canonical_refuses_a_canonical_only_the_reference_can_catch():
         oracle.verify_canonical(make_problem(CANONICAL=ONLY_SHORT_INPUTS))
 
 
+@pytest.mark.parametrize(("overrides", "where"), [
+    ({"valid": lambda nums: min(nums) >= 0}, "a test"),
+    ({"valid": lambda nums: len(nums) <= 10**4}, "SCALE"),
+    ({"valid": lambda nums: min(nums) >= -50, "generate": lambda rng: ([-100],)}, "a generated input"),
+], ids=["test", "scale", "generated"])
+def test_verify_canonical_refuses_an_input_outside_the_constraints(overrides, where):
+    """Reverse Bits kept an older version's inputs through every other check here."""
+    with pytest.raises(AssertionError, match=f"fake: {where} breaks the stated constraints"):
+        oracle.verify_canonical(make_problem(**overrides))
+
+
+def test_verify_canonical_accepts_inputs_inside_the_constraints():
+    oracle.verify_canonical(make_problem(valid=lambda nums: 1 <= len(nums) <= 200_000))
+
+
+def test_a_test_problem_without_valid_is_refused():
+    """The numbers RESULTS.md quotes come from the test split, so its inputs cannot rest on a rule alone."""
+    with pytest.raises(AssertionError, match="a test problem needs `valid`"):
+        oracle.verify_canonical(make_problem(SPLIT="test"))
+
+
 def test_verify_clean_rejects_a_variant_the_oracle_cannot_prove_clean():
     variant = {"id": "first-only", "code": "class Solution:\n    def run(self, nums):\n        return nums[0]\n"}
     with pytest.raises(AssertionError, match=r"fake/first-only: clean variant is not clean \(bug"):
@@ -231,6 +252,27 @@ def test_a_canonical_too_fast_to_measure_is_refused_too(monkeypatch):
 def test_a_solution_too_fast_to_time_once_is_timed_over_repeated_calls():
     """A microsecond call is mostly clock noise; the ratio has to measure the code."""
     assert oracle.time_at_scale(CANONICAL, "run", ([1, 2, 3],)) > 0
+
+
+# Slow on its first call only, as a garbage collection or a busy machine slows one call.
+PAUSES_ONCE = '''\
+import time
+
+
+class Solution:
+    paused = False
+
+    def run(self, nums):
+        if not Solution.paused:
+            Solution.paused = True
+            time.sleep(0.06)
+        return max(nums)
+'''
+
+
+def test_one_paused_call_does_not_decide_the_timing():
+    """A pause that fills MIN_TIMED_SECONDS alone once timed a clean control at 28x the canonical."""
+    assert oracle.time_at_scale(PAUSES_ONCE, "run", ([1, 2, 3],)) < 0.01
 
 
 def test_an_edge_label_is_refused_when_the_code_also_fails_ordinary_inputs():

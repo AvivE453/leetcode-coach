@@ -20,6 +20,9 @@ The judge's own tools sit beside them. `reference` is a brute force written to b
 obviously right rather than fast; `generate(rng)` returns random inputs the problem's
 constraints allow; `normalize`, where present, maps every answer LeetCode accepts to one
 form; SPACE_SCALE is the largest input the constraints allow, for the memory check.
+`valid` is the problem's LeetCode Constraints section as code, written from the fetched
+statement: `oracle.verify_inputs` holds every test, generated and SCALE input to it, and
+refuses a test problem that has none.
 SPLIT puts the problem in "dev", where prompts are tuned, or "test", which is only ever
 scored (see evals/bank/controls.py).
 

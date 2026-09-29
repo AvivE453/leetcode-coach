@@ -14,11 +14,12 @@ TESTS = [
     (([[1, 2], [1, 2], [1, 2]],), 2, "general"),
     (([[1, 2], [2, 3]],), 0, "general"),
     (([[1, 100], [11, 22], [1, 11], [2, 12]],), 2, "general"),
+    (([[-3, -1], [-2, 0], [0, 2]],), 1, "general"),
     (([[0, 5]],), 0, "edge"),
 ]
 
 SCALE = ([[i, i + 2] for i in range(2000)],)
-SPACE_SCALE = ([[i, i + 2] for i in range(100_000)],)
+SPACE_SCALE = ([[i, i + 2] for i in range(-5 * 10**4, 5 * 10**4 - 1)],)
 
 
 def reference(intervals):
@@ -31,11 +32,18 @@ def reference(intervals):
     return n - most
 
 
+def valid(intervals):
+    # 1 <= intervals.length <= 10^5, intervals[i].length == 2, -5 * 10^4 <= start < end <= 5 * 10^4
+    return 1 <= len(intervals) <= 10**5 and all(
+        len(interval) == 2 and -5 * 10**4 <= interval[0] < interval[1] <= 5 * 10**4 for interval in intervals
+    )
+
+
 def generate(rng):
     # constraints: 1 <= intervals.length <= 10^5, -5 * 10^4 <= start < end <= 5 * 10^4
     intervals = []
     for _ in range(rng.randint(1, 8)):
-        start = rng.randint(0, 10)
+        start = rng.randint(-5, 5)
         intervals.append([start, start + rng.randint(1, 4)])
     return (intervals,)
 

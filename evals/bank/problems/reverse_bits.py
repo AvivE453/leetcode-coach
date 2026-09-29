@@ -11,23 +11,28 @@ CANONICAL = external_code("neetcode", NUMBER)
 
 TESTS = [
     ((43261596,), 964176192, "general"),
-    ((4294967293,), 3221225471, "general"),
+    ((2147483644,), 1073741822, "general"),
     ((0,), 0, "edge"),
-    ((1,), 2147483648, "edge"),
-    ((2**31,), 1, "edge"),
+    ((2,), 1073741824, "edge"),
+    ((2**31 - 2,), 2147483646, "edge"),
 ]
 
-SCALE = (4294967293,)
-SPACE_SCALE = (4294967293,)
+SCALE = (2**31 - 2,)
+SPACE_SCALE = (2**31 - 2,)
 
 
 def reference(n):
     return int(format(n, "032b")[::-1], 2)
 
 
+def valid(n):
+    # 0 <= n <= 2^31 - 2, n is even
+    return 0 <= n <= 2**31 - 2 and n % 2 == 0
+
+
 def generate(rng):
-    # constraints: n is a 32-bit unsigned integer
-    return (rng.choice([rng.randint(0, 2**32 - 1), 2 ** rng.randint(0, 31), rng.randint(0, 16)]),)
+    # constraints: 0 <= n <= 2^31 - 2, n is even
+    return (rng.choice([2 * rng.randint(0, 2**30 - 1), 2 ** rng.randint(1, 30), 2 * rng.randint(0, 8)]),)
 
 
 MUTANTS = [

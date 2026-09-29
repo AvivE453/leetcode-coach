@@ -21,6 +21,7 @@ which input the tests are missing, and a person adds that test and decides its k
 """
 
 import copy
+import math
 import random
 import signal
 import sys
@@ -32,7 +33,8 @@ TEST_TIMEOUT = 5.0
 SCALE_TIMEOUT = 10.0
 COMPLEXITY_RATIO = 5.0
 # A solution that finishes in microseconds is timed over repeated calls until this much
-# time has accumulated, so its ratio measures the code rather than the clock's noise.
+# time has accumulated, and the fastest is kept, so its ratio measures the code rather
+# than the clock's noise.
 MIN_TIMED_SECONDS = 0.05
 DIFFERENTIAL_CASES = 1000
 # The memory check catches one thing: a control that needs megabytes at SPACE_SCALE where the
@@ -122,16 +124,23 @@ def run_tests(code: str, tests, method: str, normalize=None) -> list[TestOutcome
 
 
 def time_at_scale(code: str, method: str, scale_args) -> float | None:
-    """Seconds one call on the scale input takes; None if a call exceeds SCALE_TIMEOUT.
+    """Seconds the fastest call on the scale input takes; None if a call exceeds SCALE_TIMEOUT.
 
     Each call gets its own copy of the input, made before the clock starts - copying a
     large fixture is constant overhead that would otherwise compress the ratio between a
     fast and a slow solution. Calls repeat until MIN_TIMED_SECONDS have been timed.
+
+    The fastest call, not the mean: a pause (a garbage collection, another process) only
+    ever adds time, and one long enough fills MIN_TIMED_SECONDS on its own and ends the
+    loop, so a mean over the few calls before it is mostly the pause. That once timed a
+    clean control at 28x the canonical; thirty re-timings put it at 0.9-1.3x. And never
+    one call alone, or a pause on the first would be the fastest there is.
     """
     fresh = entry_point_factory(code, method)
     timed = 0.0
     calls = 0
-    while timed < MIN_TIMED_SECONDS:
+    fastest = math.inf
+    while timed < MIN_TIMED_SECONDS or calls < 2:
         fn = fresh()
         args = copy.deepcopy(scale_args)
         started = time.perf_counter()
@@ -139,9 +148,11 @@ def time_at_scale(code: str, method: str, scale_args) -> float | None:
             with_timeout(lambda fn=fn, args=args: fn(*args), SCALE_TIMEOUT)
         except Timeout:
             return None
-        timed += time.perf_counter() - started
+        elapsed = time.perf_counter() - started
+        timed += elapsed
         calls += 1
-    return timed / calls
+        fastest = min(fastest, elapsed)
+    return fastest
 
 
 def peak_memory(code: str, method: str, args) -> int:
@@ -156,19 +167,22 @@ def peak_memory(code: str, method: str, args) -> int:
         tracemalloc.stop()
 
 
+def generated_inputs(problem) -> list[tuple]:
+    """Seeded by the problem number, so every run judges against the same inputs."""
+    rng = random.Random(problem.NUMBER)
+    count = getattr(problem, "DIFFERENTIAL_CASES", DIFFERENTIAL_CASES)
+    return [problem.generate(rng) for _ in range(count)]
+
+
 def differential_cases(problem) -> list[tuple]:
     """Generated inputs with the reference's answers, computed once per problem.
 
-    Seeded by the problem number, so every run judges against the same inputs. Kept on the
-    problem itself because a brute force is slow and one problem is judged many times: its
-    canonical, each clean control, each would-be discard.
+    Kept on the problem itself because a brute force is slow and one problem is judged many
+    times: its canonical, each clean control, each would-be discard.
     """
     cases = getattr(problem, "_differential_cases", None)
     if cases is None:
-        rng = random.Random(problem.NUMBER)
-        count = getattr(problem, "DIFFERENTIAL_CASES", DIFFERENTIAL_CASES)
-        inputs = [problem.generate(rng) for _ in range(count)]
-        cases = [(args, problem.reference(*copy.deepcopy(args))) for args in inputs]
+        cases = [(args, problem.reference(*copy.deepcopy(args))) for args in generated_inputs(problem)]
         problem._differential_cases = cases
     return cases
 
@@ -254,8 +268,33 @@ def classify(problem, code: str) -> Verdict:
     return Verdict(None, "indistinguishable from the canonical solution")
 
 
+def verify_inputs(problem) -> None:
+    """Every input the oracle judges with lies inside the problem's stated constraints.
+
+    A label earned on an input the problem excludes is no label: code failing only there is
+    correct, and a reviewer saying nothing about it is right. That used to be a rule and not
+    a check, so Reverse Bits kept the tests, generator and SCALE of an older version of the
+    problem through every other check here. `valid` is its Constraints section as code, and a
+    test problem must have one: the split every number is quoted from is the one that cannot
+    rest on a rule alone. Generated inputs are checked before the reference sees them, so an
+    input it cannot handle is reported as what it is.
+    """
+    valid = getattr(problem, "valid", None)
+    if valid is None:
+        if getattr(problem, "SPLIT", None) == "test":
+            raise AssertionError(f"{problem.SLUG}: a test problem needs `valid`, its Constraints section as code")
+        return
+    inputs = [("a test", args) for args, _, _ in problem.TESTS]
+    inputs += [("SCALE", problem.SCALE), ("SPACE_SCALE", problem.SPACE_SCALE)]
+    inputs += [("a generated input", args) for args in generated_inputs(problem)]
+    for where, args in inputs:
+        if not valid(*args):
+            raise AssertionError(f"{problem.SLUG}: {where} breaks the stated constraints: {args!r:.200}")
+
+
 def verify_canonical(problem) -> None:
     """A canonical solution or a test that disagrees with the reference invalidates every label."""
+    verify_inputs(problem)
     normalize = getattr(problem, "normalize", None)
     for args, expected, _ in problem.TESTS:
         want = problem.reference(*copy.deepcopy(args))
