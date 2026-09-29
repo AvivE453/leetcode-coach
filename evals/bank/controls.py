@@ -51,7 +51,7 @@ def write_store(path: Path, store: dict) -> None:
 
 
 def candidate_id(entry: dict) -> str:
-    return f"aviv-{entry['solution_id']}" if entry["source"] == "aviv" else entry["source"]
+    return f"solution-{entry['solution_id']}" if entry["source"] == "aviv" else entry["source"]
 
 
 def external_code(source: str, number: int) -> str:

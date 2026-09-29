@@ -24,6 +24,8 @@ FIXTURE = {
 QUIET = {"issues": [], "verdict": "optimal"}
 FLAGGED = {"issues": [{"category": "edge-case", "description": "Returns None with no pair."}],
            "verdict": "acceptable"}
+REMARKED = {"issues": [{"category": "complexity", "description": "One rolling row would do."}],
+            "verdict": "acceptable"}
 
 
 def control(fixture_id, split="dev", kind="representative", origin="authored"):
@@ -66,9 +68,9 @@ def test_a_false_positive_on_private_code_names_its_categories_but_not_the_claim
     """RESULTS.md is public and a claim can quote the code it is about."""
     issues = [{"category": "edge-case", "description": "`nums[i] + nums[j]` is never checked."}]
 
-    line = run_evals.false_positive_line(control("aviv-3", origin="aviv"), issues)
+    line = run_evals.false_positive_line(control("solution-3", origin="aviv"), issues)
 
-    assert "two-sum/aviv-3" in line and "edge-case" in line
+    assert "two-sum/solution-3" in line and "edge-case" in line
     assert "nums[i]" not in line
 
 
@@ -85,6 +87,23 @@ def test_regression_controls_are_scored_apart_from_the_headline_rate():
     assert "two-sum/relies-on-guaranteed-answer" in dev["regression_false_positives"][0]
 
 
+def test_a_complexity_remark_on_clean_code_is_counted_apart_from_the_false_positives():
+    """The oracle proves a control correct, not optimal, so a remark on its complexity can be right."""
+    dev = run_evals.score_feedback([control("canonical")], [REMARKED])["dev"]
+
+    assert dev["false_positive_rate"] == 0.0
+    assert (dev["complexity_remark_rate"], dev["any_issue_rate"]) == (1.0, 1.0)
+    assert "One rolling row would do." in dev["complexity_remarks"][0]
+
+
+def test_a_needs_work_verdict_naming_no_issue_is_a_false_positive():
+    """It caps the coach's grade like a reported edge case, so the eval counts it the same way."""
+    dev = run_evals.score_feedback([control("canonical")], [{"issues": [], "verdict": "needs-work"}])["dev"]
+
+    assert (dev["false_positive_rate"], dev["any_issue_rate"]) == (1.0, 0.0)
+    assert "needs-work" in dev["false_positives"][0]
+
+
 def test_each_split_is_scored_from_its_own_fixtures():
     fixtures = [control("canonical", split="dev"), control("neetcode", split="test", origin="neetcode")]
 
@@ -96,7 +115,7 @@ def test_each_split_is_scored_from_its_own_fixtures():
 
 def test_false_positives_are_broken_down_by_who_wrote_the_code():
     fixtures = [control("neetcode", origin="neetcode"), control("walkccc", origin="walkccc"),
-                control("aviv-3", origin="aviv")]
+                control("solution-3", origin="aviv")]
 
     by_origin = run_evals.score_feedback(fixtures, [QUIET, QUIET, FLAGGED])["dev"]["false_positives_by_origin"]
 
@@ -106,8 +125,9 @@ def test_false_positives_are_broken_down_by_who_wrote_the_code():
 
 
 def test_a_hidden_test_split_reports_its_numbers_but_not_what_it_got_wrong():
-    fixtures = [control("canonical", split="dev"), control("neetcode", split="test", origin="neetcode")]
-    scores = run_evals.score_feedback(fixtures, [FLAGGED, FLAGGED])
+    fixtures = [control("canonical", split="dev"), control("neetcode", split="test", origin="neetcode"),
+                control("walkccc", split="test", origin="walkccc")]
+    scores = run_evals.score_feedback(fixtures, [FLAGGED, FLAGGED, REMARKED])
     scores["test"] = run_evals.hide_details(scores["test"])
 
     report = "\n".join(run_evals.feedback_lines(
@@ -118,3 +138,4 @@ def test_a_hidden_test_split_reports_its_numbers_but_not_what_it_got_wrong():
     assert "details hidden" in test_part
     assert "two-sum/neetcode" not in test_part
     assert "Returns None with no pair." not in test_part
+    assert "One rolling row would do." not in test_part

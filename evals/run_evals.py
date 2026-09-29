@@ -26,7 +26,7 @@ from pathlib import Path
 import httpx
 import numpy as np
 
-from coach import catalog, config, embed, enrich, llm, review
+from coach import assessment, catalog, config, embed, enrich, llm, review
 from evals import corpus, pairs
 from evals.bank import controls, oracle
 from evals.bank.problems import load_all
@@ -36,7 +36,7 @@ CACHE_DIR = EVALS_DIR / "cache"
 RESULTS_PATH = EVALS_DIR / "RESULTS.md"
 WORKERS = 8
 TOP_K = 5
-DETAILS = ("misses", "false_positives", "regression_false_positives")
+DETAILS = ("misses", "false_positives", "complexity_remarks", "regression_false_positives")
 
 # Rough observed cost of one eval call, for --dry-run. Dominated by output
 # tokens, since thinking is billed as output.
@@ -252,24 +252,51 @@ def false_positive_line(fixture, issues) -> str:
         f"{i['category']}: {i['description']}" for i in issues)
 
 
+def wrong_claims(result) -> list[dict]:
+    """What a review says is wrong with the code: its bug and edge-case issues, or a bare needs-work verdict."""
+    named = [issue for issue in result["issues"] if issue["category"] != "complexity"]
+    return named or [{"category": "needs-work", "description": "a needs-work verdict naming no issue"}]
+
+
 def score_controls(scored) -> dict:
-    """False positives on one group of clean controls: any issue at all on code proven correct.
+    """What the reviewer claimed about one group of clean controls, code the oracle proved correct.
+
+    A false positive is a claim that the code is wrong - a bug, an edge case, or a needs-work
+    verdict - read through assessment.correctness_finding, the rule the coach grades a solve
+    by, so the eval and the coach cannot disagree on what "wrong" means. A complexity remark
+    is counted apart and scored neither way: the oracle proves a control correct and no
+    slower than the canonical, not optimal, and on bank-v4's test split most such remarks
+    were right. Any issue at all - the false-positive rate until 2026-09-29 - is kept so the
+    runs before that stay comparable.
 
     Broken down by who wrote the code, because a reviewer that goes easy on famous
     solutions it has seen before, and hard on code it has not, shows up only there.
     """
-    lines = [false_positive_line(fixture, result["issues"]) for fixture, result in scored if result["issues"]]
+    wrong_lines, remark_lines = [], []
     by_origin: dict[str, dict[str, int]] = {}
     for fixture, result in scored:
+        wrong = assessment.correctness_finding(result["verdict"], result["issues"]) is not None
+        remarks = [issue for issue in result["issues"] if issue["category"] == "complexity"]
+        if wrong:
+            wrong_lines.append(false_positive_line(fixture, wrong_claims(result)))
+        if remarks:
+            remark_lines.append(false_positive_line(fixture, remarks))
         counts = by_origin.setdefault(fixture["origin"], {"controls": 0, "false_positives": 0})
         counts["controls"] += 1
-        counts["false_positives"] += bool(result["issues"])
+        counts["false_positives"] += wrong
     n = len(scored)
+
+    def share(count: int) -> float:
+        return count / n if n else 0.0
+
     return {
         "n": n,
-        "rate": len(lines) / n if n else 0.0,
-        "optimal_rate": sum(result["verdict"] == "optimal" for _, result in scored) / n if n else 0.0,
-        "lines": lines,
+        "rate": share(len(wrong_lines)),
+        "remark_rate": share(len(remark_lines)),
+        "any_issue_rate": share(sum(bool(result["issues"]) for _, result in scored)),
+        "optimal_rate": share(sum(result["verdict"] == "optimal" for _, result in scored)),
+        "lines": wrong_lines,
+        "remark_lines": remark_lines,
         "by_origin": dict(sorted(by_origin.items())),
     }
 
@@ -305,10 +332,13 @@ def score_split(fixtures, results) -> dict:
         "recall_overall": sum(all_flags) / len(all_flags) if all_flags else 0.0,
         "counts": {c: len(v) for c, v in sorted(per_category.items())},
         "false_positive_rate": representative["rate"],
+        "complexity_remark_rate": representative["remark_rate"],
+        "any_issue_rate": representative["any_issue_rate"],
         "clean_controls": representative["n"],
         "optimal_verdict_rate": representative["optimal_rate"],
         "false_positives_by_origin": representative["by_origin"],
         "false_positives": representative["lines"],
+        "complexity_remarks": representative["remark_lines"],
         "regression_false_positive_rate": regression["rate"],
         "regression_controls": regression["n"],
         "regression_false_positives": regression["lines"],
@@ -520,11 +550,15 @@ def feedback_lines(feedback: dict) -> list[str]:
             lines.append(f"| recall · {category} | {value:.0%} | {f['counts'][category]} |")
         lines.append(f"| **recall · overall** | **{f['recall_overall']:.0%}** |"
                      f" {sum(f['counts'].values())} |")
-        lines.append(f"| **false-positive rate** (clean controls) |"
+        lines.append(f"| **false-positive rate** (proven-correct code called wrong) |"
                      f" **{f['false_positive_rate']:.0%}** | {f['clean_controls']} |")
         for origin, counts in f["false_positives_by_origin"].items():
             lines.append(f"| false-positive rate · {origin} |"
                          f" {counts['false_positives'] / counts['controls']:.0%} | {counts['controls']} |")
+        lines.append(f"| complexity remarks on clean controls (not scored: clean is not proven optimal) |"
+                     f" {f['complexity_remark_rate']:.0%} | {f['clean_controls']} |")
+        lines.append(f"| any issue on clean controls (the false-positive rate until 2026-09-29) |"
+                     f" {f['any_issue_rate']:.0%} | {f['clean_controls']} |")
         lines.append(f"| verdict `optimal` on clean controls | {f['optimal_verdict_rate']:.0%} |"
                      f" {f['clean_controls']} |")
         if f["regression_controls"]:
@@ -542,8 +576,12 @@ def feedback_lines(feedback: dict) -> list[str]:
             lines.extend(f"- {miss}" for miss in f["misses"])
             lines.append("")
         if f["false_positives"]:
-            lines.append("**False positives** (on code the oracle proved correct)\n")
+            lines.append("**False positives** (code the oracle proved correct, called wrong)\n")
             lines.extend(f"- {fp}" for fp in f["false_positives"])
+            lines.append("")
+        if f["complexity_remarks"]:
+            lines.append("**Complexity remarks on clean controls** (not scored)\n")
+            lines.extend(f"- {remark}" for remark in f["complexity_remarks"])
             lines.append("")
         if f["regression_false_positives"]:
             lines.append("**False positives on regression controls** (scored apart)\n")
