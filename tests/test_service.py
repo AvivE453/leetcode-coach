@@ -504,8 +504,7 @@ def test_a_solve_the_plan_asked_for_still_counts_once_the_review_that_asked_is_c
     asked = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 27))
     assert asked.next_due == date(2026, 10, 4)
 
-    clean = FEEDBACK.model_copy(update={"issues": [], "verdict": "optimal"})
-    review_with(conn, monkeypatch, first.solution_id, clean, refresh=True)
+    review_with(conn, monkeypatch, first.solution_id, OPTIMAL_REVIEW, refresh=True)
 
     assert service.stored_review_state(conn, 1).next_due == date(2026, 10, 4)
 
@@ -530,6 +529,87 @@ def test_logging_and_scheduling_work_before_due_when_logged_is_migrated(tmp_path
 
     assert again.counted_as_review
     assert again.next_due == date(2026, 10, 15)
+
+
+def solve_ids_in(conn, table) -> list[int]:
+    column = "id" if table == "solutions" else "solution_id"
+    return [row[0] for row in conn.execute(f"SELECT {column} FROM {table} ORDER BY 1")]
+
+
+def test_deleting_the_third_of_five_solves_leaves_the_other_four_whole(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+    ids = []
+    for day in (1, 8, 15, 22, 29):
+        solution_id = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, day)).solution_id
+        tag_solution(conn, solution_id, "hashmap")
+        review.save(conn, solution_id, OPTIMAL_REVIEW)
+        conn.execute("INSERT INTO embeddings (solution_id, vector) VALUES (?, x'00')", (solution_id,))
+        ids.append(solution_id)
+    conn.commit()
+
+    result = service.delete_solve(conn, 1, ids[2])
+
+    kept = [ids[0], ids[1], ids[3], ids[4]]
+    for table in ("solutions", "enrichments", "reviews", "embeddings"):
+        assert solve_ids_in(conn, table) == kept, table
+    assert result.remaining == 4
+
+
+def test_deleting_a_failed_solve_takes_its_lapse_back(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+    service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+    failed = service.log_solve(conn, 1, "failed", CODE, today=date(2026, 9, 4))
+    assert failed.next_due == date(2026, 9, 7)
+
+    result = service.delete_solve(conn, 1, failed.solution_id)
+
+    assert (result.next_due_before, result.next_due) == (date(2026, 9, 7), date(2026, 9, 8))
+    assert stored_schedule(conn) == (date(2026, 9, 8), 1, 0)
+
+
+def test_deleting_the_last_solve_takes_the_problem_off_the_schedule(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+    logged = service.log_solve(conn, 1, "failed", CODE, today=date(2026, 9, 1))
+
+    result = service.delete_solve(conn, 1, logged.solution_id)
+
+    assert (result.remaining, result.next_due) == (0, None)
+    assert conn.execute("SELECT COUNT(*) FROM review_state").fetchone()[0] == 0
+    assert history.load(conn) == []
+    plan = service.daily_plan(conn, date(2026, 9, 10), config.SECTION_LIMIT).sections
+    assert 1 not in [item.number for item in plan.due]
+
+
+def test_delete_refuses_a_solve_that_is_not_that_problems(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+    logged = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+
+    with pytest.raises(service.SolveNotFound):
+        service.delete_solve(conn, 2, logged.solution_id)
+    with pytest.raises(service.SolveNotFound):
+        service.delete_solve(conn, 1, logged.solution_id + 1)
+    assert solve_ids_in(conn, "solutions") == [logged.solution_id]
+
+
+def test_a_delete_that_fails_part_way_deletes_nothing(tmp_path, monkeypatch):
+    """The only copy of the history: a solve gone with its schedule still counting it
+    would be a split no later read repairs."""
+    conn = seed_db(tmp_path, monkeypatch)
+    service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
+    logged = service.log_solve(conn, 1, "failed", CODE, today=date(2026, 9, 4))
+    tag_solution(conn, logged.solution_id, "hashmap")
+    conn.commit()
+    before = (solve_ids_in(conn, "solutions"), solve_ids_in(conn, "enrichments"), stored_schedule(conn))
+
+    def fail(conn, number):
+        raise RuntimeError("replay failed")
+
+    monkeypatch.setattr(service, "update_review_state", fail)
+    with pytest.raises(RuntimeError):
+        service.delete_solve(conn, 1, logged.solution_id)
+
+    after = (solve_ids_in(conn, "solutions"), solve_ids_in(conn, "enrichments"), stored_schedule(conn))
+    assert after == before
 
 
 def test_enrich_solution_now_reports_llm_degradation(tmp_path, monkeypatch):

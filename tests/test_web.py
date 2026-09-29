@@ -667,6 +667,31 @@ def test_review_endpoint_rejects_unknown_problem_and_solution(client, monkeypatc
     assert client.post("/api/solutions/15/review", json={"solution_id": 1}).status_code == 404
 
 
+def test_delete_endpoint_removes_one_solve_and_says_how_the_date_moved(client, monkeypatch):
+    enriched(monkeypatch)
+    client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
+    client.post("/api/log", json={"number": 1, "outcome": "failed", "code": CODE})
+    newest, oldest = [s["id"] for s in client.get("/api/solutions/1").json()["solves"]]
+
+    res = client.delete(f"/api/solutions/1/{newest}")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert (body["solution_id"], body["remaining"]) == (newest, 1)
+    assert body["next_due"] > body["next_due_before"]  # the failure's lapse went with it
+    assert [s["id"] for s in client.get("/api/solutions/1").json()["solves"]] == [oldest]
+
+
+def test_delete_endpoint_rejects_an_unknown_or_foreign_solve(client, monkeypatch):
+    enriched(monkeypatch)
+    client.post("/api/log", json={"number": 1, "outcome": "clean", "code": CODE})
+    solution_id = client.get("/api/solutions/1").json()["solves"][0]["id"]
+
+    assert client.delete(f"/api/solutions/15/{solution_id}").status_code == 404
+    assert client.delete(f"/api/solutions/1/{solution_id + 1}").status_code == 404
+    assert len(client.get("/api/solutions/1").json()["solves"]) == 1
+
+
 def test_solutions_endpoint_rejects_an_unknown_problem(client):
     res = client.get("/api/solutions/99999")
     assert res.status_code == 404

@@ -296,6 +296,16 @@ the other, so the split bought nothing and cost every reader a join, plus tests 
 no real solve could reach. The attempt's columns now live on `solutions`, which kept its
 ids because enrichments, reviews and embeddings are keyed by them.
 
+**Deleting a solve is deleting its rows.**
+Because nothing derived is stored, a solve logged by mistake is removed by deleting it and
+the three rows keyed by it - its tags, review and vector - and nothing else: mastery, the
+plan, approach practice and the week drop it on their next read. The schedule is the one
+thing stored from the solves, and since it is a replay rather than a running total there
+is nothing to subtract - `service.delete_solve` replays what is left in the same
+transaction, or removes the schedule with the problem's last solve. Only the problem's
+accepted approaches stay, because they describe the problem, not the solve. There is no
+undo: `coach.db` is the only copy, so the page asks first.
+
 **Nothing about the week is written down.**
 The Weekly Review page runs its SQL on demand, so the week is correct by construction
 rather than as of whenever it was last generated. The frozen snapshot it replaced was

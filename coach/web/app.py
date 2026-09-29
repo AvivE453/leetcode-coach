@@ -232,6 +232,22 @@ def api_review(number: int, body: ReviewRequest) -> dict:
     }
 
 
+@app.delete("/api/solutions/{number}/{solution_id}")
+def api_delete_solve(number: int, solution_id: int) -> dict:
+    """Delete one stored solve for good; the problem's other solves stay as they are."""
+    with open_db() as conn:
+        try:
+            result = service.delete_solve(conn, number, solution_id)
+        except service.SolveNotFound:
+            raise HTTPException(404, f"No stored solution {solution_id} for ({number}).") from None
+    return {
+        "solution_id": solution_id,
+        "remaining": result.remaining,
+        "next_due_before": result.next_due_before.isoformat(),
+        "next_due": result.next_due.isoformat() if result.next_due else None,
+    }
+
+
 def plan_item_payload(item: weekly_plan.PlanItem) -> dict:
     """One problem under a Daily Plan heading, with a chip per reason."""
     return {

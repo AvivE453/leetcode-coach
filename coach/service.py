@@ -41,6 +41,10 @@ class EmptySolution(ValueError):
     """A solve was submitted with no code."""
 
 
+class SolveNotFound(LookupError):
+    """No stored solve with that id on that problem."""
+
+
 @dataclass(frozen=True)
 class LogResult:
     number: int
@@ -50,6 +54,13 @@ class LogResult:
     solution_id: int
     next_due: date
     counted_as_review: bool  # False when the schedule stayed as it was: early, or a day already counted
+
+
+@dataclass(frozen=True)
+class DeleteResult:
+    remaining: int  # solves of the problem still stored
+    next_due_before: date
+    next_due: date | None  # None once no solve is left: the problem is off the schedule
 
 
 @dataclass(frozen=True)
@@ -338,6 +349,37 @@ def log_solve(
         next_due=state.next_due,
         counted_as_review=state != before,
     )
+
+
+def delete_solve(conn: sqlite3.Connection, number: int, solution_id: int) -> DeleteResult:
+    """Delete one stored solve of a problem, and everything keyed by it, for good.
+
+    Its tags, review and vector go with it; the problem's other solves keep theirs.
+    Mastery, the plan, approach practice and the week read history.load() on every
+    request, so they drop the solve on their own. The schedule is the one thing stored
+    from the solves, so it is replayed from what is left in the same transaction - or
+    removed with the last solve, since a problem never attempted is never due.
+    data/coach.db is the only copy, so there is no undo.
+    """
+    if not conn.execute(
+        "SELECT 1 FROM solutions WHERE id = ? AND problem_number = ?", (solution_id, number)
+    ).fetchone():
+        raise SolveNotFound(solution_id)
+
+    before = stored_review_state(conn, number)
+    with conn:
+        for child in ("enrichments", "reviews", "embeddings"):
+            conn.execute(f"DELETE FROM {child} WHERE solution_id = ?", (solution_id,))
+        conn.execute("DELETE FROM solutions WHERE id = ?", (solution_id,))
+        remaining = conn.execute(
+            "SELECT COUNT(*) FROM solutions WHERE problem_number = ?", (number,)
+        ).fetchone()[0]
+        if remaining:
+            next_due = update_review_state(conn, number).next_due
+        else:
+            conn.execute("DELETE FROM review_state WHERE problem_number = ?", (number,))
+            next_due = None
+    return DeleteResult(remaining=remaining, next_due_before=before.next_due, next_due=next_due)
 
 
 def practice_dates(

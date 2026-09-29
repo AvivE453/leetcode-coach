@@ -151,8 +151,74 @@ function renderSolve(s, number) {
 
   const reviewBox = el("div", { class: "review" });
   fillReviewBox(reviewBox, number, s.id, s.review);
-  block.append(reviewBox);
+  block.append(reviewBox, deleteButton(number, s));
   return block;
+}
+
+/* data/coach.db is the only copy of the history, so a delete is for good and always asks first. */
+function deleteButton(number, s) {
+  const button = el("button", { class: "btn ghost danger", type: "button", text: "Delete this solve" });
+  button.addEventListener("click", () => deleteSolve(number, s, button));
+  return button;
+}
+
+/* In the page's own look rather than the browser's confirm(). <dialog> brings the backdrop,
+   Esc to cancel and focus kept inside it. Cancel takes focus first, so a stray Enter never
+   deletes. Resolves true only on Delete. */
+function askToDelete() {
+  const cancel = el("button", { class: "btn ghost", type: "button", text: "Cancel" });
+  const remove = el("button", { class: "btn danger", type: "button", text: "Delete" });
+  const dialog = el("dialog", { class: "confirm", "aria-labelledby": "confirm-title" }, [
+    el("div", { class: "confirm-body" }, [
+      el("p", { class: "confirm-title", id: "confirm-title", text: "Are you sure you want to delete?" }),
+      el("p", { text: "Only this solve is deleted: the problem and its other solves stay." }),
+      el("p", { class: "hint", text: "This can't be undone." }),
+      el("div", { class: "confirm-actions" }, [cancel, remove]),
+    ]),
+  ]);
+  document.body.append(dialog);
+
+  return new Promise((resolve) => {
+    const close = (answer) => {
+      dialog.close();
+      dialog.remove();
+      resolve(answer);
+    };
+    cancel.addEventListener("click", () => close(false));
+    remove.addEventListener("click", () => close(true));
+    dialog.addEventListener("cancel", (e) => {  // Esc
+      e.preventDefault();
+      close(false);
+    });
+    // The dialog itself is only the backdrop around .confirm-body, so this is a click outside.
+    dialog.addEventListener("click", (e) => { if (e.target === dialog) close(false); });
+    dialog.showModal();
+    cancel.focus();
+  });
+}
+
+async function deleteSolve(number, s, button) {
+  if (!(await askToDelete())) return;
+  button.disabled = true;
+  try {
+    const res = await fetch(`/api/solutions/${number}/${s.id}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : `returned ${res.status}`);
+    // Redrawn from the server, so the row's solve count and last outcome follow. With no
+    // solve left the problem leaves the list, and there is no panel to say so in.
+    await load(document.getElementById("solutions-search").value);
+    const panel = await openProblem(number);
+    panel?.prepend(el("p", { class: "hint", text: deletedNote(data) }));
+  } catch (err) {
+    button.disabled = false;
+    button.after(el("p", { class: "error", text: `Could not delete: ${err.message}` }));
+  }
+}
+
+function deletedNote(data) {
+  return data.next_due === data.next_due_before
+    ? `Solve deleted. Practice date unchanged: ${data.next_due}.`
+    : `Solve deleted. Practice is now due ${data.next_due} (was ${data.next_due_before}).`;
 }
 
 /* Approach practice the problem still owes, shown above its solves. Nothing once it is
@@ -257,13 +323,19 @@ async function load(query = "") {
 async function openLinked(number) {
   document.getElementById("solutions-search").value = String(number);
   await load(String(number));
+  const panel = await openProblem(number);
+  // Solves arrive newest first, so the first review box is the latest solve's.
+  panel?.querySelector(".review")?.scrollIntoView({ block: "start" });
+}
+
+/* Expands one problem's row, when the listing shows it, and returns its panel. */
+async function openProblem(number) {
   // A number search is a prefix match - "1" also lists 10 and 100 - so find the exact row.
   const button = document.querySelector(`.solve-toggle[aria-controls="solves-${number}"]`);
-  if (!button) return;
+  if (!button) return null;
   const panel = button.closest("li").querySelector(".solve-panel");
   await toggle(button, panel, number);
-  // Solves arrive newest first, so the first review box is the latest solve's.
-  panel.querySelector(".review")?.scrollIntoView({ block: "start" });
+  return panel;
 }
 
 let typing;
