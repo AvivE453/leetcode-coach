@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from coach import config, llm
 
-PROMPT_VERSION = "review-v6"
+PROMPT_VERSION = "review-v7"
 # Thinking counts toward the limit, and a review tracing code whose correctness rests on
 # an unexplained trick can think past 16,000 tokens: three of bank-v5's 145 test reviews
 # ran out there in two runs out of two. A cut-off answer is paid for and thrown away.
@@ -52,7 +52,10 @@ Report:
   guaranteed answer, the allowed characters. Read them from the problem statement
   above when it is given; otherwise use what you know of this problem's actual
   constraints, never a generic worst case. An input the constraints exclude is not a
-  flaw, and code that relies on a guarantee the problem gives is not a flaw. The three
+  flaw, and code that relies on a guarantee the problem gives is not a flaw. Recursion
+  is a standard, accepted approach: its call stack is never an issue in any category.
+  Suggest an iterative rewrite as better_approach only when it improves the time or
+  space complexity, or when the problem itself calls for it (e.g. an iterator). The three
   categories are mutually exclusive - decide which one applies by asking what kind of
   input breaks the code:
   - "bug": wrong on a REPRESENTATIVE input - an ordinary case a reader would write down
