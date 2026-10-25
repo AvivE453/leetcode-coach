@@ -19,7 +19,6 @@ from coach import (
     config,
     corrections,
     curriculum,
-    db,
     embed,
     enrich,
     history,
@@ -325,20 +324,16 @@ def log_solve(
 
     today = today or date.today()
     before = stored_review_state(conn, number)
-    solution_id = conn.execute(
-        """
-        INSERT INTO solutions (problem_number, date, outcome, minutes, note, code)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (number, today.isoformat(), outcome, minutes, note, code),
-    ).lastrowid
-    if db.has_column(conn, "solutions", "due_when_logged"):
-        conn.execute(
-            "UPDATE solutions SET due_when_logged = ? WHERE id = ?",
-            (before is not None and before.next_due <= today, solution_id),
-        )
-    state = update_review_state(conn, number)
-    conn.commit()
+    with conn:
+        solution_id = conn.execute(
+            """
+            INSERT INTO solutions (problem_number, date, outcome, minutes, note, code, due_when_logged)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (number, today.isoformat(), outcome, minutes, note, code,
+             before is not None and before.next_due <= today),
+        ).lastrowid
+        state = update_review_state(conn, number)
 
     return LogResult(
         number=number,
@@ -461,12 +456,12 @@ def tag_solution_now(
     except llm.LLMUnavailable as exc:
         return EnrichResult(skipped=str(exc))
 
-    enrich.save(conn, solution_id, e)
-    embed.discard(conn, solution_id)
-    canonical = enrich.save_intended(
-        conn, problem["number"], e.intended_pattern, list(e.intended_secondary_patterns)
-    )
-    conn.commit()
+    with conn:
+        enrich.save(conn, solution_id, e)
+        embed.discard(conn, solution_id)
+        canonical = enrich.save_intended(
+            conn, problem["number"], e.intended_pattern, list(e.intended_secondary_patterns)
+        )
 
     # Two signals off one free set comparison: off_pattern is the sharp one (no
     # canonical approach used at all), also_solvable_with is informational.
@@ -520,19 +515,7 @@ def problem_content(conn: sqlite3.Connection, problem: sqlite3.Row) -> str | Non
     A None cell means never fetched, or the fetch failed - the next review for this
     problem tries again, since LeetCode being briefly unreachable shouldn't ban it
     from constraints text for good.
-
-    A database that has not been through `coach init` since this column landed has no
-    `content` to read: `db.connect()` never adds schema, so the column is missing until
-    then, and reading it off the row raises rather than returning anything. It reviews
-    without a statement until the migration runs, the way every other input here
-    degrades - the alternative was a 500 on the one button that spends money.
     """
-    # .keys() is load-bearing: sqlite3.Row's `in` searches VALUES, not column names, so
-    # `"content" not in problem` is False for any row holding "content" in some other
-    # column and True for a migrated row whose content is NULL - backwards, and only on
-    # some rows. noqa: SIM118 is right about dicts and wrong about Row.
-    if "content" not in problem.keys():  # noqa: SIM118
-        return None
     if problem["content"]:
         return problem["content"]
     if problem["paid_only"]:

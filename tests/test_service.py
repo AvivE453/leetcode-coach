@@ -4,7 +4,7 @@ from datetime import date, timedelta
 import httpx
 import numpy as np
 import pytest
-from conftest import CODE, TWO_SUM, drop_column, seed_db, store_solution, tag_solution
+from conftest import CODE, TWO_SUM, seed_db, store_solution, tag_solution
 
 from coach import (
     config,
@@ -420,39 +420,6 @@ def test_a_review_prompt_includes_the_fetched_problem_statement(tmp_path, monkey
     assert "2 <= nums.length <= 10^4" in seen_prompts[0]
 
 
-def test_problem_content_is_none_on_a_database_that_has_not_been_migrated(tmp_path, monkeypatch):
-    """`db.connect()` never adds schema, so the column is missing until `coach init` runs."""
-    conn = seed_db(tmp_path, monkeypatch)
-    drop_column(conn, "problems", "content")
-    monkeypatch.setattr(
-        "coach.catalog.fetch_content", lambda slug: pytest.fail("fetched with nowhere to cache it")
-    )
-
-    assert service.problem_content(conn, service.get_problem(conn, 1)) is None
-
-
-def test_a_review_still_runs_on_a_database_that_has_not_been_migrated(tmp_path, monkeypatch):
-    """The review button is the one that spends money, and it used to 500 here.
-
-    Reading `problem["content"]` off a pre-migration row raises IndexError, which
-    /api/solutions/{n}/review does not catch - so the whole review failed for a column
-    that only makes it sharper. It reviews without the statement instead.
-    """
-    conn = seed_db(tmp_path, monkeypatch)
-    logged = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 1))
-    drop_column(conn, "problems", "content")
-    seen_prompts = []
-    monkeypatch.setattr(
-        "coach.llm.parse",
-        lambda prompt, output_format, **kw: seen_prompts.append(prompt) or FEEDBACK,
-    )
-
-    result = service.review_solution_now(conn, logged.solution_id, service.get_problem(conn, 1), CODE)
-
-    assert result.review is not None and result.skipped is None
-    assert "Problem statement:" not in seen_prompts[0]
-
-
 def test_a_review_prompt_never_claims_the_code_is_python(tmp_path, monkeypatch):
     """A Java solve fenced as ```python drew a review reporting "not valid Python" as a bug,
     which capped a correct solve's grade at 1 and lapsed it."""
@@ -519,16 +486,33 @@ def test_an_early_solve_the_plan_did_not_ask_for_still_moves_nothing(tmp_path, m
     assert not early.counted_as_review
 
 
-def test_logging_and_scheduling_work_before_due_when_logged_is_migrated(tmp_path, monkeypatch):
-    """`db.connect()` never adds schema, so the column is missing until `coach init` runs."""
+def test_a_log_that_fails_part_way_leaves_nothing_behind(tmp_path, monkeypatch):
+    """A caller that catches the error and commits later must not commit half a log."""
     conn = seed_db(tmp_path, monkeypatch)
-    drop_column(conn, "solutions", "due_when_logged")
+    monkeypatch.setattr(service, "update_review_state", lambda conn, number: 1 / 0)
 
-    service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 24))
-    again = service.log_solve(conn, 1, "clean", CODE, today=date(2026, 10, 1))
+    with pytest.raises(ZeroDivisionError):
+        service.log_solve(conn, 1, "clean", CODE, today=date(2026, 9, 24))
+    conn.commit()
 
-    assert again.counted_as_review
-    assert again.next_due == date(2026, 10, 15)
+    assert conn.execute("SELECT COUNT(*) FROM solutions").fetchone()[0] == 0
+
+
+def test_tagging_that_fails_part_way_keeps_the_old_tags_and_vector(tmp_path, monkeypatch):
+    conn = seed_db(tmp_path, monkeypatch)
+    solution_id = store_solution(conn, 1)
+    tag_solution(conn, solution_id, "two-pointers")
+    conn.execute("INSERT INTO embeddings (solution_id, vector) VALUES (?, x'00')", (solution_id,))
+    conn.commit()
+    monkeypatch.setattr("coach.llm.parse", lambda prompt, output_format, **kw: ENRICHMENT)
+    monkeypatch.setattr(enrich, "save_intended", lambda *a: 1 / 0)
+
+    with pytest.raises(ZeroDivisionError):
+        service.tag_solution_now(conn, solution_id, service.get_problem(conn, 1), CODE)
+    conn.commit()
+
+    assert history.load(conn)[0].main_patterns == ("two-pointers",)
+    assert solve_ids_in(conn, "embeddings") == [solution_id]
 
 
 def solve_ids_in(conn, table) -> list[int]:

@@ -3,21 +3,7 @@ from pathlib import Path
 
 from coach import config
 
-# Its own constant because merge_attempts_into_solutions() recreates the table from it.
-SOLUTIONS_TABLE = """
-CREATE TABLE IF NOT EXISTS solutions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    problem_number INTEGER NOT NULL REFERENCES problems(number),
-    date TEXT NOT NULL,
-    outcome TEXT NOT NULL CHECK (outcome IN ('clean', 'struggled', 'hints', 'failed')),
-    minutes INTEGER,
-    note TEXT,
-    code TEXT NOT NULL,
-    due_when_logged INTEGER
-);
-"""
-
-SCHEMA = f"""
+SCHEMA = """
 CREATE TABLE IF NOT EXISTS problems (
     number INTEGER PRIMARY KEY,
     slug TEXT NOT NULL UNIQUE,
@@ -32,7 +18,17 @@ CREATE TABLE IF NOT EXISTS problems (
     content TEXT
 );
 
-{SOLUTIONS_TABLE}
+CREATE TABLE IF NOT EXISTS solutions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    problem_number INTEGER NOT NULL REFERENCES problems(number),
+    date TEXT NOT NULL,
+    outcome TEXT NOT NULL CHECK (outcome IN ('clean', 'struggled', 'hints', 'failed')),
+    minutes INTEGER,
+    note TEXT,
+    code TEXT NOT NULL,
+    due_when_logged INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS enrichments (
     solution_id INTEGER PRIMARY KEY REFERENCES solutions(id),
     main_patterns TEXT NOT NULL,
@@ -87,7 +83,6 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
 
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
-    merge_attempts_into_solutions(conn)
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(problems)")}
     if "intended_pattern" not in columns:
         conn.execute("ALTER TABLE problems ADD COLUMN intended_pattern TEXT")
@@ -104,64 +99,6 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
 def has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
     return any(row["name"] == column for row in conn.execute(f"PRAGMA table_info({table})"))
-
-
-def merge_attempts_into_solutions(conn: sqlite3.Connection) -> None:
-    """Fold each attempt into the solution logged with it, leaving one row per solve.
-
-    Logging always wrote the two together, so the split only cost every reader a join.
-    Each solve keeps its solution's id, which enrichments, reviews and embeddings are
-    keyed by, so none of them changes. It refuses unless attempts and solutions pair
-    up exactly one-to-one on the same problem: this is the only copy of the history,
-    and a row without a partner would silently vanish in the join.
-
-    `solutions` is never renamed, unlike the usual rebuild. It is the table the others
-    reference, and SQLite rewrites a renamed table's incoming REFERENCES to follow it -
-    to the copy about to be dropped. So the rows are copied out, both tables dropped and
-    `solutions` recreated under its own name, in one transaction: a failure part-way
-    rolls back to the two tables as they were. Foreign keys are off meanwhile, because
-    with them on SQLite refuses to drop a table other rows still point into.
-    """
-    if not conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'attempts'"
-    ).fetchone():
-        return
-    attempts, solutions, paired = conn.execute(
-        """
-        SELECT (SELECT COUNT(*) FROM attempts),
-               (SELECT COUNT(*) FROM solutions),
-               (SELECT COUNT(DISTINCT a.id) FROM solutions s
-                JOIN attempts a ON a.id = s.attempt_id AND a.problem_number = s.problem_number)
-        """
-    ).fetchone()
-    if not attempts == solutions == paired:
-        raise RuntimeError(
-            f"{attempts} attempts and {solutions} solutions, of which {paired} pair up on the "
-            "same problem: not one-to-one, so nothing was merged"
-        )
-
-    conn.execute("PRAGMA foreign_keys = OFF")
-    try:
-        conn.executescript(
-            f"""
-            BEGIN;
-            CREATE TABLE solutions_merged AS
-                SELECT s.id, a.problem_number, a.date, a.outcome, a.minutes, a.note, s.code
-                FROM solutions s JOIN attempts a ON a.id = s.attempt_id;
-            DROP TABLE solutions;
-            DROP TABLE attempts;
-            {SOLUTIONS_TABLE}
-            INSERT INTO solutions (id, problem_number, date, outcome, minutes, note, code)
-            SELECT id, problem_number, date, outcome, minutes, note, code FROM solutions_merged;
-            DROP TABLE solutions_merged;
-            COMMIT;
-            """
-        )
-    except sqlite3.Error:
-        conn.rollback()
-        raise
-    finally:
-        conn.execute("PRAGMA foreign_keys = ON")
 
 
 def upsert_problems(conn: sqlite3.Connection, problems: list[dict]) -> None:
