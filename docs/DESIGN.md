@@ -289,22 +289,7 @@ nobody reads is a second copy that can be wrong. The same rule retired the daily
 commands: every daily feature existed as a service function, a CLI printer and a web page,
 and once the page could do everything the printer did, nobody read the printer.
 
-Inside the database, a solve is one row too. It used to be two: an `attempts` row for how
-it went (date, outcome, minutes, note) and a `solutions` row for the code, linked by
-`attempt_id`. Logging always wrote the pair together and no feature ever stored one without
-the other, so the split bought nothing and cost every reader a join, plus tests for states
-no real solve could reach. The attempt's columns now live on `solutions`, which kept its
-ids because enrichments, reviews and embeddings are keyed by them.
-
-**Deleting a solve is deleting its rows.**
-Because nothing derived is stored, a solve logged by mistake is removed by deleting it and
-the three rows keyed by it - its tags, review and vector - and nothing else: mastery, the
-plan, approach practice and the week drop it on their next read. The schedule is the one
-thing stored from the solves, and since it is a replay rather than a running total there
-is nothing to subtract - `service.delete_solve` replays what is left in the same
-transaction, or removes the schedule with the problem's last solve. Only the problem's
-accepted approaches stay, because they describe the problem, not the solve. There is no
-undo: `coach.db` is the only copy, so the page asks first.
+How a solve is stored, and what deleting one removes: [database.md](database.md).
 
 **Nothing about the week is written down.**
 The Weekly Review page runs its SQL on demand, so the week is correct by construction

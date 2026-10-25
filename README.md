@@ -96,4 +96,5 @@ on the problems it was tuned on and 82% on held-out ones: that gap is what a hel
 is for.
 
 The architecture, the design decisions behind it, and the full eval methodology are in
-**[docs/DESIGN.md](docs/DESIGN.md)**.
+**[docs/DESIGN.md](docs/DESIGN.md)**. How each part is designed, in more depth:
+[docs/database.md](docs/database.md).
