@@ -262,24 +262,7 @@ Brute-force numpy cosine over float32 blobs in SQLite. At a few hundred solution
 takes microseconds; a vector DB would be infrastructure bought to solve a problem this
 project does not have.
 
-**One read of the practice history, and pure functions over it.**
-Four things ask the database the same question — what mastery folds, what approach practice
-is owed, what SM-2 replays, and why a problem came back — and each used to ask it with its
-own join, its own JSON decoding and its own choice of inner or left join. The grade formula
-already had one owner ([`coach/assessment.py`](../coach/assessment.py)), but the *evidence*
-it graded did not, so a change to how a review attaches to an attempt meant editing four
-queries in four modules, and missing one brought back exactly the disagreement assessment.py
-was written to end — silently, with nothing to fail. The join now lives once, in
-[`coach/history.py`](../coach/history.py). An attempt is one solve seen as practice: its
-`solutions` row as logged, its tags when it has been tagged, and its review when one was
-bought, with its grade and its correctness finding derived through assessment.py rather than
-stored. Solves drive the join and everything else is left-joined, because a solve logged
-before enrichment ran is still practice that happened and dropping it would quietly change
-what the schedule replays; an untagged solve reads as unknown, which is never evidence, and
-not as an empty list. Mastery, approach practice, findings and the weekly window are then
-pure functions over the attempts, and one request loads them once and hands the same list to
-all four. Nothing is cached, for the reason nothing else here is: a review saved days after
-the solve it judges, or a tag backfilled by `coach enrich`, counts on the next read.
+How the practice history is read, once per request: [history.md](history.md).
 
 **One copy of everything.**
 `coach.db` is the only place a solve lives. Two mirrors have been removed for the same
