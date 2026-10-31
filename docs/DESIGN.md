@@ -64,69 +64,11 @@ one batch at the end.
 
 ## Design decisions
 
-**Two tag layers, because "solved" and "learned" are different questions.**
-Each solution gets `main_patterns` describing *the approach as written* — even when that
-approach is a brute force. Usually that is one pattern; a solution genuinely built on two
-(a memoized DFS computing a knapsack recurrence) gets both, and they are equal: the solve
-is an attempt of each at its full score, never split between them or credited to
-whichever the model named first. Patterns a solution merely leans on go in
-`secondary_patterns`, which count toward the off-pattern check below but never toward
-mastery or the pattern table — a row there always describes solves that pattern was built
-into. Each problem separately gets an `intended_pattern`: the canonical optimal approach.
-Tagging your solution honestly is what keeps struggle analytics truthful; if a
-brute-forced Maximum Subarray were filed under `dp-1d`, the planner would never schedule
-the one thing you most need to learn. The **disagreement between the layers** is the
-useful signal: it marks a problem you solved without learning what it teaches, and that
-problem owes approach practice until you show you have ([logic.md](logic.md)).
-
-**A problem can have more than one canonical approach.**
-Best Time to Buy and Sell Stock is a one-pass greedy *and* a textbook 1-D DP; solving it
-either way is solving it properly. So a problem carries `intended_secondary_patterns`
-alongside its central `intended_pattern`, feeding two signals. The sharp one,
-*off-pattern*, fires only when a solve used **none** of the accepted approaches. The soft
-one is a note ("this problem can also be solved with: dp-1d") shown on every solve, which
-lists the canonical approaches you have not practised here. Both are set arithmetic over
-columns the enrichment call already filled in, so they cost nothing. The accepted set
-accumulates across enrichments, since the model does not name the same alternates every
-time, so a solve is judged against the merged set the write returns, never against the
-answer just received — otherwise one forgetful answer re-flags a solve that had already
-completed its approach practice. Because the note is
-computed when you look rather than frozen when the solve was stored, widening a problem's
-canonical set later widens the note on old solves too.
+How the language model tags and reviews solves, and what happens when it cannot answer:
+[llm.md](llm.md).
 
 How an attempt is graded, the review schedule, mastery per pattern, approach practice, the
 Daily Plan and the Weekly Review: [logic.md](logic.md).
-
-**The reviewer reads the problem statement, fetched once per problem.**
-`review-v4` fixed a class of false positives by telling the model to judge issues against
-the problem's stated constraints and guarantees — an input the constraints exclude is not
-a flaw, and a faster algorithm that makes no difference at the allowed sizes is not an
-improvement. But it was given only a number and a title to recall those constraints from,
-so the rule pointed at text the prompt never contained. `review-v5` supplies it: LeetCode's
-statement, cleaned to plain text and cached in `problems.content`. The fetch is one GraphQL
-call made by the first review that needs it, not part of the bulk catalog fetch, so a
-problem never reviewed never costs a request. An empty cell means never fetched *or* the
-fetch failed, so an unreachable LeetCode does not ban a problem from constraints text for
-good, and paid-only problems are never attempted, because the public API withholds the
-field for them — answering 200 with it null, which is why a malformed answer reads as
-absent rather than raising. The statement is an input the prompt can do without: with none,
-`review-v5` tells the model to fall back on what it knows of this problem's actual
-constraints rather than a generic worst case, so a failed fetch costs one review some
-precision instead of the review itself. The column arrives through the guarded
-`ALTER TABLE` in `init_schema`, so a database carried over from before it needs one
-`coach init`. **The eval numbers below do not measure this**: they were bought under
-`review-v4`, and the fixture bank's test split was already spent on it.
-
-**A controlled vocabulary of 28 patterns, enforced as a type.**
-The model picks from an enum, so tags can never fragment into `dp`/`DP`/`dynamic
-programming` and make coverage analytics meaningless. LeetCode's own tags are kept too,
-but for the opposite job — they are coarse enough to *find new problems*, while our
-vocabulary is fine enough to *diagnose weaknesses*. The price of an enum is that a
-missing pattern is not a missing tag but a wrong one: before `bucket-sort` joined the list,
-an O(n) bucket-sort solve of Top K Frequent Elements — the one its review called optimal —
-could only be tagged `hashmap`, missed the problem's `heap`, and was sent to approach
-practice for using the wrong approach. A solve flagged off-pattern that its review calls
-optimal is the sign to look for.
 
 **Embed an enriched card, not raw code.**
 Each solution is embedded as `title + main patterns + key trick + code`, so two problems
@@ -171,21 +113,6 @@ commands: every daily feature existed as a service function, a CLI printer and a
 and once the page could do everything the printer did, nobody read the printer.
 
 How a solve is stored, and what deleting one removes: [database.md](database.md).
-
-**Everything degrades.**
-No API key, rate limit, refusal, or network failure ever loses a logged solve. Logging
-stores the solution and queues enrichment, then `coach enrich` backfills the tags and
-embeddings later. Only enrichment and reviews ever call the API at all.
-
-**The model's name picks the API.**
-Two APIs are supported: Anthropic's own, and OpenRouter, which serves many vendors'
-models (free ones among them) behind one key. Which one a call goes to is read off the
-model's name - OpenRouter's are all `vendor/model`, Anthropic's have no slash - so
-switching is one `COACH_MODEL` line in `.env`, and the key that matters is the one that
-model needs. There is deliberately no fallback from one to the other: a free model's
-daily limit would quietly start billing a paid one, and the solves tagged that day would
-come from a model nobody chose. Every enrichment and review stores the model that wrote
-it, so a history tagged by two models stays readable.
 
 ---
 
