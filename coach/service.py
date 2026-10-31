@@ -831,8 +831,8 @@ STANDING_ORDER = {"weak": 0, "on-track": 1, "too-early": 2}
 def weekly_review(conn: sqlite3.Connection, today: date | None = None) -> WeeklyReview:
     """The last seven days: every solve, and every pattern those solves used.
 
-    Purely backward-looking and entirely free - pure SQL, no LLM, no writes, so it
-    can be recomputed on every CLI run and every page load. A pattern is listed if
+    Purely backward-looking and entirely free - no LLM and no writes, just one
+    history.load() and pure functions over it - so it can be recomputed on every page load. A pattern is listed if
     it was practiced inside the window, however long ago it was first picked up;
     its standing and mastery are all-time, because a week of practice is not enough
     history to judge a pattern on.

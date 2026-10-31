@@ -865,9 +865,9 @@ def test_pattern_table_counts_a_problem_under_each_of_its_main_patterns(tmp_path
     log_tagged(conn, monkeypatch, 1, "struggled", main_patterns=["hashmap", "two-pointers"])
     log_tagged(conn, monkeypatch, 15, main_patterns=["two-pointers"])
 
-    # two-pointers: the struggled Two Sum solve at 3.0, then 3Sum's 5.0 folded in at alpha 0.2
+    # two-pointers: the struggled Two Sum solve at 3.0, then 3Sum's 5.0 folded in at alpha 0.25
     assert service.pattern_table(conn) == [
-        {"pattern": "two-pointers", "solved": 2, "score": pytest.approx(3.4),
+        {"pattern": "two-pointers", "solved": 2, "score": pytest.approx(3.5),
          "attempts": 2, "rough": 1},
         {"pattern": "hashmap", "solved": 1, "score": 3.0, "attempts": 1, "rough": 1},
     ]
@@ -911,14 +911,14 @@ def test_pattern_standings_withhold_a_verdict_on_a_first_attempt(tmp_path, monke
 def test_pattern_standings_withhold_a_verdict_over_many_attempts_on_few_problems(
     tmp_path, monkeypatch
 ):
-    """Seven failures would have been judged weak by attempts; four problems are too few."""
+    """Seven failures would have been judged weak by attempts; two problems are too few."""
     conn = seed_db(tmp_path, monkeypatch, ENOUGH_PROBLEMS)
-    for number in (1, 1, 1, 2, 2, 3, 4):
+    for number in (1, 1, 1, 1, 2, 2, 2):
         log_and_enrich(conn, monkeypatch, "failed", number=number)
 
     assert service.pattern_standings(conn, ["hashmap"]) == [
         service.PatternStanding(
-            pattern="hashmap", solved=4, attempts=7, struggle_rate=1.0, score=1.0,
+            pattern="hashmap", solved=2, attempts=7, struggle_rate=1.0, score=1.0,
             weak=False, enough_data=False,
         )
     ]
@@ -926,12 +926,12 @@ def test_pattern_standings_withhold_a_verdict_over_many_attempts_on_few_problems
 
 def test_pattern_standings_call_a_pattern_weak_once_there_is_data(tmp_path, monkeypatch):
     conn = seed_db(tmp_path, monkeypatch, ENOUGH_PROBLEMS)
-    for number in range(1, 6):
+    for number in range(1, mastery.WEAK_MIN_PROBLEMS + 1):
         log_and_enrich(conn, monkeypatch, "failed", number=number)
 
     assert service.pattern_standings(conn, ["hashmap"]) == [
         service.PatternStanding(
-            pattern="hashmap", solved=5, attempts=5, struggle_rate=1.0, score=1.0,
+            pattern="hashmap", solved=mastery.WEAK_MIN_PROBLEMS, attempts=mastery.WEAK_MIN_PROBLEMS, struggle_rate=1.0, score=1.0,
             weak=True, enough_data=True,
         )
     ]
@@ -939,12 +939,12 @@ def test_pattern_standings_call_a_pattern_weak_once_there_is_data(tmp_path, monk
 
 def test_pattern_standings_stay_clear_of_weak_on_clean_solves(tmp_path, monkeypatch):
     conn = seed_db(tmp_path, monkeypatch, ENOUGH_PROBLEMS)
-    for number in range(1, 6):
+    for number in range(1, mastery.WEAK_MIN_PROBLEMS + 1):
         log_and_enrich(conn, monkeypatch, "clean", number=number)
 
     assert service.pattern_standings(conn, ["hashmap"]) == [
         service.PatternStanding(
-            pattern="hashmap", solved=5, attempts=5, struggle_rate=0.0, score=5.0,
+            pattern="hashmap", solved=mastery.WEAK_MIN_PROBLEMS, attempts=mastery.WEAK_MIN_PROBLEMS, struggle_rate=0.0, score=5.0,
             weak=False, enough_data=True,
         )
     ]
@@ -953,7 +953,7 @@ def test_pattern_standings_stay_clear_of_weak_on_clean_solves(tmp_path, monkeypa
 def test_pattern_standings_separate_struggling_from_failing(tmp_path, monkeypatch):
     """Same 100% struggle rate as the weak case above, a very different score."""
     conn = seed_db(tmp_path, monkeypatch, ENOUGH_PROBLEMS)
-    for number in range(1, 6):
+    for number in range(1, mastery.WEAK_MIN_PROBLEMS + 1):
         log_and_enrich(conn, monkeypatch, "struggled", number=number)
 
     [standing] = service.pattern_standings(conn, ["hashmap"])
@@ -988,8 +988,8 @@ def test_a_stored_review_pulls_the_pattern_score_down(tmp_path, monkeypatch):
         conn, result.solution_id, service.get_problem(conn, 1), CODE, refresh=True
     )
 
-    # the reported bug holds that solve at 1, folded in at alpha 0.2: 0.8*5 + 0.2*1
-    assert service.pattern_standings(conn, ["hashmap"])[0].score == pytest.approx(4.2)
+    # the reported bug holds that solve at 1, folded in at alpha 0.25: 0.75*5 + 0.25*1
+    assert service.pattern_standings(conn, ["hashmap"])[0].score == pytest.approx(4.0)
 
 
 def test_saved_evidence_is_read_without_any_rebuild(tmp_path, monkeypatch):
@@ -1004,7 +1004,7 @@ def test_saved_evidence_is_read_without_any_rebuild(tmp_path, monkeypatch):
     review.save(conn, result.solution_id, FEEDBACK)
     conn.commit()
 
-    reviewed = pytest.approx(4.2)  # four clean solves, then the bug-capped 1 folded in
+    reviewed = pytest.approx(4.0)  # four clean solves, then the bug-capped 1 folded in
     assert service.pattern_table(conn)[0]["score"] == reviewed
     assert service.pattern_standings(conn, ["hashmap"], today)[0].score == reviewed
     plan = service.daily_plan(conn, today, config.SECTION_LIMIT)
@@ -1351,14 +1351,14 @@ def test_weekly_review_lists_every_main_pattern_of_a_solve(tmp_path, monkeypatch
 
 
 def test_weekly_review_says_too_early_below_the_problem_floor(tmp_path, monkeypatch):
-    """Six attempts, but on four problems: the floor counts problems, not attempts."""
+    """Six attempts, but on two problems: the floor counts problems, not attempts."""
     conn = seed_db(tmp_path, monkeypatch, ENOUGH_PROBLEMS)
-    for day, number in enumerate((1, 1, 2, 2, 3, 4)):
+    for day, number in enumerate((1, 1, 1, 2, 2, 2)):
         scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "failed", number=number)
 
     p = service.weekly_review(conn, WEEK_TODAY).patterns[0]
 
-    assert (p.attempts_total, p.solved_total) == (6, 4)
+    assert (p.attempts_total, p.solved_total) == (6, 2)
     assert p.solved_total < mastery.WEAK_MIN_PROBLEMS
     assert p.standing == "too-early"
 
@@ -1367,7 +1367,7 @@ def test_weekly_review_standing_tracks_the_analysis_verdict(tmp_path, monkeypatc
     """weak is only ever membership in analysis["weak_patterns"] - never a
     threshold re-derived here, which is how the two definitions drift apart."""
     conn = seed_db(tmp_path, monkeypatch, ENOUGH_PROBLEMS)
-    for day in range(5):
+    for day in range(mastery.WEAK_MIN_PROBLEMS):
         scored_attempt(conn, WEEK_TODAY - timedelta(days=day), "failed", number=day + 1)
 
     review = service.weekly_review(conn, WEEK_TODAY)
@@ -1376,7 +1376,7 @@ def test_weekly_review_standing_tracks_the_analysis_verdict(tmp_path, monkeypatc
     assert analysis["weak_patterns"] == ["hashmap"]
     assert review.patterns[0].standing == "weak"
 
-    # Five struggled-but-solved attempts are the same struggle rate and not weak.
+    # Struggled-but-solved attempts are the same struggle rate and not weak.
     conn.execute("UPDATE solutions SET outcome = 'struggled'")
     assert service.weekly_review(conn, WEEK_TODAY).patterns[0].standing == "on-track"
 
@@ -1392,8 +1392,8 @@ def test_weekly_review_measures_the_week_against_where_it_started(tmp_path, monk
     assert p.attempts_week == 1
     assert p.attempts_total == 6
     assert p.score_before == pytest.approx(1.0)  # five failures
-    assert p.score == pytest.approx(1.8)  # one clean solve, EMA alpha 0.2
-    assert p.delta == pytest.approx(0.8)
+    assert p.score == pytest.approx(2.0)  # one clean solve, EMA alpha 0.25
+    assert p.delta == pytest.approx(1.0)
 
 
 def test_weekly_review_has_no_delta_for_a_pattern_first_seen_this_week(tmp_path, monkeypatch):
@@ -1408,7 +1408,7 @@ def test_weekly_review_has_no_delta_for_a_pattern_first_seen_this_week(tmp_path,
 
 def test_weekly_review_orders_the_worst_patterns_first(tmp_path, monkeypatch):
     conn = seed_db(tmp_path, monkeypatch, ENOUGH_PROBLEMS)
-    for day in range(5):
+    for day in range(mastery.WEAK_MIN_PROBLEMS):
         day_before = WEEK_TODAY - timedelta(days=day)
         scored_attempt(conn, day_before, "failed", pattern="dp-1d", number=day + 1)
         scored_attempt(conn, day_before, "clean", pattern="hashmap", number=day + 1)
@@ -1441,7 +1441,7 @@ def test_weekly_review_loads_history_once(tmp_path, monkeypatch):
     p = service.weekly_review(conn, WEEK_TODAY).patterns[0]
 
     assert len(loads) == 1
-    assert (p.score_before, p.score) == (pytest.approx(1.0), pytest.approx(1.8))
+    assert (p.score_before, p.score) == (pytest.approx(1.0), pytest.approx(2.0))
 
 
 def test_daily_plan_only_counts_reviews_due_today(tmp_path, monkeypatch):

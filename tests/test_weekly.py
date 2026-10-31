@@ -4,7 +4,7 @@ from datetime import date, timedelta
 import pytest
 from conftest import store_solution, tag_solution
 
-from coach import config, corrections, db, enrich, history
+from coach import config, corrections, db, enrich, history, mastery
 from coach.weekly import analyze as weekly_analyze
 from coach.weekly import collect as weekly_collect
 from coach.weekly import plan as weekly_plan
@@ -24,10 +24,10 @@ def add_problem(conn, number, slug, title, difficulty="Easy", tags=(), blind75=T
     conn.execute(
         """
         INSERT INTO problems (number, slug, title, difficulty, official_tags, paid_only,
-                              in_blind75, intended_pattern)
-        VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+                              in_blind75, in_neetcode150, intended_pattern)
+        VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
         """,
-        (number, slug, title, difficulty, json.dumps(list(tags)), int(blind75), intended),
+        (number, slug, title, difficulty, json.dumps(list(tags)), int(blind75), int(blind75), intended),
     )
 
 
@@ -160,22 +160,23 @@ def test_analyze_flags_weak_and_stale_patterns(tmp_path):
     assert scores == pytest.approx({"dp-1d": 1.0, "two-pointers": 3.0, "hashmap": 5.0, "design": 5.0})
 
 
-def test_analyze_needs_five_distinct_problems_before_calling_a_pattern_weak(tmp_path):
+def test_analyze_needs_enough_distinct_problems_before_calling_a_pattern_weak(tmp_path):
     """Attempts alone never judge a pattern. SM-2 re-queues a failed problem every few
     days, so one hard problem racks up attempts on its own - that is the problem's
     trouble, and SM-2's to handle, not a verdict on the pattern."""
+    floor = mastery.WEAK_MIN_PROBLEMS
     conn = make_db(tmp_path)
-    for number in range(1, 6):
+    for number in range(1, floor + 1):
         add_problem(conn, number, f"problem-{number}", f"Problem {number}")
     for requeue in range(10):
         add_attempt(conn, 1, TODAY - timedelta(days=3 * requeue), outcome="failed", pattern="dp-1d")
     assert weekly_analyze.analyze(conn, TODAY)["weak_patterns"] == []
 
-    for number in (2, 3, 4):
+    for number in range(2, floor):
         add_attempt(conn, number, TODAY, outcome="failed", pattern="dp-1d")
     assert weekly_analyze.analyze(conn, TODAY)["weak_patterns"] == []
 
-    add_attempt(conn, 5, TODAY, outcome="failed", pattern="dp-1d")
+    add_attempt(conn, floor, TODAY, outcome="failed", pattern="dp-1d")
     assert weekly_analyze.analyze(conn, TODAY)["weak_patterns"] == ["dp-1d"]
 
 

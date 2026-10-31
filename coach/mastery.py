@@ -30,11 +30,11 @@ from datetime import date
 from coach import assessment, history
 from coach.scheduler import QUALITY
 
-OUTCOME_WEIGHT = 0.7
-REVIEW_WEIGHT = 0.3
-EMA_ALPHA = 0.2
-WEAK_SCORE = 2.5
-WEAK_MIN_PROBLEMS = 5
+OUTCOME_WEIGHT = 0.5
+REVIEW_WEIGHT = 0.5
+EMA_ALPHA = 0.25
+WEAK_SCORE = 3.0
+WEAK_MIN_PROBLEMS = 3
 
 VERDICT_MASTERY = {"optimal": 5, "acceptable": 4}
 

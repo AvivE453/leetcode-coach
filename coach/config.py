@@ -48,7 +48,7 @@ EMBED_MODEL = "all-MiniLM-L6-v2"
 SECTION_LIMIT = 10
 # How many problems /solutions lists before you search; a search shows every match.
 RECENT_SOLUTIONS = 10
-CURRICULUM = "blind75"
+CURRICULUM = "neetcode150"
 
 WEB_HOST = os.environ.get("COACH_WEB_HOST", "127.0.0.1")
 WEB_PORT = int(os.environ.get("COACH_WEB_PORT", "8000"))

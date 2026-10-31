@@ -57,9 +57,9 @@ def test_attempt_score_falls_back_to_the_outcome_without_a_review():
         ("clean", "needs-work", ("bug",), 1.0),
         ("clean", "needs-work", ("edge-case",), 2.0),
         ("clean", "optimal", (), 5.0),
-        # a complexity finding still describes correct code, so the blend stands: 0.7*5 + 0.3*4
-        ("clean", "acceptable", ("complexity",), 4.7),
-        # a good review never lifts a solve above its outcome: 3.6, 2.9 and 2.2 held down
+        # a complexity finding still describes correct code, so the blend stands: 0.5*5 + 0.5*4
+        ("clean", "acceptable", ("complexity",), 4.5),
+        # a good review never lifts a solve above its outcome: 4.0, 3.5 and 3.0 held down
         ("struggled", "optimal", (), 3.0),
         ("hints", "optimal", (), 2.0),
         ("failed", "optimal", (), 1.0),
@@ -75,8 +75,8 @@ def test_fold_seeds_on_the_first_attempt_and_eases_toward_later_ones():
     assert mastery.fold([]) is None
     assert mastery.fold([5.0]) == 5.0
     # one bad solve moves a perfect record by alpha, not all the way down
-    assert mastery.fold([5.0, 1.0]) == pytest.approx(4.2)
-    assert mastery.fold([5.0, 1.0, 1.0]) == pytest.approx(3.56)
+    assert mastery.fold([5.0, 1.0]) == pytest.approx(4.0)
+    assert mastery.fold([5.0, 1.0, 1.0]) == pytest.approx(3.25)
     # and a steady run converges on what it keeps seeing
     assert mastery.fold([3.0] * 8) == pytest.approx(3.0)
 
@@ -125,10 +125,10 @@ def add_pinned_history(conn):
         conn, "2026-08-10", "struggled", "hashmap", review=("acceptable", ("complexity",)), problem=2
     )
     add_solve(conn, "2026-09-05", "clean", "hashmap", problem=3)
-    add_solve(conn, "2026-09-05", "failed", "hashmap", problem=4)
+    add_solve(conn, "2026-09-05", "struggled", "hashmap", problem=4)
     add_solve(conn, "2026-08-30", "hints", "hashmap", secondary=["two-pointers"], problem=5)
     add_review(conn, late, "needs-work", ("bug",), day="2026-09-06")
-    # dp-1d - weak: exactly five problems, mastery under 2.5, every review rule in play
+    # dp-1d - weak: five problems, mastery under 3, every review rule in play
     add_solve(conn, "2026-08-20", "failed", "dp-1d", problem=1)
     add_solve(conn, "2026-08-21", "struggled", "dp-1d", review=("needs-work", ("edge-case",)), problem=2)
     add_solve(
@@ -149,11 +149,11 @@ def add_pinned_history(conn):
 def test_scoring_behavior_is_pinned(tmp_path):
     """Every reader of mastery, over one history, against numbers worked by hand.
 
-    Per solve: 0.7 x outcome + 0.3 x review, the review capped by its issue count, and
+    Per solve: 0.5 x outcome + 0.5 x review, the review capped by its issue count, and
     the solve capped by what it earned - its outcome, and 1 for a reported bug or 2 for
-    an edge case. dp-1d: 1, 2, 2, 1, 2. hashmap in date order: 3 (a 3.3 blend held at
-    struggled), 1 (its late bug review), 2, 5, 1. graph: 1 (a failed solve an acceptable
-    review cannot lift), 1, 1, 1, 1. Each folded oldest-first at alpha 0.2.
+    an edge case. dp-1d: 1, 2, 2, 1, 2. hashmap in date order: 3 (a 3.5 blend held at
+    struggled), 1 (its late bug review), 2, 5, 3. graph: 1 (a failed solve an acceptable
+    review cannot lift), 1, 1, 1, 1. Each folded oldest-first at alpha 0.25.
     """
     conn = make_db(tmp_path)
     add_pinned_history(conn)
@@ -161,18 +161,18 @@ def test_scoring_behavior_is_pinned(tmp_path):
     analysis = weekly_analyze.analyze(conn, PIN_TODAY)
     assert analysis["patterns"] == [
         {"pattern": "dp-1d", "solved": 5, "attempts": 5, "rough": 4, "struggle_rate": 0.8,
-         "score": pytest.approx(1.4304), "last_date": date(2026, 9, 3)},
+         "score": pytest.approx(1.49609375), "last_date": date(2026, 9, 3)},
         {"pattern": "graph", "solved": 2, "attempts": 5, "rough": 5, "struggle_rate": 1.0,
          "score": pytest.approx(1.0), "last_date": date(2026, 9, 4)},
         {"pattern": "hashmap", "solved": 5, "attempts": 5, "rough": 3, "struggle_rate": 0.6,
-         "score": pytest.approx(2.5872), "last_date": date(2026, 9, 5)},
+         "score": pytest.approx(3.0234375), "last_date": date(2026, 9, 5)},
     ]
     assert analysis["weak_patterns"] == ["dp-1d"]
 
     # two-pointers, a secondary on one hashmap solve, practiced nothing: no row
     assert service.pattern_table(conn) == [
-        {"pattern": "dp-1d", "solved": 5, "score": pytest.approx(1.4304), "attempts": 5, "rough": 4},
-        {"pattern": "hashmap", "solved": 5, "score": pytest.approx(2.5872), "attempts": 5, "rough": 3},
+        {"pattern": "dp-1d", "solved": 5, "score": pytest.approx(1.49609375), "attempts": 5, "rough": 4},
+        {"pattern": "hashmap", "solved": 5, "score": pytest.approx(3.0234375), "attempts": 5, "rough": 3},
         {"pattern": "graph", "solved": 2, "score": pytest.approx(1.0), "attempts": 5, "rough": 5},
     ]
 
@@ -183,15 +183,16 @@ def test_scoring_behavior_is_pinned(tmp_path):
          p.standing)
         for p in review.patterns
     ] == [
-        ("dp-1d", 2, 5, 5, pytest.approx(1.4304), pytest.approx(1.36), "weak"),
+        ("dp-1d", 2, 5, 5, pytest.approx(1.49609375), pytest.approx(1.4375), "weak"),
         # the late review re-scores its pre-window solve on both sides of the cut
-        ("hashmap", 2, 5, 5, pytest.approx(2.5872), pytest.approx(2.48), "on-track"),
+        ("hashmap", 2, 5, 5, pytest.approx(3.0234375), pytest.approx(2.375), "on-track"),
         ("graph", 5, 5, 2, pytest.approx(1.0), None, "too-early"),
     ]
 
 
 def test_clean_solves_that_each_carry_a_bug_make_the_pattern_weak(tmp_path):
-    """Each used to blend to 3.8, so no number of them could ever read as weak."""
+    """Each blends to 3.0 (0.5*5 + 0.5*1), not below the weak line, so without the cap
+    no number of them could ever read as weak."""
     conn = make_db(tmp_path)
     for day in range(1, 6):
         add_solve(
@@ -280,8 +281,8 @@ def test_scored_gives_every_main_pattern_the_whole_solve():
     )
 
     assert [(a.pattern, a.score) for a in mastery.scored([attempt])] == [
-        ("dfs", pytest.approx(4.7)),
-        ("dp-knapsack", pytest.approx(4.7)),
+        ("dfs", pytest.approx(4.5)),
+        ("dp-knapsack", pytest.approx(4.5)),
     ]
 
 
@@ -295,7 +296,7 @@ def test_scored_history_orders_each_solve_oldest_first(tmp_path):
     add_solve(conn, "2026-08-01", "struggled", "dp-1d")
 
     assert [(a.pattern, a.day, a.outcome, a.score) for a in scored_history(conn)] == [
-        ("hashmap", date(2026, 8, 1), "clean", pytest.approx(4.4)),  # 0.7*5 + 0.3*3
+        ("hashmap", date(2026, 8, 1), "clean", pytest.approx(4.0)),  # 0.5*5 + 0.5*3
         ("dp-1d", date(2026, 8, 1), "struggled", 3.0),
         ("hashmap", date(2026, 8, 2), "failed", 1.0),
     ]
@@ -319,7 +320,7 @@ def test_pattern_stats_takes_every_field_from_the_same_attempts(tmp_path):
         {"pattern": "dp-1d", "solved": 1, "attempts": 1, "rough": 1, "struggle_rate": 1.0,
          "score": 3.0, "last_date": date(2026, 8, 3)},
         {"pattern": "hashmap", "solved": 1, "attempts": 2, "rough": 1, "struggle_rate": 0.5,
-         "score": pytest.approx(4.2), "last_date": date(2026, 8, 2)},
+         "score": pytest.approx(4.0), "last_date": date(2026, 8, 2)},
     ]
     assert mastery.pattern_stats([]) == []
 
@@ -367,4 +368,4 @@ def test_a_late_review_counts_the_moment_it_is_saved(tmp_path):
     add_review(conn, solution_id, "needs-work", ("bug",), day="2026-08-09")
 
     # the reported bug holds the second solve at 1, folded onto the 5.0 seed
-    assert mastery.pattern_stats(scored_history(conn))[0]["score"] == pytest.approx(4.2)
+    assert mastery.pattern_stats(scored_history(conn))[0]["score"] == pytest.approx(4.0)

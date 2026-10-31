@@ -63,7 +63,7 @@ def client(tmp_path, monkeypatch):
     endpoint has something unsolved to rank behind a solved one.
     """
     conn = seed_db(tmp_path, monkeypatch, PROBLEMS)
-    conn.execute("UPDATE problems SET in_blind75 = 1")
+    conn.execute("UPDATE problems SET in_blind75 = 1, in_neetcode150 = 1")
     conn.commit()
     conn.close()
     with TestClient(app) as c:
