@@ -77,7 +77,7 @@ Tagging your solution honestly is what keeps struggle analytics truthful; if a
 brute-forced Maximum Subarray were filed under `dp-1d`, the planner would never schedule
 the one thing you most need to learn. The **disagreement between the layers** is the
 useful signal: it marks a problem you solved without learning what it teaches, and that
-problem owes approach practice until you show you have (below).
+problem owes approach practice until you show you have ([logic.md](logic.md)).
 
 **A problem can have more than one canonical approach.**
 Best Time to Buy and Sell Stock is a one-pass greedy *and* a textbook 1-D DP; solving it
@@ -94,97 +94,8 @@ completed its approach practice. Because the note is
 computed when you look rather than frozen when the solve was stored, widening a problem's
 canonical set later widens the note on old solves too.
 
-**Approach practice closes on a demonstrated success, not on a tag.**
-An off-pattern solve used to put its problem on the Daily Plan every day until any stored
-solution carried an accepted tag — so a failed attempt, one that needed hints, or one whose
-review found a bug all cleared it, while a problem practised yesterday came straight back
-this morning. It is now three questions, recomputed from the history on every read
-([`coach/corrections.py`](../coach/corrections.py)). A solve is *off-pattern* when its tags
-name none of the accepted approaches. *Approach practice is outstanding* while some solve
-was off-pattern and no attempt **qualifies**: one attempt that used an accepted approach on
-a day that was not a failure day. A failure day is the line SM-2 already lapses a day on —
-something that day failed, needed hints, or has a review reporting a bug, an edge case or
-needs-work — so a clean retry typed in right after a failure completes nothing, for the same
-reason it does not stretch the schedule. The tags and the success must be one attempt's: a
-failed DP solve beside a clean brute force is never "solved with DP". *It is due* three days
-after the latest attempt of any kind, so practising a problem, however it went, never brings
-it back the next day, and a review or a late tag that reopens it is due three days after the
-practice it judges — usually already past — not three days after you read it. One qualifying
-attempt closes it for good: brute-forcing the problem again later is an experiment, and
-forgetting the approach is SM-2's job. An untagged solve is neither evidence nor success
-until `coach enrich` tags it, though it still moves the date, because it was practice. On
-the Daily Plan a problem owed both a review and approach practice is one item under Due
-carrying both reasons. Completing approach practice never advances the review: a success before the review
-is due leaves its date where it was (below), so the review can also come due first, and each
-is then listed on its own date.
-
-**One mastery score per pattern, not a struggle rate.**
-"Weak" used to mean *at least half the attempts were not clean* — a binary that read five
-shaky-but-solved sweeps exactly like five failures. It now means a mastery score below
-2.5/5 across at least five distinct problems. The floor counts problems, not attempts: SM-2
-re-queues a failed problem every three days, so one hard problem could pile up five attempts
-on its own, and that says something about the problem, which SM-2 already handles, not about
-the pattern. Each solve scores `0.7 · outcome + 0.3 · review`, on the
-same 1–5 scale SM-2 already uses for scheduling: the outcome is self-report (how it felt),
-the review is the external judgement on the code (a bug scores 1, a missed boundary 2, and
-extra findings can only pull it down). They disagree often enough to be worth both — a solve
-can feel clean and still carry a bug. The blend is then capped by what the attempt earned
-(`assessment.effective_quality`): never above its outcome, and never above 1 when its review
-reports a bug or 2 when it reports a missed boundary. Blending alone scored a clean solve
-with a reported bug 3.8, so no number of them could make a pattern weak, and let an optimal
-review lift a solve that needed hints to 2.9. A review is a model's judgement, not an
-executed test, so it only ever lowers a grade; the ceilings are a policy, not a calibrated
-prediction. Scores fold through an exponential moving average
-(α = 0.2), so recent solves move the number without erasing history. Nothing about the
-score is stored: every read replays the saved attempts and reviews, so a review — which
-usually arrives days after the solve it judges — counts the moment it is saved, and no
-writer has to remember to refresh a cache. That costs something, measured on synthetic
-histories: the Weekly Review's read takes 0.2 ms at today's size, 7 ms at a year of 25
-solves a week, and 83 ms at ten years, against 0.2, 6 and 60 ms for the cache it replaced.
-
-**One review per day, graded by its worst attempt, and none before it is due.**
-A review is only worth scheduling from if it tested memory, and counting every logged solve
-as one did not: solving a problem three times in one sitting stepped its schedule 7 → 14 →
-39 days, and a clean retry typed in right after reading the solution passed for a month of
-retention. So a problem's attempts on the same day are one SM-2 review, graded by the worst
-of them. Every attempt is still stored; only the schedule reads the day once. A failure
-grades its day whichever order it came in, because it is real evidence, but three failed
-tries lapse the problem once rather than flooring its ease and shortening every interval
-after it. The same stretch survived across days: three clean solves on consecutive days still
-reached 39 days, and approach practice — owed three days after an off-pattern solve, four
-before its review — stepped the review to 14 days from the practice, though it tested nothing
-about remembering. So a passing day counts only once its review is due
-(`scheduler.counts_as_review()`); before that it changes nothing, not even the ease. A failing
-day always counts, however early, because forgetting is evidence whenever it shows, and
-reviews taken on their due dates schedule exactly as before. The stored schedule is a replay of the attempts (`scheduler.replay()`), not a
-running total stepped once per solve, so the rule has one owner, and `coach init` re-derives
-every stored schedule when the rule changes.
-
-A replay re-judges which days were early, and that must not take back a solve the plan
-asked for. A clean Java solve drew a false bug (the prompt had fenced it as Python), which
-lapsed it; the Daily Plan brought it back three days later and it was solved clean, due in
-a week. Re-running the old review came back clean, and the replay then found that solve
-three days after a clean one - early, so it moved nothing, and the problem came back
-three days sooner than the week that solve had earned. Nothing in the attempts could tell
-it apart from a genuinely early solve, because whether the problem was due is a fact of
-the moment it was logged, and a later review changes what the replay thinks that moment
-was. So `log_solve` records it (`solutions.due_when_logged`), and a passing day the plan
-asked for that the replay finds early restarts the clock at the interval it has: a week
-from that day, not a longer interval. Every other early day still changes nothing, and
-solves logged before the column are treated as not due.
-
-**A review re-grades the attempt it judges; it is never a review of its own.**
-The schedule used to ignore reviews, so a clean solve whose review reported a bug stayed a
-week away while its pattern's mastery counted the bug. Now each attempt is scheduled by the
-same capped grade mastery uses, and saving or refreshing a review replays the problem's
-history in the transaction that stores it. It is not a failure appended on the day the
-review arrives: re-running a review would count the same evidence twice, and the schedule
-would depend on when you happened to click. A bug found ten days after a solve lapses the
-problem three days after the solve — already overdue, so it is owed now — and a clean solve
-logged in between still counts after it. An optimal review never upgrades a failed attempt.
-On the Daily Plan that problem reads "re-solve: review reported a bug" rather than a bare
-date, judged by its last practice day, so a clean retry the same afternoon hides the reason
-no more than it undoes the lapse.
+How an attempt is graded, the review schedule, mastery per pattern, approach practice, the
+Daily Plan and the Weekly Review: [logic.md](logic.md).
 
 **The reviewer reads the problem statement, fetched once per problem.**
 `review-v4` fixed a class of false positives by telling the model to judge issues against
@@ -205,19 +116,6 @@ precision instead of the review itself. The column arrives through the guarded
 `ALTER TABLE` in `init_schema`, so a database carried over from before it needs one
 `coach init`. **The eval numbers below do not measure this**: they were bought under
 `review-v4`, and the fixture bank's test split was already spent on it.
-
-**The Daily Plan is three headings of ten, not one list of fifteen.**
-It used to be one ranked list sharing fifteen slots: due reviews, then due approach practice,
-then weak-pattern picks, then curriculum progression. A heavy review day pushed everything
-after it off the page, and nothing said so. Now each kind of work has its own heading and its
-own budget of `SECTION_LIMIT` (10): **Due**, **Approach practice** and **Weak patterns**,
-filled in that order. Approach practice fills before weak picks because it is owed on a
-problem already solved the wrong way, while a weak pick is a new, optional problem, so only
-new picks meet the one-in-five Hard cap, counted per heading. Curriculum progression is not a
-heading of its own: it tops Due up when fewer than ten reviews are due, and it runs last, so it
-never takes a problem a weak pattern would have picked. Due claims every review due, even one
-that does not fit. That review stays overdue, comes first tomorrow, and the heading says how
-many it left out, instead of letting it resurface under Approach practice without its review.
 
 **A controlled vocabulary of 28 patterns, enforced as a type.**
 The model picks from an enum, so tags can never fragment into `dp`/`DP`/`dynamic
@@ -273,19 +171,6 @@ commands: every daily feature existed as a service function, a CLI printer and a
 and once the page could do everything the printer did, nobody read the printer.
 
 How a solve is stored, and what deleting one removes: [database.md](database.md).
-
-**Nothing about the week is written down.**
-The Weekly Review page runs its SQL on demand, so the week is correct by construction
-rather than as of whenever it was last generated. The frozen snapshot it replaced was
-stale the moment the next problem was solved, and the LLM narrative beside it restated
-numbers the tables already showed.
-
-**Comparison instead of narration.**
-The question that narrative was there to answer — *is this pattern getting better?* — is a
-subtraction, not a paragraph. Mastery is already a replay of every scored attempt, so
-the same replay over only the attempts before the window gives what the pattern scored
-a week ago, and the difference is the answer. It is exact, it costs nothing, and unlike
-prose it cannot be vague.
 
 **Everything degrades.**
 No API key, rate limit, refusal, or network failure ever loses a logged solve. Logging
