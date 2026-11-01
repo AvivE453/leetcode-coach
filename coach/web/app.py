@@ -2,7 +2,8 @@
 
 Every endpoint is a thin JSON translation of a service function. The CLI keeps only
 the jobs with no page (init, enrich, similar), over the same service functions. The
-two write endpoints are POST /api/log and POST /api/solutions/{number}/review.
+three write endpoints are POST /api/log, POST /api/solutions/{number}/review and
+DELETE /api/solutions/{number}/{solution_id}.
 """
 
 from contextlib import contextmanager
@@ -288,8 +289,8 @@ def api_plan() -> dict:
 def api_weekly() -> dict:
     """The last seven days, recomputed on every call.
 
-    Free to open, like every other page: pure SQL, no LLM call, and nothing is
-    written - so logging a solve is visible here immediately.
+    Free to open, like every other page: no LLM call, and nothing is written - so
+    logging a solve is visible here immediately.
     """
     with open_db() as conn:
         review = service.weekly_review(conn, date.today())

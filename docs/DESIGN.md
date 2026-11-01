@@ -53,12 +53,7 @@ Solid arrows stay on the machine; dotted arrows leave it — the model's API (An
 or OpenRouter's) for enrichment and reviews, LeetCode for a problem's statement. Every one
 of them degrades to a working local path when the network or the key is unavailable.
 
-The web UI is the daily interface; the CLI keeps only the jobs with no page (`init`,
-`enrich`, `similar`). Both are thin layers over one implementation
-([`coach/service.py`](../coach/service.py)), so they cannot drift into disagreeing.
-Enrichment is the sharpest case: logging a solve and the `coach enrich` backfill both run
-`service.tag_solution_now()`, and differ only in how they embed — one card per solve, or
-one batch at the end.
+How a request reaches the logic, and how one solve travels to every page: [web.md](web.md).
 
 ---
 
@@ -84,21 +79,6 @@ commands: every daily feature existed as a service function, a CLI printer and a
 and once the page could do everything the printer did, nobody read the printer.
 
 How a solve is stored, and what deleting one removes: [database.md](database.md).
-
----
-
-## No automation, by design
-
-Nothing here runs unattended. There is no cron job, no systemd timer, and no scheduled
-writer, because there is nothing left to schedule: the weekly review is computed the
-moment you ask for it, from the database, in a few milliseconds.
-
-That is the second time this project has arrived at *pull, don't push*. A GitHub Actions
-cron wrote the report first, and was dropped because it meant leaving a live API key and
-an automated writer on a repo run by hand. The systemd timer that replaced it then proved
-the point on its own: it fired on a Sunday with no network, wrote a report missing the
-one part that needed the network, and overwrote that week's good one. Removing the stored
-report removed the last thing a scheduler was for.
 
 ---
 
