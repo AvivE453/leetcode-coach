@@ -70,37 +70,8 @@ How the language model tags and reviews solves, and what happens when it cannot 
 How an attempt is graded, the review schedule, mastery per pattern, approach practice, the
 Daily Plan and the Weekly Review: [logic.md](logic.md).
 
-**Embed an enriched card, not raw code.**
-Each solution is embedded as `title + main patterns + key trick + code`, so two problems
-that share a technique retrieve each other even when they share no vocabulary; after a
-solve is logged, similar past solves are those sharing any of its main patterns. Measured,
-not assumed: see the retrieval eval below — it wins by 17 points on `enrich-v5`, up from 5
-on `enrich-v2`.
-
-**One vector per solve, not one per problem.**
-Embeddings are keyed by `solution_id`. Re-solving a problem a different way — Best Time to
-Buy and Sell Stock as `greedy`, then again as `dp-1d` — embeds a new card for the new solve
-and leaves the old solve's vector untouched, so the problem now has two vectors and can be
-retrieved through either approach. Search filters solve by solve and keeps each problem's
-best score, so a `greedy` query reaches it through the greedy solve and a `dp-1d` query
-through the DP one. The hit names the solve that matched, and is shown with that solve's
-patterns and key trick: describing it by the problem's latest solve labelled a match found
-through the DP solve as greedy. The asking side works the same way — `coach similar
-<number>` queries with every solve of the problem, so a problem solved both ways finds the
-relatives of both approaches instead of only the latest one's. Keeping a single vector per problem — the latest solve's, or an average
-of all of them — would leave it findable through one approach at most, which throws away
-exactly the variety that re-solving a problem a new way is meant to build. A stored vector
-changes only when its own solve is re-tagged. The card names the solve's main patterns, so
-saving new tags discards the vector in the same commit, and the next `coach enrich` rebuilds
-every missing one. The rebuild used to be the re-tag's own job, and a re-tag whose embedding
-failed left the old vector searchable under the new tags, where a plain `coach enrich` —
-looking only for solves with no vector — never found it. A missing vector is a state that
-repairs itself; a stale one was not.
-
-**No vector database.**
-Brute-force numpy cosine over float32 blobs in SQLite. At a few hundred solutions this
-takes microseconds; a vector DB would be infrastructure bought to solve a problem this
-project does not have.
+How similar past solves are found, and why each solve has its own vector:
+[search.md](search.md).
 
 How the practice history is read, once per request: [history.md](history.md).
 
