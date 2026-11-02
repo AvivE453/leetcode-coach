@@ -2,7 +2,7 @@
 
 test_web.py asserts on JSON and never runs a script; test_static_pages.py reads
 the scripts and never executes them. So a script that throws on line one leaves
-every page blank and all 192 of them green. That is what this file is for, and
+every page blank and every one of them green. That is what this file is for, and
 it is deliberately the only browser test - a browser costs ~100x a unit test, so
 it earns its place only where nothing cheaper can reach.
 """

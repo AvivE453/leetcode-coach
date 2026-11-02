@@ -40,7 +40,7 @@ SHARED_SCRIPT = "dom.js"
 def pages() -> list[tuple[str, str, list[str]]]:
     """(page name, markup, scripts it loads in order) for every page in static/.
 
-    Discovered rather than listed, so a fifth page is covered the day it is
+    Discovered rather than listed, so a new page is covered the day it is
     added instead of the day someone remembers to add it here.
     """
     found = []
@@ -126,7 +126,7 @@ def test_every_aria_reference_points_at_an_element_on_the_page():
 
 
 def test_every_name_selector_matches_the_form_it_queries():
-    """home.js reads the outcome radios by name; renamed, the form stops submitting."""
+    """log.js reads the outcome radios by name; renamed, the form stops submitting."""
     checked = 0
     for name, markup, scripts in pages():
         for script in scripts:
