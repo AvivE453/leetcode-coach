@@ -2,14 +2,14 @@
 
 Solutions are canonical (correct, idiomatic) reference implementations - NOT
 Aviv's data, which starts empty and would make eval numbers drift week to week.
-The 13 feedback-bank problems contribute their verified CANONICAL solutions;
-the rest are added here to span patterns the bank cannot cover (trees, graphs,
-linked lists, tries, heaps).
+The feedback-bank problems NeetCode's Blind 75 sections label contribute their
+verified CANONICAL solutions; the rest are added here to span patterns the bank
+cannot cover (trees, graphs, linked lists, tries, heaps).
 
 `accept` is the ground-truth set for `intended_pattern`. The PRIMARY entry is
 dictated by the problem's section in NeetCode's published Blind 75 ordering -
 an external taxonomy, not our opinion. Alternates are added ONLY where that
-section is coarser than our 26-pattern vocabulary ("Graphs" covers dfs, bfs,
+section is coarser than our pattern vocabulary ("Graphs" covers dfs, bfs,
 union-find and topological-sort) or where a problem genuinely has two canonical
 approaches (Longest Palindromic Substring: expand-around-center or DP). They
 are listed explicitly so a reader can disagree with any single one.

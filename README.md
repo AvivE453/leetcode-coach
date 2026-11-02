@@ -95,9 +95,9 @@ solution in that set was written outside this repo. An earlier prompt scored 97%
 on the problems it was tuned on and 82% on held-out ones: that gap is what a held-out set
 is for.
 
-The architecture, the design decisions behind it, and the full eval methodology are in
-**[docs/DESIGN.md](docs/DESIGN.md)**. How each part is designed, in more depth:
+How the parts fit together is in **[docs/DESIGN.md](docs/DESIGN.md)**. How each part is
+designed, in more depth:
 [docs/database.md](docs/database.md), [docs/history.md](docs/history.md),
 [docs/logic.md](docs/logic.md), [docs/llm.md](docs/llm.md),
 [docs/search.md](docs/search.md), [docs/web.md](docs/web.md),
-[docs/testing.md](docs/testing.md).
+[docs/testing.md](docs/testing.md), [docs/evals.md](docs/evals.md).
