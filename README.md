@@ -8,6 +8,8 @@ Solving 20–30 problems a week leaks. There is no record of which patterns are 
 signal when a problem was "solved" without learning what it teaches, and no schedule that
 brings it back before you forget it. This fixes that.
 
+![Home page: progress, reviews due and per-pattern mastery](docs/images/home.png)
+
 ## Install
 
 Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
@@ -33,6 +35,12 @@ Day-to-day use happens in the browser, on five pages over the same data:
 | **Log a solve** | Paste a solution and it is stored, tagged by pattern, embedded, scheduled for review, compared with similar past solves, and flagged if you used the wrong approach |
 | **Solutions** | Every solve with its code, searchable by number or name, and structured feedback on any of them: what it got right, complexity, bugs, edge cases, a better approach — judged against the problem's own statement and constraints where LeetCode publishes them, fetched on the first review and kept. Stored after the first run, so looking again is free. A solve logged by mistake can be deleted, for good |
 | **Weekly Review** | The last seven days: every solve, and whether each pattern you used is going well, needs work, or has too little history to call |
+
+![Daily Plan: reviews due by spaced repetition, most overdue first](docs/images/daily-plan.png)
+
+![Log a solve: paste a solution, and it is tagged by pattern and scheduled for review](docs/images/log-a-solve.png)
+
+![AI review of a solve: pattern tag, complexity and what went well](docs/images/ai-review.png)
 
 Opening a page never spends money. The server binds to localhost and has no
 authentication, so keep it there; `COACH_WEB_HOST` / `COACH_WEB_PORT` move it.
